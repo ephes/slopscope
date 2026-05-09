@@ -5,9 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Implement plain text rendering.
-- [ ] Implement Rich rendering.
-- [ ] Implement JSON rendering.
 - [ ] Load `[tool.slopscope]` from `pyproject.toml`.
 - [ ] Support named projects and optional projects.
 - [ ] Support YAML total profiles.
@@ -29,6 +26,10 @@ repository shapes and product behavior, not private source projects.
 - [x] Implement fallback file-level rows with physical line counts.
 - [x] Implement path classification for source, tests, docs, examples, scripts, specs, and tooling.
 - [x] Implement source/test, area, and directory aggregation over file-level rows.
+- [x] Implement plain text rendering for the default single-repository report.
+- [x] Implement optional Rich rendering with plain fallback.
+- [x] Implement JSON rendering for the default single-repository report.
+- [x] Add `--format rich|plain|json` and `--no-color`.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

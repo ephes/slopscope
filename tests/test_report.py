@@ -9,6 +9,7 @@ from slopscope.report import (
     FileRow,
     LanguageRow,
     LanguageSummaryReport,
+    RepositoryReport,
     SourceTestSummary,
 )
 
@@ -57,3 +58,35 @@ def test_file_aggregate_report_keeps_aggregate_rows() -> None:
     assert report.source_tests.source_code == 10
     assert report.area_rows[0].name == "src"
     assert report.directory_rows[1].code == 3
+
+
+def test_repository_report_from_reports_combines_language_and_aggregates() -> None:
+    language_report = LanguageSummaryReport.from_rows(
+        engine="cloc",
+        path=".",
+        language_rows=[
+            LanguageRow(language="Python", files=1, blank=0, comment=0, code=10),
+        ],
+    )
+    aggregate_report = FileAggregateReport(
+        source_tests=SourceTestSummary(
+            source_files=1,
+            source_code=10,
+            test_files=0,
+            test_code=0,
+        ),
+        area_rows=(AreaRow(name="src", files=1, code=10),),
+        directory_rows=(DirectoryRow(name="src", files=1, code=10),),
+    )
+
+    report = RepositoryReport.from_reports(
+        language_report=language_report,
+        aggregate_report=aggregate_report,
+    )
+
+    assert report.engine == "cloc"
+    assert report.path == Path(".")
+    assert report.language_rows == language_report.language_rows
+    assert report.source_test_summary.source_code == 10
+    assert report.area_rows == aggregate_report.area_rows
+    assert report.directory_rows == aggregate_report.directory_rows

@@ -176,10 +176,21 @@ def build_language_summary(path: Path | str) -> LanguageSummaryReport:
     """Build a deterministic fallback language summary for a repository path."""
 
     root = Path(path)
+    return build_language_summary_from_file_rows(path=root, file_rows=build_file_rows(root))
+
+
+def build_language_summary_from_file_rows(
+    *,
+    path: Path | str,
+    file_rows: Iterable[FileRow],
+) -> LanguageSummaryReport:
+    """Build a deterministic fallback language summary from counted file rows."""
+
+    root = Path(path)
     files_by_language: dict[str, int] = {}
     lines_by_language: dict[str, int] = {}
 
-    for row in build_file_rows(root):
+    for row in file_rows:
         files_by_language[row.language] = files_by_language.get(row.language, 0) + 1
         lines_by_language[row.language] = lines_by_language.get(row.language, 0) + row.code
 

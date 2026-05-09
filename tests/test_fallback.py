@@ -244,6 +244,21 @@ def test_build_language_summary_skips_missing_discovered_files(
     assert report.language_rows == ()
 
 
+def test_build_language_summary_from_file_rows_reuses_counted_rows(tmp_path: Path) -> None:
+    rows = [
+        FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=2),
+        FileRow(language="Markdown", path="README.md", blank=0, comment=0, code=1),
+    ]
+
+    report = fallback.build_language_summary_from_file_rows(path=tmp_path, file_rows=rows)
+
+    assert report.language_rows == (
+        LanguageRow(language="Python", files=1, blank=0, comment=0, code=2),
+        LanguageRow(language="Markdown", files=1, blank=0, comment=0, code=1),
+        LanguageRow(language="SUM", files=2, blank=0, comment=0, code=3),
+    )
+
+
 def test_build_file_rows_uses_mapped_languages_and_physical_lines(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

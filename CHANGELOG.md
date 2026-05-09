@@ -14,6 +14,8 @@ All notable changes to `slopscope` will be documented here.
   physical-line counting, and explicit physical-line output labeling.
 - Add internal source/test, area, and directory classification plus deterministic aggregation over file-level rows.
 - Add pure-Python fallback file-level rows using mapped languages and physical line counts.
+- Add default report rendering for language, source/test, area, and directory sections with `--format rich|plain|json`
+  and `--no-color`.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.

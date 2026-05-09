@@ -90,3 +90,33 @@ class LanguageSummaryReport:
             path=Path(path),
             language_rows=tuple(language_rows),
         )
+
+
+@dataclass(frozen=True)
+class RepositoryReport:
+    """Complete single-repository report data independent of rendering."""
+
+    engine: str
+    path: Path
+    language_rows: tuple[LanguageRow, ...]
+    source_test_summary: SourceTestSummary
+    area_rows: tuple[AreaRow, ...]
+    directory_rows: tuple[DirectoryRow, ...]
+
+    @classmethod
+    def from_reports(
+        cls,
+        *,
+        language_report: LanguageSummaryReport,
+        aggregate_report: FileAggregateReport,
+    ) -> Self:
+        """Build a complete report from language and file aggregate reports."""
+
+        return cls(
+            engine=language_report.engine,
+            path=language_report.path,
+            language_rows=language_report.language_rows,
+            source_test_summary=aggregate_report.source_tests,
+            area_rows=aggregate_report.area_rows,
+            directory_rows=aggregate_report.directory_rows,
+        )

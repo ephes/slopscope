@@ -43,12 +43,12 @@ source repositories.
 
 ## Phase 4: Rendering
 
-- [ ] Implement plain table rendering.
-- [ ] Implement Rich table rendering.
-- [ ] Add `--format rich|plain|json`.
-- [ ] Add `--no-color`.
-- [ ] Add JSON output matching the internal report model.
-- [ ] Keep rendering separate from counting and aggregation.
+- [x] Implement plain table rendering.
+- [x] Implement Rich table rendering.
+- [x] Add `--format rich|plain|json`.
+- [x] Add `--no-color`.
+- [x] Add JSON output matching the internal report model.
+- [x] Keep rendering separate from counting and aggregation.
 
 ## Phase 5: Configuration
 
