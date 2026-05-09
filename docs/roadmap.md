@@ -23,9 +23,9 @@ source repositories.
 
 ## Phase 2: Python Fallback
 
-- [ ] Implement fallback file discovery.
-- [ ] Prefer `git ls-files -z` in Git repositories.
-- [ ] Fall back to filesystem traversal outside Git repositories.
+- [x] Implement fallback file discovery.
+- [x] Prefer `git ls-files -z` in Git repositories.
+- [x] Fall back to filesystem traversal outside Git repositories.
 - [ ] Implement default language mapping by filename and suffix.
 - [ ] Implement default excludes for caches, virtualenvs, build output, and dependency directories.
 - [ ] Count physical lines with UTF-8 and ignored decode errors.
