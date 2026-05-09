@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "slopscope"
 version = "0.0.0"
-description = "Repository line-count reports with cloc support and a planned Python fallback."
+description = "Repository line-count reports with cloc support and a Python fallback."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

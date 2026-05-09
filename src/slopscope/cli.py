@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from slopscope import cloc
+from slopscope import cloc, fallback
 from slopscope.report import LanguageSummaryReport
 
 
@@ -51,20 +51,14 @@ def run(
     args = build_parser().parse_args(argv)
     selected_path = Path(args.path)
 
-    if args.engine == "python":
-        print("slopscope: python engine is not implemented yet", file=err)
-        return 2
-
-    if args.engine == "auto" and not cloc.is_cloc_available():
-        print(
-            "slopscope: cloc is not available and the python fallback is not implemented yet",
-            file=err,
-        )
-        return 2
-
     if args.engine == "cloc" and not cloc.is_cloc_available():
         print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
         return 2
+
+    if args.engine == "python" or (args.engine == "auto" and not cloc.is_cloc_available()):
+        report = fallback.build_language_summary(selected_path)
+        _print_language_summary(report, out)
+        return 0
 
     result = cloc.run_language_summary(selected_path)
     if result.returncode != 0:
@@ -86,6 +80,8 @@ def run(
 
 
 def _print_language_summary(report: LanguageSummaryReport, out: TextIO) -> None:
+    if report.engine == "python":
+        print("Engine: python (physical lines)", file=out)
     print("Language          Files    Blank  Comment     Code", file=out)
     print("--------------------------------------------------", file=out)
     for row in report.language_rows:

@@ -34,7 +34,41 @@ def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stderr.getvalue() == ""
 
 
-def test_cli_auto_fails_clearly_without_cloc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_auto_falls_back_to_python_when_cloc_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_is_cloc_available() -> bool:
+        return False
+
+    def fake_build_language_summary(path: Path | str) -> LanguageSummaryReport:
+        return LanguageSummaryReport.from_rows(
+            engine="python",
+            path=path,
+            language_rows=[
+                LanguageRow(language="Python", files=1, blank=0, comment=0, code=4),
+                LanguageRow(language="SUM", files=1, blank=0, comment=0, code=4),
+            ],
+        )
+
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", fake_is_cloc_available)
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_language_summary",
+        fake_build_language_summary,
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run([], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 0
+    assert "Engine: python (physical lines)" in stdout.getvalue()
+    assert "Python" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_cli_cloc_engine_still_fails_clearly_without_cloc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def fake_is_cloc_available() -> bool:
         return False
 
@@ -42,11 +76,11 @@ def test_cli_auto_fails_clearly_without_cloc(monkeypatch: pytest.MonkeyPatch) ->
     stdout = io.StringIO()
     stderr = io.StringIO()
 
-    exit_code = cli.run([], stdout=stdout, stderr=stderr)
+    exit_code = cli.run(["--engine", "cloc"], stdout=stdout, stderr=stderr)
 
     assert exit_code == 2
     assert stdout.getvalue() == ""
-    assert "python fallback is not implemented yet" in stderr.getvalue()
+    assert "cloc engine requested, but cloc was not found" in stderr.getvalue()
 
 
 def test_cli_surfaces_cloc_failure_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,15 +146,32 @@ def test_language_summary_rendering_uses_report_rows() -> None:
     )
 
 
-def test_cli_python_engine_fails_clearly() -> None:
+def test_cli_python_engine_succeeds_with_physical_line_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_build_language_summary(path: Path | str) -> LanguageSummaryReport:
+        return LanguageSummaryReport.from_rows(
+            engine="python",
+            path=path,
+            language_rows=[
+                LanguageRow(language="Markdown", files=1, blank=0, comment=0, code=2),
+                LanguageRow(language="SUM", files=1, blank=0, comment=0, code=2),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_language_summary",
+        fake_build_language_summary,
+    )
     stdout = io.StringIO()
     stderr = io.StringIO()
 
     exit_code = cli.run(["--engine", "python"], stdout=stdout, stderr=stderr)
 
-    assert exit_code == 2
-    assert stdout.getvalue() == ""
-    assert "python engine is not implemented yet" in stderr.getvalue()
+    assert exit_code == 0
+    assert stdout.getvalue().startswith("Engine: python (physical lines)\n")
+    assert "Markdown" in stdout.getvalue()
+    assert stderr.getvalue() == ""
 
 
 def test_compatibility_entry_point_targets_same_callable() -> None:

@@ -1,4 +1,4 @@
-"""File discovery helpers for the planned pure-Python fallback."""
+"""Pure-Python fallback file discovery and physical-line summaries."""
 
 from __future__ import annotations
 
@@ -8,7 +8,59 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_PRUNED_DIR_NAMES = frozenset({".git", ".hg", ".svn", "__pycache__"})
+from slopscope.report import LanguageRow, LanguageSummaryReport
+
+DEFAULT_EXCLUDED_PATH_SEGMENTS = frozenset(
+    {
+        ".coverage",
+        ".git",
+        ".hg",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".svn",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "htmlcov",
+        "node_modules",
+        "venv",
+    },
+)
+# Filesystem discovery prunes the same path segments that fallback summaries exclude.
+DEFAULT_PRUNED_DIR_NAMES = DEFAULT_EXCLUDED_PATH_SEGMENTS
+
+LANGUAGES_BY_SUFFIX = {
+    ".bash": "Shell",
+    ".cjs": "JavaScript",
+    ".css": "CSS",
+    ".cts": "TypeScript",
+    ".htm": "HTML",
+    ".html": "HTML",
+    ".js": "JavaScript",
+    ".json": "JSON",
+    ".jsx": "JavaScript",
+    ".markdown": "Markdown",
+    ".md": "Markdown",
+    ".mjs": "JavaScript",
+    ".mts": "TypeScript",
+    ".py": "Python",
+    ".pyi": "Python",
+    ".sh": "Shell",
+    ".toml": "TOML",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".txt": "Text",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".zsh": "Shell",
+}
+LANGUAGES_BY_FILENAME = {
+    "dockerfile": "Dockerfile",
+    "justfile": "Just",
+    "makefile": "Makefile",
+}
 
 
 @dataclass(frozen=True)
@@ -51,8 +103,26 @@ def discover_files(path: Path | str) -> list[Path]:
     root = Path(path)
     git_result = run_git_ls_files(root)
     if git_result.returncode == 0:
-        return parse_git_ls_files_output(git_result.stdout)
+        return filter_excluded_paths(parse_git_ls_files_output(git_result.stdout))
     return discover_filesystem_files(root)
+
+
+def filter_excluded_paths(
+    paths: Iterable[Path],
+    *,
+    excluded_path_segments: Iterable[str] = DEFAULT_EXCLUDED_PATH_SEGMENTS,
+) -> list[Path]:
+    """Filter files whose relative path contains a default excluded segment."""
+
+    excluded_segments = set(excluded_path_segments)
+    return [path for path in paths if not is_excluded_path(path, excluded_segments)]
+
+
+def is_excluded_path(path: Path | str, excluded_path_segments: Iterable[str]) -> bool:
+    """Return whether a relative path contains an excluded segment."""
+
+    excluded_segments = set(excluded_path_segments)
+    return any(part in excluded_segments for part in Path(path).parts)
 
 
 def discover_filesystem_files(
@@ -71,7 +141,77 @@ def discover_filesystem_files(
         current_path = Path(current)
         for filename in sorted(filenames):
             file_path = current_path / filename
-            if file_path.is_file():
-                files.append(file_path.relative_to(root))
+            # Keep only regular files; this also skips broken symlinks from os.walk.
+            if file_path.is_file() and filename not in pruned_names:
+                relative_path = file_path.relative_to(root)
+                files.append(relative_path)
 
     return files
+
+
+def map_language(path: Path | str) -> str | None:
+    """Map a fallback file path to a language name, or None when unknown."""
+
+    file_path = Path(path)
+    filename_language = LANGUAGES_BY_FILENAME.get(file_path.name.lower())
+    if filename_language is not None:
+        return filename_language
+    return LANGUAGES_BY_SUFFIX.get(file_path.suffix.lower())
+
+
+def count_physical_lines(path: Path | str) -> int | None:
+    """Count physical lines as UTF-8 text, ignoring decode errors.
+
+    Missing or unreadable files are skipped by returning None.
+    """
+
+    try:
+        with Path(path).open(encoding="utf-8", errors="ignore") as handle:
+            return sum(1 for _line in handle)
+    except OSError:
+        return None
+
+
+def build_language_summary(path: Path | str) -> LanguageSummaryReport:
+    """Build a deterministic fallback language summary for a repository path."""
+
+    root = Path(path)
+    files_by_language: dict[str, int] = {}
+    lines_by_language: dict[str, int] = {}
+
+    for relative_path in discover_files(root):
+        language = map_language(relative_path)
+        if language is None:
+            continue
+
+        physical_lines = count_physical_lines(root / relative_path)
+        if physical_lines is None:
+            continue
+
+        files_by_language[language] = files_by_language.get(language, 0) + 1
+        lines_by_language[language] = lines_by_language.get(language, 0) + physical_lines
+
+    rows = [
+        LanguageRow(
+            language=language,
+            files=files_by_language[language],
+            blank=0,
+            comment=0,
+            code=lines_by_language[language],
+        )
+        for language in files_by_language
+    ]
+    rows.sort(key=lambda row: (-row.code, row.language))
+
+    total_files = sum(row.files for row in rows)
+    total_lines = sum(row.code for row in rows)
+    if rows:
+        rows.append(
+            LanguageRow(language="SUM", files=total_files, blank=0, comment=0, code=total_lines)
+        )
+
+    return LanguageSummaryReport.from_rows(
+        engine="python",
+        path=root,
+        language_rows=rows,
+    )

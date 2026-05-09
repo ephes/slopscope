@@ -5,7 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Continue pure-Python fallback scanning with language mapping and physical line counts.
 - [ ] Implement path classification for source, tests, docs, examples, scripts, and tooling.
 - [ ] Implement plain text rendering.
 - [ ] Implement Rich rendering.
@@ -27,6 +26,7 @@ repository shapes and product behavior, not private source projects.
 - [x] Implement `cloc` CSV parsing for language summaries.
 - [x] Implement `cloc` file-level parsing for directory/source/test aggregation.
 - [x] Implement fallback file discovery with Git and filesystem traversal.
+- [x] Implement pure-Python fallback language mapping, default excludes, and physical line counts.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

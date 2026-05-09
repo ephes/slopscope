@@ -26,10 +26,10 @@ source repositories.
 - [x] Implement fallback file discovery.
 - [x] Prefer `git ls-files -z` in Git repositories.
 - [x] Fall back to filesystem traversal outside Git repositories.
-- [ ] Implement default language mapping by filename and suffix.
-- [ ] Implement default excludes for caches, virtualenvs, build output, and dependency directories.
-- [ ] Count physical lines with UTF-8 and ignored decode errors.
-- [ ] Mark fallback output clearly as physical-line based.
+- [x] Implement default language mapping by filename and suffix.
+- [x] Implement default excludes for caches, virtualenvs, build output, and dependency directories.
+- [x] Count physical lines with UTF-8 and ignored decode errors.
+- [x] Mark fallback output clearly as physical-line based.
 
 ## Phase 3: Classification and Aggregation
 

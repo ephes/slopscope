@@ -3,9 +3,9 @@
 Colorful repository line-count reports by language, source, tests, and directory, with `cloc` support and a
 pure-Python fallback.
 
-This project is not published yet. The repository now contains the initial installable Python package scaffold, a
-first `cloc`-backed language summary slice, internal report data models for language and file rows, and internal
-fallback file discovery.
+This project is not published yet. The repository now contains the initial installable Python package scaffold,
+`cloc`-backed language summaries, internal report data models for language and file rows, and a pure-Python fallback
+for physical-line language summaries.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -28,6 +28,7 @@ reusable Python CLI that can be added as a development dependency.
 uv run slopscope
 uv run slopscope path/to/repository
 uv run slopscope --engine cloc
+uv run slopscope --engine python
 ```
 
 For migration compatibility, the package also exposes:
@@ -36,8 +37,14 @@ For migration compatibility, the package also exposes:
 uv run count-lines-of-code
 ```
 
-The initial implementation supports `--engine auto|cloc|python`. `auto` and `cloc` use `cloc` when it is available.
-The Python fallback is planned but not implemented yet, so `--engine python` fails with a clear message.
+The initial implementation supports `--engine auto|cloc|python`. `auto` uses `cloc` when it is available and falls
+back to the Python engine when `cloc` is not on `PATH`. `--engine cloc` keeps failing clearly when `cloc` is
+unavailable.
+
+The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
+default excludes for common caches, virtual environments, dependency directories, and build output, then counts
+physical lines in mapped text-like files using UTF-8 with ignored decode errors. Python fallback reports are marked
+with `Engine: python (physical lines)`.
 
 ## Development
 
@@ -55,7 +62,8 @@ The same commands are available through the `justfile` as `just test`, `just lin
 
 This repository is in early implementation. The completed slices are intentionally narrow: package metadata, console
 scripts, `cloc` availability detection, language-summary CSV parsing, an internal language-summary report model,
-file-level `cloc` CSV parsing, fallback file discovery, and focused tests. See:
+file-level `cloc` CSV parsing, fallback file discovery, fallback language mapping, physical-line counting, and
+focused tests. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)

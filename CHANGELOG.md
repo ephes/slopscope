@@ -10,6 +10,8 @@ All notable changes to `slopscope` will be documented here.
 - Add an internal language-summary report model used by the CLI rendering path.
 - Add internal `cloc --by-file --csv --quiet` command support and file-row CSV parsing.
 - Add internal pure-Python fallback file discovery using Git file lists or filesystem traversal.
+- Implement pure-Python fallback language summaries with default excludes, filename and suffix language mapping,
+  physical-line counting, and explicit physical-line output labeling.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.
