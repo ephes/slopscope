@@ -20,6 +20,17 @@ class LanguageRow:
 
 
 @dataclass(frozen=True)
+class FileRow:
+    """A file-level count row."""
+
+    language: str
+    path: str
+    blank: int
+    comment: int
+    code: int
+
+
+@dataclass(frozen=True)
 class LanguageSummaryReport:
     """Language-summary report data independent of counting and rendering."""
 

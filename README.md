@@ -4,7 +4,7 @@ Colorful repository line-count reports by language, source, tests, and directory
 pure-Python fallback.
 
 This project is not published yet. The repository now contains the initial installable Python package scaffold, a
-first `cloc`-backed language summary slice, and the initial internal report data model.
+first `cloc`-backed language summary slice, and internal report data models for language and file rows.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -53,8 +53,8 @@ The same commands are available through the `justfile` as `just test`, `just lin
 ## Project Status
 
 This repository is in early implementation. The completed slices are intentionally narrow: package metadata, console
-scripts, `cloc` availability detection, language-summary CSV parsing, an internal language-summary report model, and
-focused tests. See:
+scripts, `cloc` availability detection, language-summary CSV parsing, an internal language-summary report model,
+file-level `cloc` CSV parsing, and focused tests. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)

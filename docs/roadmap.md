@@ -16,7 +16,7 @@ source repositories.
 - [x] Define internal report data model.
 - [x] Implement `cloc` availability detection.
 - [x] Run `cloc --csv --quiet` for language summaries.
-- [ ] Run `cloc --by-file --csv --quiet` for file-level aggregation.
+- [x] Run `cloc --by-file --csv --quiet` for file-level aggregation.
 - [x] Parse `cloc` CSV output with `csv.DictReader`.
 - [x] Preserve `SUM` rows where useful.
 - [x] Surface `cloc` failures with clear stderr and non-zero exit.

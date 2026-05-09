@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from slopscope.report import LanguageRow
+from slopscope.report import FileRow, LanguageRow
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,12 @@ def build_language_summary_command(path: Path | str, executable: str = "cloc") -
     return [executable, str(path), "--vcs=git", "--csv", "--quiet"]
 
 
+def build_file_summary_command(path: Path | str, executable: str = "cloc") -> list[str]:
+    """Build the cloc command used for file-level count rows."""
+
+    return [executable, str(path), "--vcs=git", "--by-file", "--csv", "--quiet"]
+
+
 def run_command(command: Sequence[str]) -> ClocResult:
     """Run a command and capture text output."""
 
@@ -50,6 +56,12 @@ def run_language_summary(path: Path | str, executable: str = "cloc") -> ClocResu
     return run_command(build_language_summary_command(path, executable=executable))
 
 
+def run_file_summary(path: Path | str, executable: str = "cloc") -> ClocResult:
+    """Run cloc for file-level count rows at the selected path."""
+
+    return run_command(build_file_summary_command(path, executable=executable))
+
+
 def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     """Parse cloc CSV language summary output, skipping malformed rows."""
 
@@ -57,6 +69,18 @@ def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     rows: list[LanguageRow] = []
     for row in reader:
         parsed = _parse_language_row(row)
+        if parsed is not None:
+            rows.append(parsed)
+    return rows
+
+
+def parse_file_summary_csv(output: str) -> list[FileRow]:
+    """Parse cloc CSV file-level output, skipping malformed and non-file rows."""
+
+    reader = csv.DictReader(output.splitlines())
+    rows: list[FileRow] = []
+    for row in reader:
+        parsed = _parse_file_row(row)
         if parsed is not None:
             rows.append(parsed)
     return rows
@@ -72,6 +96,24 @@ def _parse_language_row(row: dict[str, str | None]) -> LanguageRow | None:
             language=language,
             # cloc summary CSV uses "filename" as the file-count column name.
             files=_parse_int(row.get("filename")),
+            blank=_parse_int(row.get("blank")),
+            comment=_parse_int(row.get("comment")),
+            code=_parse_int(row.get("code")),
+        )
+    except ValueError:
+        return None
+
+
+def _parse_file_row(row: dict[str, str | None]) -> FileRow | None:
+    language = _clean(row.get("language"))
+    path = _clean(row.get("filename"))
+    if not language or language == "SUM" or not path:
+        return None
+
+    try:
+        return FileRow(
+            language=language,
+            path=path,
             blank=_parse_int(row.get("blank")),
             comment=_parse_int(row.get("comment")),
             code=_parse_int(row.get("code")),

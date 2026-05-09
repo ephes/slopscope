@@ -5,7 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Implement `cloc` file-level parsing for directory/source/test aggregation.
 - [ ] Implement pure-Python fallback scanning.
 - [ ] Implement path classification for source, tests, docs, examples, scripts, and tooling.
 - [ ] Implement plain text rendering.
@@ -26,6 +25,7 @@ repository shapes and product behavior, not private source projects.
 - [x] Implement the core report data model.
 - [x] Implement `cloc` availability detection.
 - [x] Implement `cloc` CSV parsing for language summaries.
+- [x] Implement `cloc` file-level parsing for directory/source/test aggregation.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.
