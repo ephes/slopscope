@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "slopscope"
-version = "0.0.0"
+version = "0.1.0a1"
 description = "Repository line-count reports with cloc support and a Python fallback."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,13 +14,16 @@ authors = [
 ]
 keywords = ["cloc", "lines-of-code", "repository", "metrics"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
   "Topic :: Software Development",
   "Topic :: Utilities",
 ]

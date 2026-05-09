@@ -274,7 +274,7 @@ wheels = [
 
 [[package]]
 name = "slopscope"
-version = "0.0.0"
+version = "0.1.0a1"
 source = { editable = "." }
 
 [package.dev-dependencies]

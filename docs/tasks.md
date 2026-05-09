@@ -5,7 +5,10 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-No active tasks.
+- [ ] Confirm final pre-release version, package registry, and publishing credentials before publishing.
+- [ ] Publish first pre-release after explicit release-owner approval.
+- [ ] Migrate at least three authorized representative repositories before `1.0`, recording only public-safe
+  repository shapes and validation notes.
 
 ## Done
 
@@ -50,6 +53,15 @@ No active tasks.
 - [x] Write public roadmap/backlog.
 - [x] Write initial configuration guide.
 - [x] Write initial migration guide.
+- [x] Prepare first pre-release package metadata with synchronized project and package versions.
+- [x] Add MIT license text for packaged release artifacts.
+- [x] Add installation guidance for source checkouts, editable development installs, future pre-release package
+  installs, optional `cloc`, and optional Rich.
+- [x] Add release workflow documentation for checks, local builds, artifact inspection, changelog updates, and
+  publish authorization boundaries.
+- [x] Expand the migration guide with prerequisites, validation commands, semantic-difference notes, and public-safe
+  representative migration tracking.
+- [x] Document lightweight changelog workflow.
 
 ## Later
 
@@ -57,4 +69,3 @@ No active tasks.
 - [ ] Decide whether the compatibility alias remains permanent.
 - [ ] Decide whether YAML total mode defaults to physical lines or `cloc` code lines.
 - [ ] Evaluate whether `sloccount` compatibility is worth implementing.
-- [ ] Publish first pre-release.

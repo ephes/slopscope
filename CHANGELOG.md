@@ -2,8 +2,14 @@
 
 All notable changes to `slopscope` will be documented here.
 
+Release workflow: keep new changes under `Unreleased`. At release time, move the relevant bullets into a dated
+version section such as `## 0.1.0a1 - 2026-05-09`, leave a fresh `Unreleased` section for the next cycle, and note
+any CLI, configuration, output, migration, or publishing compatibility details.
+
 ## Unreleased
 
+- Prepare first pre-release package metadata with version `0.1.0a1`, MIT license text, alpha classifiers, and
+  synchronized package version metadata.
 - Add the initial installable Python package scaffold with `src/slopscope`.
 - Add `slopscope` and `count-lines-of-code` console scripts.
 - Implement the first `cloc` language-summary slice with CSV parsing and clear unavailable-engine errors.
@@ -33,3 +39,6 @@ All notable changes to `slopscope` will be documented here.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.
+- Add installation and release workflow documentation for first pre-release readiness.
+- Expand the migration guide with prerequisites, validation commands, semantic-difference notes, and representative
+  migration tracking before `1.0`.

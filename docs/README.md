@@ -7,6 +7,7 @@ This directory tracks the public product planning and user-facing documentation 
 - [Tasks](tasks.md): lightweight task checklist until issue tracking is set up.
 - [Configuration](configuration.md): `pyproject.toml` configuration shape and supported commands.
 - [Migration Guide](migration.md): migration patterns from local line-count recipes.
+- [Release Workflow](release.md): build, changelog, and publish-readiness checklist.
 - [Changelog](../CHANGELOG.md): public change history.
 
 Private provenance, private repository names, local filesystem paths, and internal migration notes should stay out

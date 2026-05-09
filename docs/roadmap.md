@@ -94,9 +94,9 @@ Use public fixture repositories or synthetic test fixtures for these shapes:
 
 ## Phase 9: Release Readiness
 
-- [ ] Add package metadata.
-- [ ] Add installation docs.
-- [ ] Add migration guide.
-- [ ] Add changelog workflow.
+- [x] Add package metadata.
+- [x] Add installation docs.
+- [x] Add migration guide.
+- [x] Add changelog workflow.
 - [ ] Publish first pre-release.
 - [ ] Migrate at least three representative repositories before `1.0`.
