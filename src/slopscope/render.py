@@ -7,18 +7,31 @@ import io
 import json
 from typing import Any, Literal
 
-from slopscope.report import AreaRow, DirectoryRow, LanguageRow, RepositoryReport
+from slopscope.report import (
+    AreaRow,
+    DirectoryRow,
+    GroupedProfileReport,
+    GroupedRow,
+    LanguageRow,
+    ProfileTotalReport,
+    RepositoryReport,
+)
 
 OutputFormat = Literal["rich", "plain", "json"]
+RenderableReport = RepositoryReport | ProfileTotalReport | GroupedProfileReport
+
+
+def _is_profile_report(report: RenderableReport) -> bool:
+    return isinstance(report, ProfileTotalReport | GroupedProfileReport)
 
 
 def render_report(
-    report: RepositoryReport,
+    report: RenderableReport,
     *,
     output_format: OutputFormat,
     color: bool = True,
 ) -> str:
-    """Render a repository report in the selected output format."""
+    """Render a repository or profile report in the selected output format."""
 
     if output_format == "json":
         return render_json(report)
@@ -27,8 +40,13 @@ def render_report(
     return render_rich(report, color=color)
 
 
-def render_plain(report: RepositoryReport) -> str:
-    """Render a repository report as deterministic plain text."""
+def render_plain(report: RenderableReport) -> str:
+    """Render a repository or profile report as deterministic plain text."""
+
+    if isinstance(report, ProfileTotalReport):
+        return render_profile_total_plain(report)
+    if isinstance(report, GroupedProfileReport):
+        return render_grouped_profile_plain(report)
 
     lines = [
         "Slopscope Report",
@@ -47,8 +65,30 @@ def render_plain(report: RepositoryReport) -> str:
     return "\n".join(lines)
 
 
-def render_json(report: RepositoryReport) -> str:
-    """Render a repository report as stable JSON."""
+def render_json(report: RenderableReport) -> str:
+    """Render a repository or profile report as stable JSON."""
+
+    if isinstance(report, ProfileTotalReport):
+        payload = {
+            "engine": report.engine,
+            "path": str(report.path),
+            "profile": report.profile,
+            "total": report.total,
+            "physical_lines": report.physical_lines,
+        }
+        return json.dumps(payload, indent=2, sort_keys=False) + "\n"
+    if isinstance(report, GroupedProfileReport):
+        payload = {
+            "engine": report.engine,
+            "path": str(report.path),
+            "profile": report.profile,
+            "group_by": report.group_by,
+            "top": report.top,
+            "total": report.total,
+            "physical_lines": report.physical_lines,
+            "rows": [_grouped_row_to_dict(row) for row in report.rows],
+        }
+        return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
     payload = {
         "engine": report.engine,
@@ -66,7 +106,7 @@ def render_json(report: RepositoryReport) -> str:
     return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
 
-def render_rich(report: RepositoryReport, *, color: bool = True) -> str:
+def render_rich(report: RenderableReport, *, color: bool = True) -> str:
     """Render with Rich when available, otherwise fall back to plain text."""
 
     if not color:
@@ -86,9 +126,23 @@ def render_rich(report: RepositoryReport, *, color: bool = True) -> str:
         legacy_windows=False,
     )
 
-    console.print(text_class("Slopscope Report", style="bold blue"))
+    title = "Slopscope Profile" if _is_profile_report(report) else "Slopscope Report"
+    console.print(text_class(title, style="bold blue"))
     console.print(text_class(f"Path: {report.path}", style="dim"))
     console.print(text_class(f"Engine: {_engine_label(report.engine)}", style="dim"))
+    if isinstance(report, ProfileTotalReport):
+        console.print(text_class(f"Profile: {report.profile}", style="dim"))
+        console.print(text_class(f"Total: {report.total}", style="green"))
+        return buffer.getvalue()
+    if isinstance(report, GroupedProfileReport):
+        console.print(text_class(f"Profile: {report.profile}", style="dim"))
+        console.print(text_class(f"Group: {report.group_by}", style="dim"))
+        console.print(text_class(f"Top: {_top_label(report.top)}", style="dim"))
+        console.print(text_class(f"Total: {report.total}", style="green"))
+        console.print()
+        _print_rich_grouped_rows(console, table_class, report.rows)
+        return buffer.getvalue()
+
     console.print()
     _print_rich_language_summary(console, table_class, report.language_rows)
     console.print()
@@ -104,6 +158,39 @@ def render_rich(report: RepositoryReport, *, color: bool = True) -> str:
         report.directory_rows,
     )
     return buffer.getvalue()
+
+
+def render_profile_total_plain(report: ProfileTotalReport) -> str:
+    """Render a profile total report as deterministic plain text."""
+
+    return "\n".join(
+        [
+            "Slopscope Profile",
+            f"Path: {report.path}",
+            f"Engine: {_engine_label(report.engine)}",
+            f"Profile: {report.profile}",
+            f"Total: {report.total}",
+            "",
+        ]
+    )
+
+
+def render_grouped_profile_plain(report: GroupedProfileReport) -> str:
+    """Render a grouped profile report as deterministic plain text."""
+
+    lines = [
+        "Slopscope Profile",
+        f"Path: {report.path}",
+        f"Engine: {_engine_label(report.engine)}",
+        f"Profile: {report.profile}",
+        f"Group: {report.group_by}",
+        f"Top: {_top_label(report.top)}",
+        f"Total: {report.total}",
+        "",
+    ]
+    lines.extend(_render_grouped_rows(report.rows))
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _render_language_summary(rows: tuple[LanguageRow, ...]) -> list[str]:
@@ -160,6 +247,21 @@ def _render_named_rows(
     return lines
 
 
+def _render_grouped_rows(rows: tuple[GroupedRow, ...]) -> list[str]:
+    lines = [
+        "Grouped Lines",
+        f"{'Group':<24} {'Files':>5} {'Code':>8}",
+        "---------------------------------------",
+    ]
+    if not rows:
+        lines.append("(no grouped rows)")
+        return lines
+
+    for row in rows:
+        lines.append(f"{row.name:<24} {row.files:>5} {row.code:>8}")
+    return lines
+
+
 def _source_test_line(label: str, files: int, code: int, total: int) -> str:
     return f"{label:<16} {files:>5} {code:>8} {_percent(code, total):>7}"
 
@@ -192,6 +294,20 @@ def _named_row_to_dict(row: AreaRow | DirectoryRow) -> dict[str, int | str]:
         "files": row.files,
         "code": row.code,
     }
+
+
+def _grouped_row_to_dict(row: GroupedRow) -> dict[str, int | str]:
+    return {
+        "name": row.name,
+        "files": row.files,
+        "code": row.code,
+    }
+
+
+def _top_label(top: int | None) -> str:
+    if top is None:
+        return "all"
+    return str(top)
 
 
 def _load_rich() -> tuple[Any, Any, Any] | None:
@@ -274,5 +390,24 @@ def _print_rich_named_rows(
             table.add_row(row.name, str(row.files), str(row.code))
     else:
         table.add_row("(no file-level rows)", "", "")
+
+    console.print(table)
+
+
+def _print_rich_grouped_rows(
+    console: Any,
+    table_class: Any,
+    rows: tuple[GroupedRow, ...],
+) -> None:
+    table = table_class(title="Grouped Lines", title_style="bold blue")
+    table.add_column("Group", style="cyan")
+    table.add_column("Files", justify="right", style="magenta")
+    table.add_column("Code", justify="right", style="green")
+
+    if rows:
+        for row in rows:
+            table.add_row(row.name, str(row.files), str(row.code))
+    else:
+        table.add_row("(no grouped rows)", "", "")
 
     console.print(table)

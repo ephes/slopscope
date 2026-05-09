@@ -156,12 +156,15 @@ YAML total profile:
 - Must support output compatible with simple `just yaml-lines` recipes: a single number.
 - Must be able to count physical lines to preserve `wc -l`-style behavior.
 - Should also support `cloc` YAML code lines when requested.
+- In the current profile slice, `--total-only` is available only with `--profile NAME`.
 
 Grouped profile:
 
 - Must support grouping by a path prefix such as `roles/*` or `packages/*`.
 - Must support top-N output.
 - Must support language filtering for grouped reports.
+- Current grouped output displays a `roles/*` match as `roles/<name>` and totals only files that match the group
+  pattern.
 
 ## Counting Semantics
 
@@ -210,6 +213,7 @@ The tool must degrade gracefully to plain text when Rich is unavailable or disab
 JSON output should expose the same data model as the rendered reports:
 
 - engine
+- profile name, total, physical-line flag, and grouped rows when a profile is selected
 - projects
 - language rows
 - source/test summary

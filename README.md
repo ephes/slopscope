@@ -6,7 +6,8 @@ pure-Python fallback.
 This project is not published yet. The repository now contains the initial installable Python package scaffold,
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
 physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
-summaries, and `[tool.slopscope]` configuration loading from `pyproject.toml`.
+summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, and configured profile execution for
+YAML totals and grouped top-N reports.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -23,14 +24,15 @@ reusable Python CLI that can be added as a development dependency.
 - Configuration from `[tool.slopscope]` in `pyproject.toml`, or from `--config PATH`.
 - Configured excludes, included fallback globs, language filters, source/test dirs, named areas, and nested buckets
   for the default single-repository report.
+- Named profile execution from `[tool.slopscope.profiles]`.
+- YAML-only total profiles with `--total-only` integer output.
+- Physical-line profile totals for compatibility with `wc -l`-style recipes.
+- Grouped top-N profile reports for path patterns such as `roles/*`.
 - JSON output for future CI or badge integrations.
 
 ## Planned Features
 
-- Profile execution from configured named profiles.
-- YAML-only total counts for infrastructure repositories.
 - Multi-project workspace reports.
-- Grouped top-N reports.
 
 ## Usage
 
@@ -43,6 +45,8 @@ uv run slopscope --format plain
 uv run slopscope --format json
 uv run slopscope --no-color
 uv run slopscope --config path/to/pyproject.toml
+uv run slopscope --profile yaml --total-only
+uv run slopscope --profile roles --top 20
 ```
 
 For migration compatibility, the package also exposes:
@@ -77,8 +81,21 @@ Current single-repository configuration supports:
 - `areas`
 - `nested_bucket_dirs`
 
-Configured `projects` and `profiles` are parsed and validated, but selecting or executing them is planned for later
-phases.
+Configured `profiles` can now be selected with `--profile NAME`. Configured `projects` are parsed and validated, but
+selecting or executing projects is planned for a later phase.
+
+Profile execution supports:
+
+- `include_languages`, `exclude_languages`, and `include_globs`
+- `physical_lines = true` for Python fallback physical-line totals, even when `--engine cloc` is selected
+- `physical_lines = false` for normal engine semantics: `cloc` code lines when `cloc` is selected or available, and
+  Python physical lines when the Python fallback is selected
+- `group_by = "roles/*"` style grouped reports, displayed as `roles/<name>`
+- `top = N` in config, with `--top N` as a CLI override
+- `--total-only` for one integer plus a newline; without `--profile`, `--total-only` is a usage error
+
+When a profile sets its own language filters or include globs, those profile values are used for that profile.
+Top-level values are used only when the profile field is empty. Top-level `exclude_dirs` always apply.
 
 Default rendered sections are:
 
@@ -105,7 +122,7 @@ This repository is in early implementation. The completed slices are intentional
 scripts, `cloc` availability detection, language-summary and file-summary CSV parsing, fallback file discovery,
 fallback language mapping, physical-line counting, internal aggregation for source/test, area, and directory
 summaries, plain/Rich/JSON rendering for the default single-repository report, and configuration loading for that
-report. See:
+report plus named profile execution for YAML totals and grouped top-N reports. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)

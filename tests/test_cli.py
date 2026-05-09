@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, cloc
+from slopscope import cli, cloc, fallback
 from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
 
 
@@ -44,6 +44,157 @@ def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stderr.getvalue() == ""
 
 
+def test_cli_help_includes_profile_options() -> None:
+    help_text = cli.build_parser().format_help()
+
+    assert "--profile NAME" in help_text
+    assert "--total-only" in help_text
+    assert "--top N" in help_text
+
+
+def test_cli_missing_profile_returns_usage_error(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--profile", "yaml", "--format", "plain", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: no configured profile named 'yaml'" in stderr.getvalue()
+
+
+def test_cli_total_only_requires_profile() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(["--total-only"], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: --total-only requires --profile" in stderr.getvalue()
+
+
+def test_cli_yaml_profile_total_only_prints_integer_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "slopscope.fallback.run_git_ls_files",
+        lambda _path: fallback.GitLsFilesResult(returncode=128, stdout=b""),
+    )
+    (tmp_path / "a.yml").write_text("one\ntwo\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("one\n\nthree\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("one\n", encoding="utf-8")
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "yaml"
+include_languages = ["YAML"]
+include_globs = ["*.yml", "*.yaml"]
+physical_lines = true
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "cloc", "--profile", "yaml", "--total-only", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert stdout.getvalue() == "5\n"
+    assert stderr.getvalue() == ""
+
+
+def test_cli_cloc_profile_total_uses_cloc_code_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
+    monkeypatch.setattr(
+        "slopscope.profile.cloc.run_file_summary",
+        lambda _path: cloc.ClocResult(
+            returncode=0,
+            stdout=(
+                "language,filename,blank,comment,code\n"
+                "YAML,a.yml,1,2,7\n"
+                "YAML,b.yaml,0,1,11\n"
+                "Markdown,README.md,0,0,5\n"
+            ),
+            stderr="",
+        ),
+    )
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "yaml"
+include_languages = ["YAML"]
+include_globs = ["*.yml", "*.yaml"]
+physical_lines = false
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "cloc", "--profile", "yaml", "--total-only", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert stdout.getvalue() == "18\n"
+    assert stderr.getvalue() == ""
+
+
+def test_cli_cloc_profile_failure_remains_clear(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
+    monkeypatch.setattr(
+        "slopscope.profile.cloc.run_file_summary",
+        lambda _path: cloc.ClocResult(returncode=8, stdout="", stderr="file summary failed\n"),
+    )
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "yaml"
+include_languages = ["YAML"]
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "cloc", "--profile", "yaml", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 8
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "file summary failed\n"
+
+
 def test_cli_auto_falls_back_to_python_when_cloc_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -78,6 +229,36 @@ def test_cli_cloc_engine_still_fails_clearly_without_cloc(
     stderr = io.StringIO()
 
     exit_code = cli.run(["--engine", "cloc"], stdout=stdout, stderr=stderr)
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "cloc engine requested, but cloc was not found" in stderr.getvalue()
+
+
+def test_cli_cloc_profile_still_fails_clearly_without_cloc(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: False)
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "yaml"
+include_languages = ["YAML"]
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "cloc", "--profile", "yaml", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
 
     assert exit_code == 2
     assert stdout.getvalue() == ""
@@ -590,6 +771,190 @@ def test_cli_cloc_empty_file_rows_render_empty_aggregate_sections(
 
     assert exit_code == 0
     assert "(no file-level rows)" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
+def test_cli_grouped_profile_plain_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_build_file_rows(_path: Path | str, **_kwargs: object) -> list[FileRow]:
+        return [
+            FileRow(language="YAML", path="roles/web/tasks.yml", blank=0, comment=0, code=8),
+            FileRow(language="YAML", path="roles/web/meta.yml", blank=0, comment=0, code=2),
+            FileRow(language="YAML", path="roles/db/tasks.yml", blank=0, comment=0, code=5),
+            FileRow(language="YAML", path="playbook.yml", blank=0, comment=0, code=20),
+        ]
+
+    monkeypatch.setattr("slopscope.profile.fallback.build_file_rows", fake_build_file_rows)
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "roles"
+include_languages = ["YAML"]
+group_by = "roles/*"
+top = 20
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "python", "--format", "plain", "--profile", "roles", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "Slopscope Profile" in output
+    assert "Group: roles/*" in output
+    assert "roles/web                    2       10" in output
+    assert "roles/db                     1        5" in output
+    assert "playbook.yml" not in output
+    assert stderr.getvalue() == ""
+
+
+def test_cli_grouped_profile_json_and_top_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_build_file_rows(_path: Path | str, **_kwargs: object) -> list[FileRow]:
+        return [
+            FileRow(language="YAML", path="roles/web/tasks.yml", blank=0, comment=0, code=8),
+            FileRow(language="YAML", path="roles/db/tasks.yml", blank=0, comment=0, code=5),
+            FileRow(language="YAML", path="roles/api/tasks.yml", blank=0, comment=0, code=3),
+        ]
+
+    monkeypatch.setattr("slopscope.profile.fallback.build_file_rows", fake_build_file_rows)
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "roles"
+include_languages = ["YAML"]
+group_by = "roles/*"
+top = 20
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--engine",
+            "python",
+            "--format",
+            "json",
+            "--profile",
+            "roles",
+            "--top",
+            "1",
+            str(tmp_path),
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert data == {
+        "engine": "python",
+        "path": str(tmp_path),
+        "profile": "roles",
+        "group_by": "roles/*",
+        "top": 1,
+        "total": 16,
+        "physical_lines": False,
+        "rows": [{"name": "roles/web", "files": 1, "code": 8}],
+    }
+    assert stderr.getvalue() == ""
+
+
+def test_cli_grouped_profile_total_only_sums_all_grouped_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_build_file_rows(_path: Path | str, **_kwargs: object) -> list[FileRow]:
+        return [
+            FileRow(language="YAML", path="roles/web/tasks.yml", blank=0, comment=0, code=8),
+            FileRow(language="YAML", path="roles/db/tasks.yml", blank=0, comment=0, code=5),
+            FileRow(language="YAML", path="playbook.yml", blank=0, comment=0, code=20),
+        ]
+
+    monkeypatch.setattr("slopscope.profile.fallback.build_file_rows", fake_build_file_rows)
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "roles"
+include_languages = ["YAML"]
+group_by = "roles/*"
+top = 1
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "python", "--profile", "roles", "--total-only", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert stdout.getvalue() == "13\n"
+    assert stderr.getvalue() == ""
+
+
+def test_cli_grouped_rich_output_falls_back_to_plain_when_rich_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_build_file_rows(_path: Path | str, **_kwargs: object) -> list[FileRow]:
+        return [FileRow(language="YAML", path="roles/web/tasks.yml", blank=0, comment=0, code=8)]
+
+    def fake_import_module(name: str) -> object:
+        if name.startswith("rich."):
+            raise ImportError(name)
+        raise AssertionError(name)
+
+    monkeypatch.setattr("slopscope.profile.fallback.build_file_rows", fake_build_file_rows)
+    monkeypatch.setattr("slopscope.render.importlib.import_module", fake_import_module)
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.profiles]]
+name = "roles"
+include_languages = ["YAML"]
+group_by = "roles/*"
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--engine", "python", "--format", "rich", "--profile", "roles", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert "Slopscope Profile" in stdout.getvalue()
+    assert "Grouped Lines" in stdout.getvalue()
     assert stderr.getvalue() == ""
 
 

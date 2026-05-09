@@ -31,9 +31,6 @@ loc:
 
 ## Infrastructure Repository With YAML Totals
 
-YAML total profiles are planned but not implemented yet. For now, add the profile configuration so it validates, and
-keep existing YAML total recipes until profile execution and `--total-only` are added.
-
 Before:
 
 ```just
@@ -41,7 +38,7 @@ yaml-lines:
     @rg --files -0 -g '*.yml' -g '*.yaml' . | xargs -0 wc -l | awk 'BEGIN {sum=0} !/^ *[0-9]+ total$/ {sum += $1} END {print sum}'
 ```
 
-Planned command:
+After:
 
 ```just
 yaml-lines:
@@ -51,9 +48,6 @@ yaml-lines:
 Use a profile with `physical_lines = true` when compatibility with `wc -l` totals matters.
 
 ## Grouped YAML Report
-
-Grouped profiles are planned but not implemented yet. Keep existing grouped recipes until profile execution is
-available.
 
 Before:
 
@@ -66,12 +60,15 @@ stats-roles:
     done | sort -k2 -rn | head -20
 ```
 
-Planned command:
+After:
 
 ```just
 stats-roles:
     uv run slopscope --profile roles
 ```
+
+A profile such as `group_by = "roles/*"` displays groups as `roles/<name>`. Use `top = 20` in the profile or
+`--top 20` on the command line to limit rendered rows.
 
 ## Multi-Project Workspace
 

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from slopscope import classify, cloc, fallback, render
+from slopscope import classify, cloc, fallback, profile, render
 from slopscope import config as config_module
 from slopscope.report import (
     FileAggregateReport,
@@ -52,6 +52,22 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Read configuration from PATH instead of pyproject.toml under the inspected path.",
     )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Run the configured profile named NAME.",
+    )
+    parser.add_argument(
+        "--total-only",
+        action="store_true",
+        help="Print only the selected profile total.",
+    )
+    parser.add_argument(
+        "--top",
+        metavar="N",
+        type=_positive_int,
+        help="Override a grouped profile top-N limit.",
+    )
     return parser
 
 
@@ -83,6 +99,19 @@ def run(
         print(f"slopscope: {exc}", file=err)
         return 2
 
+    if args.total_only and args.profile is None:
+        print("slopscope: --total-only requires --profile", file=err)
+        return 2
+
+    if args.profile is not None:
+        return _run_profile(
+            args=args,
+            path=selected_path,
+            slopscope_config=slopscope_config,
+            out=out,
+            err=err,
+        )
+
     if args.engine == "cloc" and not cloc.is_cloc_available():
         print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
         return 2
@@ -102,6 +131,60 @@ def run(
             color=not args.no_color,
         )
     )
+    return 0
+
+
+def _run_profile(
+    *,
+    args: argparse.Namespace,
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    out: TextIO,
+    err: TextIO,
+) -> int:
+    try:
+        selected_profile = profile.find_profile(slopscope_config, args.profile)
+    except profile.ProfileError as exc:
+        print(f"slopscope: {exc}", file=err)
+        return 2
+
+    if selected_profile.physical_lines or args.engine == "python":
+        profile_engine = "python"
+    elif args.engine == "cloc":
+        if not cloc.is_cloc_available():
+            print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
+            return 2
+        profile_engine = "cloc"
+    elif cloc.is_cloc_available():
+        profile_engine = "cloc"
+    else:
+        profile_engine = "python"
+
+    try:
+        report = profile.build_profile_report(
+            path=path,
+            slopscope_config=slopscope_config,
+            selected_profile=selected_profile,
+            engine=profile_engine,
+            top=args.top,
+        )
+    except profile.ProfileError as exc:
+        print(f"slopscope: {exc}", file=err)
+        return 2
+    except profile.ProfileCountError as exc:
+        print(str(exc), file=err)
+        return exc.returncode
+
+    if args.total_only:
+        out.write(f"{report.total}\n")
+    else:
+        out.write(
+            render.render_report(
+                report,
+                output_format=args.format,
+                color=not args.no_color,
+            )
+        )
     return 0
 
 
@@ -312,3 +395,13 @@ def _effective_fallback_excludes(
             (*sorted(fallback.DEFAULT_EXCLUDED_PATH_SEGMENTS), *slopscope_config.exclude_dirs)
         )
     )
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed

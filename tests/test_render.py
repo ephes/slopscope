@@ -12,7 +12,10 @@ from slopscope import render
 from slopscope.report import (
     AreaRow,
     DirectoryRow,
+    GroupedProfileReport,
+    GroupedRow,
     LanguageRow,
+    ProfileTotalReport,
     RepositoryReport,
     SourceTestSummary,
 )
@@ -93,6 +96,68 @@ def test_json_renderer_emits_stable_report_data() -> None:
         "files": 1,
         "code": 20,
     }
+
+
+def test_profile_total_plain_renderer() -> None:
+    output = render.render_plain(
+        ProfileTotalReport(
+            profile="yaml",
+            engine="python",
+            path=Path("."),
+            total=12,
+            physical_lines=True,
+        )
+    )
+
+    assert "Slopscope Profile" in output
+    assert "Engine: python (physical lines)" in output
+    assert "Profile: yaml" in output
+    assert "Total: 12" in output
+
+
+def test_grouped_profile_json_renderer() -> None:
+    output = render.render_json(
+        GroupedProfileReport(
+            profile="roles",
+            engine="cloc",
+            path=Path("."),
+            group_by="roles/*",
+            rows=(GroupedRow(name="roles/web", files=2, code=80),),
+            total=123,
+            top=20,
+            physical_lines=False,
+        )
+    )
+
+    assert json.loads(output) == {
+        "engine": "cloc",
+        "path": ".",
+        "profile": "roles",
+        "group_by": "roles/*",
+        "top": 20,
+        "total": 123,
+        "physical_lines": False,
+        "rows": [{"name": "roles/web", "files": 2, "code": 80}],
+    }
+
+
+def test_grouped_profile_plain_renderer() -> None:
+    output = render.render_plain(
+        GroupedProfileReport(
+            profile="roles",
+            engine="python",
+            path=Path("."),
+            group_by="roles/*",
+            rows=(GroupedRow(name="roles/web", files=2, code=80),),
+            total=123,
+            top=None,
+            physical_lines=False,
+        )
+    )
+
+    assert "Slopscope Profile" in output
+    assert "Top: all" in output
+    assert "roles/web                    2       80" in output
 
 
 def test_rich_renderer_falls_back_to_plain_when_rich_is_unavailable(

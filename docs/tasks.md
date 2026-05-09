@@ -5,10 +5,7 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Support YAML total profiles.
-- [ ] Support grouped top-N profiles.
 - [ ] Implement `--project NAME`, `--project all`, and multi-project rendering.
-- [ ] Execute named profiles from configuration.
 - [ ] Add fixture coverage for standard Python, infrastructure, grouped, multi-project, and desktop-style layouts.
 
 ## Done
@@ -36,6 +33,11 @@ repository shapes and product behavior, not private source projects.
   buckets to the default single-repository report.
 - [x] Parse and validate named projects, optional projects, and named profiles.
 - [x] Surface invalid config with clear stderr and a non-zero exit.
+- [x] Execute named profiles from configuration.
+- [x] Support YAML total profiles with `--total-only`.
+- [x] Support physical-line profile totals for compatibility with `wc -l`-style recipes.
+- [x] Support grouped top-N profiles.
+- [x] Support `--top N` overrides for grouped profiles.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

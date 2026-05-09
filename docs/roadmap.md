@@ -64,11 +64,11 @@ source repositories.
 
 ## Phase 6: Profiles
 
-- [ ] Add YAML-only total profile support.
-- [ ] Support physical-line totals for compatibility with `wc -l`-style recipes.
-- [ ] Support `cloc` code-line totals for YAML.
-- [ ] Add grouped top-N reports for repeated subtrees.
-- [ ] Support language filters in profiles.
+- [x] Add YAML-only total profile support.
+- [x] Support physical-line totals for compatibility with `wc -l`-style recipes.
+- [x] Support `cloc` code-line totals for YAML.
+- [x] Add grouped top-N reports for repeated subtrees.
+- [x] Support language filters in profiles.
 
 ## Phase 7: Multi-Project Workspaces
 

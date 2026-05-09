@@ -4,9 +4,9 @@
 non-standard source or test layouts, multiple projects, or special line-count profiles can configure behavior in
 `pyproject.toml`.
 
-The current implementation loads `[tool.slopscope]` for the default single-repository report. It also parses and
-validates configured projects and profiles so those sections are ready for later phases, but it does not yet execute
-`--project`, `--profile`, YAML total mode, grouped reports, or multi-project reports.
+The current implementation loads `[tool.slopscope]` for the default single-repository report and executes configured
+named profiles. It also parses and validates configured projects so that section is ready for later phases, but it
+does not yet execute `--project` or multi-project reports.
 
 ## No Configuration
 
@@ -107,8 +107,16 @@ Expected command:
 slopscope --profile yaml --total-only
 ```
 
-This command is planned for the profiles phase. Today, profile entries are validated only. Supported profile fields
-are `name`, `include_languages`, `exclude_languages`, `include_globs`, `physical_lines`, `group_by`, and `top`.
+This command prints one integer plus a newline, with no headings or engine metadata. Use `physical_lines = true` when
+compatibility with `wc -l`-style YAML recipes matters. Physical-line profiles use Python fallback discovery and
+physical-line counting even if `--engine cloc` is selected.
+
+With `physical_lines = false`, profiles use normal engine semantics: `--engine cloc` and available `--engine auto`
+use `cloc` code counts from file-level rows, while `--engine python` or unavailable `cloc` in `auto` mode use Python
+physical-line rows.
+
+Supported profile fields are `name`, `include_languages`, `exclude_languages`, `include_globs`, `physical_lines`,
+`group_by`, and `top`.
 
 ## Grouped Report Profile
 
@@ -124,9 +132,31 @@ Expected command:
 
 ```bash
 slopscope --profile roles
+slopscope --profile roles --top 10
 ```
 
-This command is planned for the profiles phase.
+Grouped reports support plain, Rich, and JSON output. Rich remains optional and falls back to plain output when Rich
+is unavailable or disabled. A pattern such as `roles/*` groups matching files by `roles/<name>`. Files that do not
+match the group pattern are ignored for grouped rows and grouped totals. Rows are sorted by code descending, files
+descending, then name.
+
+The configured `top` value limits rendered rows. `--top N` overrides the configured value. `--total-only` with a
+grouped profile prints the total across all matched grouped rows, not only the visible top-N rows.
+
+Example JSON output:
+
+```json
+{
+  "engine": "python",
+  "path": ".",
+  "profile": "roles",
+  "group_by": "roles/*",
+  "top": 20,
+  "total": 123,
+  "physical_lines": false,
+  "rows": [{"name": "roles/web", "files": 2, "code": 80}]
+}
+```
 
 ## Generated Artifact Excludes
 
@@ -154,8 +184,12 @@ exclude_dirs = [
 - The positional path remains the repository inspected by the default single-repository report; configured projects
   are not selected automatically.
 - Optional project skipping and required project failures are planned for the multi-project phase.
-- Language filtering is applied to parsed `cloc` rows and to fallback file mappings.
+- Language filtering is applied to parsed `cloc` rows and to fallback file mappings. For profiles, non-empty profile
+  language filters replace top-level language filters. If a profile leaves a language filter empty, the matching
+  top-level filter is used.
 - `exclude_dirs` augments fallback default excludes. For `cloc`, configured `exclude_dirs` are applied to parsed
-  file rows and language totals are recomputed from the filtered file rows.
-- `include_globs` applies to Python fallback discovery by relative path. It does not change `cloc` command input in
-  this phase.
+  file rows and language totals are recomputed from the filtered file rows. Top-level `exclude_dirs` always apply to
+  profiles.
+- For the default report, `include_globs` applies to Python fallback discovery by relative path and does not change
+  `cloc` command input. For profiles, non-empty profile `include_globs` replace top-level include globs, and profile
+  include globs also filter parsed `cloc` file rows by relative path.

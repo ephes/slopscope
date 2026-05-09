@@ -68,6 +68,40 @@ class FileAggregateReport:
 
 
 @dataclass(frozen=True)
+class GroupedRow:
+    """Grouped profile row aggregated from matching file-level rows."""
+
+    name: str
+    files: int
+    code: int
+
+
+@dataclass(frozen=True)
+class ProfileTotalReport:
+    """Profile total report data independent of rendering."""
+
+    profile: str
+    engine: str
+    path: Path
+    total: int
+    physical_lines: bool
+
+
+@dataclass(frozen=True)
+class GroupedProfileReport:
+    """Grouped profile report data independent of rendering."""
+
+    profile: str
+    engine: str
+    path: Path
+    group_by: str
+    rows: tuple[GroupedRow, ...]
+    total: int
+    top: int | None
+    physical_lines: bool
+
+
+@dataclass(frozen=True)
 class LanguageSummaryReport:
     """Language-summary report data independent of counting and rendering."""
 
