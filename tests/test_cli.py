@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from slopscope import cli, cloc
+from slopscope.report import LanguageRow, LanguageSummaryReport
 
 
 def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,6 +89,27 @@ def test_cli_fails_when_cloc_returns_no_usable_rows(monkeypatch: pytest.MonkeyPa
     assert exit_code == 1
     assert stdout.getvalue() == ""
     assert "no usable language rows" in stderr.getvalue()
+
+
+def test_language_summary_rendering_uses_report_rows() -> None:
+    stdout = io.StringIO()
+    language_report = LanguageSummaryReport.from_rows(
+        engine="cloc",
+        path=Path("."),
+        language_rows=[
+            LanguageRow(language="Python", files=1, blank=2, comment=3, code=4),
+            LanguageRow(language="SUM", files=1, blank=2, comment=3, code=4),
+        ],
+    )
+
+    cli._print_language_summary(language_report, stdout)
+
+    assert stdout.getvalue() == (
+        "Language          Files    Blank  Comment     Code\n"
+        "--------------------------------------------------\n"
+        "Python               1        2        3        4\n"
+        "SUM                  1        2        3        4\n"
+    )
 
 
 def test_cli_python_engine_fails_clearly() -> None:

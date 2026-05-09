@@ -9,16 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass(frozen=True)
-class LanguageRow:
-    """A language summary row reported by cloc."""
-
-    language: str
-    files: int
-    blank: int
-    comment: int
-    code: int
+from slopscope.report import LanguageRow
 
 
 @dataclass(frozen=True)

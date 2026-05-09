@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from slopscope import cloc
+from slopscope.report import LanguageRow
 
 
 def test_cloc_availability_detection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,9 +46,9 @@ SUM,3,13,4,110
     rows = cloc.parse_language_summary_csv(output)
 
     assert rows == [
-        cloc.LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
-        cloc.LanguageRow(language="Markdown", files=1, blank=3, comment=0, code=20),
-        cloc.LanguageRow(language="SUM", files=3, blank=13, comment=4, code=110),
+        LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
+        LanguageRow(language="Markdown", files=1, blank=3, comment=0, code=20),
+        LanguageRow(language="SUM", files=3, blank=13, comment=4, code=110),
     ]
 
 
@@ -63,8 +64,8 @@ SUM,2,10,4,100
     rows = cloc.parse_language_summary_csv(output)
 
     assert rows == [
-        cloc.LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
-        cloc.LanguageRow(language="SUM", files=2, blank=10, comment=4, code=100),
+        LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
+        LanguageRow(language="SUM", files=2, blank=10, comment=4, code=100),
     ]
 
 

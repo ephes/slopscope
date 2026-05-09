@@ -13,7 +13,7 @@ source repositories.
 
 ## Phase 1: Core Counting Model
 
-- [ ] Define internal report data model.
+- [x] Define internal report data model.
 - [x] Implement `cloc` availability detection.
 - [x] Run `cloc --csv --quiet` for language summaries.
 - [ ] Run `cloc --by-file --csv --quiet` for file-level aggregation.

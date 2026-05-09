@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from slopscope import cloc
+from slopscope.report import LanguageSummaryReport
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,19 +72,23 @@ def run(
         print(message, file=err)
         return result.returncode
 
-    rows = cloc.parse_language_summary_csv(result.stdout)
-    if not rows:
+    report = LanguageSummaryReport.from_rows(
+        engine="cloc",
+        path=selected_path,
+        language_rows=cloc.parse_language_summary_csv(result.stdout),
+    )
+    if not report.language_rows:
         print("slopscope: cloc returned no usable language rows", file=err)
         return 1
 
-    _print_language_summary(rows, out)
+    _print_language_summary(report, out)
     return 0
 
 
-def _print_language_summary(rows: Sequence[cloc.LanguageRow], out: TextIO) -> None:
+def _print_language_summary(report: LanguageSummaryReport, out: TextIO) -> None:
     print("Language          Files    Blank  Comment     Code", file=out)
     print("--------------------------------------------------", file=out)
-    for row in rows:
+    for row in report.language_rows:
         print(
             f"{row.language:<16} {row.files:>5} {row.blank:>8} {row.comment:>8} {row.code:>8}",
             file=out,

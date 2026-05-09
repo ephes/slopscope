@@ -5,7 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Implement the core report data model.
 - [ ] Implement `cloc` file-level parsing for directory/source/test aggregation.
 - [ ] Implement pure-Python fallback scanning.
 - [ ] Implement path classification for source, tests, docs, examples, scripts, and tooling.
@@ -24,6 +23,7 @@ repository shapes and product behavior, not private source projects.
 - [x] Add `slopscope` CLI entry point.
 - [x] Add `count-lines-of-code` compatibility entry point.
 - [x] Add test, lint, format, and typecheck commands.
+- [x] Implement the core report data model.
 - [x] Implement `cloc` availability detection.
 - [x] Implement `cloc` CSV parsing for language summaries.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
