@@ -31,6 +31,9 @@ loc:
 
 ## Infrastructure Repository With YAML Totals
 
+YAML total profiles are planned but not implemented yet. For now, add the profile configuration so it validates, and
+keep existing YAML total recipes until profile execution and `--total-only` are added.
+
 Before:
 
 ```just
@@ -38,7 +41,7 @@ yaml-lines:
     @rg --files -0 -g '*.yml' -g '*.yaml' . | xargs -0 wc -l | awk 'BEGIN {sum=0} !/^ *[0-9]+ total$/ {sum += $1} END {print sum}'
 ```
 
-After:
+Planned command:
 
 ```just
 yaml-lines:
@@ -48,6 +51,9 @@ yaml-lines:
 Use a profile with `physical_lines = true` when compatibility with `wc -l` totals matters.
 
 ## Grouped YAML Report
+
+Grouped profiles are planned but not implemented yet. Keep existing grouped recipes until profile execution is
+available.
 
 Before:
 
@@ -60,7 +66,7 @@ stats-roles:
     done | sort -k2 -rn | head -20
 ```
 
-After:
+Planned command:
 
 ```just
 stats-roles:
@@ -68,6 +74,9 @@ stats-roles:
 ```
 
 ## Multi-Project Workspace
+
+Multi-project selection is planned but not implemented yet. The configuration can be added and validated now, while
+the commands below remain future behavior.
 
 ```just
 loc:

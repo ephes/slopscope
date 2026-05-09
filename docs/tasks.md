@@ -5,10 +5,10 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Load `[tool.slopscope]` from `pyproject.toml`.
-- [ ] Support named projects and optional projects.
 - [ ] Support YAML total profiles.
 - [ ] Support grouped top-N profiles.
+- [ ] Implement `--project NAME`, `--project all`, and multi-project rendering.
+- [ ] Execute named profiles from configuration.
 - [ ] Add fixture coverage for standard Python, infrastructure, grouped, multi-project, and desktop-style layouts.
 
 ## Done
@@ -30,6 +30,12 @@ repository shapes and product behavior, not private source projects.
 - [x] Implement optional Rich rendering with plain fallback.
 - [x] Implement JSON rendering for the default single-repository report.
 - [x] Add `--format rich|plain|json` and `--no-color`.
+- [x] Load `[tool.slopscope]` from `pyproject.toml`.
+- [x] Add `--config PATH`.
+- [x] Apply configured excludes, language filters, included fallback globs, source/test dirs, named areas, and nested
+  buckets to the default single-repository report.
+- [x] Parse and validate named projects, optional projects, and named profiles.
+- [x] Surface invalid config with clear stderr and a non-zero exit.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

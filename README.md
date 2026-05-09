@@ -5,8 +5,8 @@ pure-Python fallback.
 
 This project is not published yet. The repository now contains the initial installable Python package scaffold,
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
-physical-line reports, default path classification, and rendered reports for language, source/test, area, and
-directory summaries.
+physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
+summaries, and `[tool.slopscope]` configuration loading from `pyproject.toml`.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -20,11 +20,14 @@ reusable Python CLI that can be added as a development dependency.
 - Source-vs-tests summaries for `src/` + `tests/` projects.
 - Directory buckets sorted by line count.
 - Repository area summaries for source, tests, docs, scripts, examples, specs, and tooling.
+- Configuration from `[tool.slopscope]` in `pyproject.toml`, or from `--config PATH`.
+- Configured excludes, included fallback globs, language filters, source/test dirs, named areas, and nested buckets
+  for the default single-repository report.
 - JSON output for future CI or badge integrations.
 
 ## Planned Features
 
-- Configuration through `pyproject.toml`.
+- Profile execution from configured named profiles.
 - YAML-only total counts for infrastructure repositories.
 - Multi-project workspace reports.
 - Grouped top-N reports.
@@ -39,6 +42,7 @@ uv run slopscope --engine python
 uv run slopscope --format plain
 uv run slopscope --format json
 uv run slopscope --no-color
+uv run slopscope --config path/to/pyproject.toml
 ```
 
 For migration compatibility, the package also exposes:
@@ -59,6 +63,22 @@ with `Engine: python (physical lines)`.
 Human-readable output defaults to `--format rich`. Rich is optional: when it is not importable, `slopscope` falls
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for
 structured output, or `--no-color` to force colorless human-readable output.
+
+By default, `slopscope` looks for `[tool.slopscope]` in `pyproject.toml` under the inspected path. Missing
+configuration keeps the built-in defaults. Use `--config PATH` to load a specific TOML file; missing files, invalid
+TOML, and invalid field types fail with a clear `slopscope:` error and exit code 2.
+
+Current single-repository configuration supports:
+
+- `exclude_languages` and `include_languages`
+- `exclude_dirs`
+- `include_globs` for the Python fallback
+- `source_dirs` and `test_dirs`
+- `areas`
+- `nested_bucket_dirs`
+
+Configured `projects` and `profiles` are parsed and validated, but selecting or executing them is planned for later
+phases.
 
 Default rendered sections are:
 
@@ -84,7 +104,8 @@ The same commands are available through the `justfile` as `just test`, `just lin
 This repository is in early implementation. The completed slices are intentionally narrow: package metadata, console
 scripts, `cloc` availability detection, language-summary and file-summary CSV parsing, fallback file discovery,
 fallback language mapping, physical-line counting, internal aggregation for source/test, area, and directory
-summaries, and plain/Rich/JSON rendering for the default single-repository report. See:
+summaries, plain/Rich/JSON rendering for the default single-repository report, and configuration loading for that
+report. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)

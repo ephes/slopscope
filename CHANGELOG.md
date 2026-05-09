@@ -16,6 +16,10 @@ All notable changes to `slopscope` will be documented here.
 - Add pure-Python fallback file-level rows using mapped languages and physical line counts.
 - Add default report rendering for language, source/test, area, and directory sections with `--format rich|plain|json`
   and `--no-color`.
+- Add `[tool.slopscope]` configuration loading from `pyproject.toml` and `--config PATH`.
+- Apply configured excludes, language filters, fallback include globs, source/test dirs, named areas, and nested
+  directory buckets to the default single-repository report.
+- Parse and validate named projects, optional projects, and named profiles for later execution phases.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.

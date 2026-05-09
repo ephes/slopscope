@@ -6,6 +6,7 @@ import os
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
@@ -97,14 +98,34 @@ def parse_git_ls_files_output(output: bytes) -> list[Path]:
     return [Path(os.fsdecode(part)) for part in output.split(b"\0") if part]
 
 
-def discover_files(path: Path | str) -> list[Path]:
+def discover_files(
+    path: Path | str,
+    *,
+    excluded_paths: Iterable[str] = DEFAULT_EXCLUDED_PATH_SEGMENTS,
+    include_globs: Iterable[str] = (),
+) -> list[Path]:
     """Discover repository files using git when available, then filesystem traversal."""
 
     root = Path(path)
+    excluded_paths_tuple = tuple(excluded_paths)
     git_result = run_git_ls_files(root)
     if git_result.returncode == 0:
-        return filter_excluded_paths(parse_git_ls_files_output(git_result.stdout))
-    return discover_filesystem_files(root)
+        return filter_included_paths(
+            filter_excluded_paths(
+                parse_git_ls_files_output(git_result.stdout),
+                excluded_path_segments=excluded_paths_tuple,
+            ),
+            include_globs=include_globs,
+        )
+    return filter_included_paths(
+        filter_excluded_paths(
+            discover_filesystem_files(
+                root, pruned_dir_names=_single_segment_excludes(excluded_paths_tuple)
+            ),
+            excluded_path_segments=excluded_paths_tuple,
+        ),
+        include_globs=include_globs,
+    )
 
 
 def filter_excluded_paths(
@@ -119,10 +140,42 @@ def filter_excluded_paths(
 
 
 def is_excluded_path(path: Path | str, excluded_path_segments: Iterable[str]) -> bool:
-    """Return whether a relative path contains an excluded segment."""
+    """Return whether a relative path contains an excluded path."""
 
-    excluded_segments = set(excluded_path_segments)
-    return any(part in excluded_segments for part in Path(path).parts)
+    parts = _path_parts(path)
+    for excluded in excluded_path_segments:
+        excluded_parts = _path_parts(excluded)
+        if not excluded_parts:
+            continue
+        if len(excluded_parts) == 1:
+            if excluded_parts[0] in parts:
+                return True
+        elif _contains_subpath(parts, excluded_parts):
+            return True
+    return False
+
+
+def filter_included_paths(
+    paths: Iterable[Path],
+    *,
+    include_globs: Iterable[str] = (),
+) -> list[Path]:
+    """Filter files by configured include globs when any are provided."""
+
+    globs = tuple(include_globs)
+    if not globs:
+        return list(paths)
+    return [path for path in paths if matches_include_globs(path, globs)]
+
+
+def matches_include_globs(path: Path | str, include_globs: Iterable[str]) -> bool:
+    """Return whether a relative path matches any configured include glob."""
+
+    relative_path = Path(path)
+    path_text = relative_path.as_posix()
+    return any(
+        relative_path.match(pattern) or fnmatch(path_text, pattern) for pattern in include_globs
+    )
 
 
 def discover_filesystem_files(
@@ -220,15 +273,32 @@ def build_language_summary_from_file_rows(
     )
 
 
-def build_file_rows(path: Path | str) -> list[FileRow]:
+def build_file_rows(
+    path: Path | str,
+    *,
+    excluded_paths: Iterable[str] = DEFAULT_EXCLUDED_PATH_SEGMENTS,
+    include_globs: Iterable[str] = (),
+    include_languages: Iterable[str] = (),
+    exclude_languages: Iterable[str] = (),
+) -> list[FileRow]:
     """Build fallback file-level rows using physical line counts."""
 
     root = Path(path)
     rows: list[FileRow] = []
+    included_languages = set(include_languages)
+    excluded_languages = set(exclude_languages)
 
-    for relative_path in discover_files(root):
+    for relative_path in discover_files(
+        root,
+        excluded_paths=excluded_paths,
+        include_globs=include_globs,
+    ):
         language = map_language(relative_path)
         if language is None:
+            continue
+        if included_languages and language not in included_languages:
+            continue
+        if language in excluded_languages:
             continue
 
         physical_lines = count_physical_lines(root / relative_path)
@@ -246,3 +316,21 @@ def build_file_rows(path: Path | str) -> list[FileRow]:
         )
 
     return rows
+
+
+def _path_parts(path: Path | str) -> tuple[str, ...]:
+    file_path = Path(path)
+    return tuple(part for part in file_path.parts if part not in ("", ".", file_path.anchor))
+
+
+def _contains_subpath(parts: tuple[str, ...], subpath: tuple[str, ...]) -> bool:
+    if len(subpath) > len(parts):
+        return False
+    return any(
+        parts[index : index + len(subpath)] == subpath
+        for index in range(len(parts) - len(subpath) + 1)
+    )
+
+
+def _single_segment_excludes(paths: Iterable[str]) -> tuple[str, ...]:
+    return tuple(parts[0] for path in paths if len(parts := _path_parts(path)) == 1)

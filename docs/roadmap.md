@@ -52,14 +52,15 @@ source repositories.
 
 ## Phase 5: Configuration
 
-- [ ] Load `[tool.slopscope]` from `pyproject.toml`.
-- [ ] Support `--config`.
-- [ ] Support excluded directories and languages.
-- [ ] Support included globs.
-- [ ] Support named projects.
-- [ ] Support optional projects.
-- [ ] Support named profiles.
-- [ ] Add validation errors for invalid config.
+- [x] Load `[tool.slopscope]` from `pyproject.toml`.
+- [x] Support `--config`.
+- [x] Support excluded directories and languages.
+- [x] Support included globs for the Python fallback.
+- [x] Support configured source/test dirs, named areas, and nested directory buckets.
+- [x] Parse and validate named projects.
+- [x] Parse and validate optional projects.
+- [x] Parse and validate named profiles.
+- [x] Add validation errors for invalid config.
 
 ## Phase 6: Profiles
 
