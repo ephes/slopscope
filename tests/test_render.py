@@ -15,8 +15,12 @@ from slopscope.report import (
     GroupedProfileReport,
     GroupedRow,
     LanguageRow,
+    MultiProjectReport,
     ProfileTotalReport,
+    ProjectReport,
+    ProjectSnapshotRow,
     RepositoryReport,
+    SkippedProject,
     SourceTestSummary,
 )
 
@@ -95,6 +99,138 @@ def test_json_renderer_emits_stable_report_data() -> None:
         "name": "src/slopscope",
         "files": 1,
         "code": 20,
+    }
+
+
+def test_multi_project_plain_renderer_includes_snapshot_and_project_reports() -> None:
+    output = render.render_plain(
+        MultiProjectReport(
+            engine="python",
+            projects=(ProjectReport(name="frontend", report=sample_report(engine="python")),),
+            snapshot_rows=(
+                ProjectSnapshotRow(
+                    name="frontend",
+                    path=Path("frontend"),
+                    engine="python",
+                    files=3,
+                    code=35,
+                    source_code=20,
+                    test_code=10,
+                ),
+            ),
+            skipped_projects=(
+                SkippedProject(
+                    name="docs",
+                    path=Path("docs"),
+                    reason="missing optional project path",
+                ),
+            ),
+        )
+    )
+
+    assert "Slopscope Projects" in output
+    assert "Project Snapshot" in output
+    assert "frontend" in output
+    assert "Skipped Projects" in output
+    assert "Project: frontend" in output
+    assert "Slopscope Report" in output
+
+
+def test_multi_project_json_renderer_emits_stable_report_data() -> None:
+    output = render.render_json(
+        MultiProjectReport(
+            engine="python",
+            projects=(ProjectReport(name="frontend", report=sample_report(engine="python")),),
+            snapshot_rows=(
+                ProjectSnapshotRow(
+                    name="frontend",
+                    path=Path("frontend"),
+                    engine="python",
+                    files=3,
+                    code=35,
+                    source_code=20,
+                    test_code=10,
+                ),
+            ),
+            skipped_projects=(
+                SkippedProject(
+                    name="docs",
+                    path=Path("docs"),
+                    reason="missing optional project path",
+                ),
+            ),
+        )
+    )
+
+    assert json.loads(output) == {
+        "engine": "python",
+        "projects": [
+            {
+                "name": "frontend",
+                "path": ".",
+                "report": {
+                    "engine": "python",
+                    "path": ".",
+                    "language_rows": [
+                        {
+                            "language": "Python",
+                            "files": 2,
+                            "blank": 1,
+                            "comment": 2,
+                            "code": 30,
+                        },
+                        {
+                            "language": "Markdown",
+                            "files": 1,
+                            "blank": 0,
+                            "comment": 0,
+                            "code": 5,
+                        },
+                        {
+                            "language": "SUM",
+                            "files": 3,
+                            "blank": 1,
+                            "comment": 2,
+                            "code": 35,
+                        },
+                    ],
+                    "source_test_summary": {
+                        "source_files": 1,
+                        "source_code": 20,
+                        "test_files": 1,
+                        "test_code": 10,
+                    },
+                    "area_rows": [
+                        {"name": "src", "files": 1, "code": 20},
+                        {"name": "tests", "files": 1, "code": 10},
+                        {"name": "docs", "files": 1, "code": 5},
+                    ],
+                    "directory_rows": [
+                        {"name": "src/slopscope", "files": 1, "code": 20},
+                        {"name": "tests", "files": 1, "code": 10},
+                        {"name": ".", "files": 1, "code": 5},
+                    ],
+                },
+            }
+        ],
+        "snapshot_rows": [
+            {
+                "name": "frontend",
+                "path": "frontend",
+                "engine": "python",
+                "files": 3,
+                "code": 35,
+                "source_code": 20,
+                "test_code": 10,
+            }
+        ],
+        "skipped_projects": [
+            {
+                "name": "docs",
+                "path": "docs",
+                "reason": "missing optional project path",
+            }
+        ],
     }
 
 
@@ -177,6 +313,35 @@ def test_rich_renderer_falls_back_to_plain_when_rich_is_unavailable(
 
 def test_rich_renderer_uses_plain_output_when_color_is_disabled() -> None:
     assert render.render_rich(sample_report(), color=False) == render.render_plain(sample_report())
+
+
+def test_multi_project_rich_renderer_falls_back_to_plain_when_rich_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_import_module(name: str) -> object:
+        if name.startswith("rich."):
+            raise ImportError(name)
+        raise AssertionError(name)
+
+    report = MultiProjectReport(
+        engine="python",
+        projects=(ProjectReport(name="frontend", report=sample_report(engine="python")),),
+        snapshot_rows=(
+            ProjectSnapshotRow(
+                name="frontend",
+                path=Path("frontend"),
+                engine="python",
+                files=3,
+                code=35,
+                source_code=20,
+                test_code=10,
+            ),
+        ),
+        skipped_projects=(),
+    )
+    monkeypatch.setattr("slopscope.render.importlib.import_module", fake_import_module)
+
+    assert render.render_rich(report) == render.render_plain(report)
 
 
 def test_rich_renderer_can_use_imported_rich_modules(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,7 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Implement `--project NAME`, `--project all`, and multi-project rendering.
 - [ ] Add fixture coverage for standard Python, infrastructure, grouped, multi-project, and desktop-style layouts.
 
 ## Done
@@ -38,6 +37,10 @@ repository shapes and product behavior, not private source projects.
 - [x] Support physical-line profile totals for compatibility with `wc -l`-style recipes.
 - [x] Support grouped top-N profiles.
 - [x] Support `--top N` overrides for grouped profiles.
+- [x] Implement `--project NAME`, repeatable `--project`, and `--project all`.
+- [x] Render multi-project workspace snapshots and per-project default reports.
+- [x] Add multi-project JSON output with skipped optional projects.
+- [x] Skip optional missing projects and fail required missing projects.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

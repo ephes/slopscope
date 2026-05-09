@@ -72,8 +72,8 @@ A profile such as `group_by = "roles/*"` displays groups as `roles/<name>`. Use 
 
 ## Multi-Project Workspace
 
-Multi-project selection is planned but not implemented yet. The configuration can be added and validated now, while
-the commands below remain future behavior.
+Configured multi-project selection can replace workspace-level recipes that shell out to several project-local line
+count commands.
 
 ```just
 loc:
@@ -85,6 +85,18 @@ loc-frontend:
 loc-backend:
     uv run slopscope --project backend
 ```
+
+Use `optional = true` for projects that are not always checked out. Missing optional projects are reported on stderr
+and included in JSON output as skipped projects. Missing required projects fail the command.
+
+`--project all` runs configured projects in config order. Repeated named selections are also supported:
+
+```just
+loc-apps:
+    uv run slopscope --project frontend --project backend
+```
+
+Project-specific profiles are not implemented yet; keep profile commands separate from workspace project reports.
 
 ## Migration Checklist
 

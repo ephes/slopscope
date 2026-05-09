@@ -7,7 +7,7 @@ This project is not published yet. The repository now contains the initial insta
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
 physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
 summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, and configured profile execution for
-YAML totals and grouped top-N reports.
+YAML totals and grouped top-N reports, plus configured multi-project workspace reports.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -28,11 +28,13 @@ reusable Python CLI that can be added as a development dependency.
 - YAML-only total profiles with `--total-only` integer output.
 - Physical-line profile totals for compatibility with `wc -l`-style recipes.
 - Grouped top-N profile reports for path patterns such as `roles/*`.
+- Multi-project workspace reports from `[tool.slopscope.projects]`.
+- Optional project skipping for missing configured projects.
 - JSON output for future CI or badge integrations.
 
 ## Planned Features
 
-- Multi-project workspace reports.
+- Persistent metrics and trend storage.
 
 ## Usage
 
@@ -45,6 +47,9 @@ uv run slopscope --format plain
 uv run slopscope --format json
 uv run slopscope --no-color
 uv run slopscope --config path/to/pyproject.toml
+uv run slopscope --project frontend
+uv run slopscope --project frontend --project backend
+uv run slopscope --project all
 uv run slopscope --profile yaml --total-only
 uv run slopscope --profile roles --top 20
 ```
@@ -81,8 +86,18 @@ Current single-repository configuration supports:
 - `areas`
 - `nested_bucket_dirs`
 
-Configured `profiles` can now be selected with `--profile NAME`. Configured `projects` are parsed and validated, but
-selecting or executing projects is planned for a later phase.
+Configured `profiles` can be selected with `--profile NAME`. Configured `projects` can be selected with
+`--project NAME`, repeated as needed, or `--project all`.
+
+Project execution supports:
+
+- paths resolved relative to the configuration file
+- top-level filters and classification settings applied to each project
+- multi-project plain, Rich, and JSON output
+- optional missing projects skipped with a concise stderr notice
+- required missing projects failing clearly with a non-zero exit
+
+`--project` and `--profile` cannot be combined in the current implementation.
 
 Profile execution supports:
 
@@ -122,7 +137,8 @@ This repository is in early implementation. The completed slices are intentional
 scripts, `cloc` availability detection, language-summary and file-summary CSV parsing, fallback file discovery,
 fallback language mapping, physical-line counting, internal aggregation for source/test, area, and directory
 summaries, plain/Rich/JSON rendering for the default single-repository report, and configuration loading for that
-report plus named profile execution for YAML totals and grouped top-N reports. See:
+report plus named profile execution for YAML totals and grouped top-N reports, and configured multi-project
+workspace reports. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)

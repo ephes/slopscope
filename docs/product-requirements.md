@@ -151,6 +151,9 @@ Multi-project report sections:
 1. Project snapshot with files, code lines, and tests/source ratio
 2. Per-project default report
 
+In the current multi-project slice, `--project NAME` is repeatable, `--project all` selects all configured projects
+in config order, and `--project` cannot be combined with `--profile`.
+
 YAML total profile:
 
 - Must support output compatible with simple `just yaml-lines` recipes: a single number.
@@ -220,6 +223,10 @@ JSON output should expose the same data model as the rendered reports:
 - area rows
 - directory rows
 - skipped optional projects
+
+For multi-project reports, JSON includes top-level `engine`, `projects`, `snapshot_rows`, and `skipped_projects`
+keys. Each project item contains `name`, `path`, and the normal single-repository `report` object. Existing
+single-repository and profile JSON shapes remain unchanged.
 
 ## Acceptance Criteria
 

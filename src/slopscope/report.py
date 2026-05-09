@@ -102,6 +102,46 @@ class GroupedProfileReport:
 
 
 @dataclass(frozen=True)
+class ProjectSnapshotRow:
+    """One row in a multi-project snapshot."""
+
+    name: str
+    path: Path
+    engine: str
+    files: int
+    code: int
+    source_code: int
+    test_code: int
+
+
+@dataclass(frozen=True)
+class SkippedProject:
+    """Configured project skipped during multi-project execution."""
+
+    name: str
+    path: Path
+    reason: str
+
+
+@dataclass(frozen=True)
+class ProjectReport:
+    """A named project and its default repository report."""
+
+    name: str
+    report: RepositoryReport
+
+
+@dataclass(frozen=True)
+class MultiProjectReport:
+    """Complete multi-project workspace report data."""
+
+    engine: str
+    projects: tuple[ProjectReport, ...]
+    snapshot_rows: tuple[ProjectSnapshotRow, ...]
+    skipped_projects: tuple[SkippedProject, ...]
+
+
+@dataclass(frozen=True)
 class LanguageSummaryReport:
     """Language-summary report data independent of counting and rendering."""
 

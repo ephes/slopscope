@@ -24,6 +24,10 @@ All notable changes to `slopscope` will be documented here.
 - Add `--total-only` for profile totals, including YAML physical-line totals compatible with `wc -l`-style recipes.
 - Add grouped profile reports for patterns such as `roles/*`, with configured `top` values and `--top N` overrides.
 - Add profile JSON output for total and grouped reports.
+- Execute configured projects with `--project NAME`, repeatable `--project`, and `--project all`.
+- Add multi-project plain, Rich, and JSON reports with project snapshots, per-project default reports, and skipped
+  optional projects.
+- Skip missing optional project paths with a concise stderr notice and fail missing required project paths clearly.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.

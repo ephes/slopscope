@@ -72,11 +72,14 @@ source repositories.
 
 ## Phase 7: Multi-Project Workspaces
 
-- [ ] Implement `--project NAME`.
-- [ ] Implement `--project all`.
-- [ ] Render multi-project snapshot.
-- [ ] Skip optional missing projects with a concise notice.
-- [ ] Fail required missing projects.
+- [x] Implement `--project NAME`.
+- [x] Implement repeatable project selection.
+- [x] Implement `--project all`.
+- [x] Render multi-project snapshot.
+- [x] Render per-project default reports.
+- [x] Add multi-project JSON output with skipped optional projects.
+- [x] Skip optional missing projects with a concise notice.
+- [x] Fail required missing projects.
 
 ## Phase 8: Migration Fixtures
 

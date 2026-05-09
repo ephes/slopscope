@@ -4,9 +4,8 @@
 non-standard source or test layouts, multiple projects, or special line-count profiles can configure behavior in
 `pyproject.toml`.
 
-The current implementation loads `[tool.slopscope]` for the default single-repository report and executes configured
-named profiles. It also parses and validates configured projects so that section is ready for later phases, but it
-does not yet execute `--project` or multi-project reports.
+The current implementation loads `[tool.slopscope]` for the default single-repository report, executes configured
+named profiles, and executes configured projects for multi-project workspace reports.
 
 ## No Configuration
 
@@ -80,16 +79,28 @@ path = "../backend"
 optional = true
 ```
 
-Expected commands:
+Available commands:
 
 ```bash
 slopscope --project all
 slopscope --project frontend
 slopscope --project backend
+slopscope --project frontend --project backend
 ```
 
-These commands are planned for the multi-project phase. Today, project entries are validated only. Project paths are
-resolved relative to the configuration file, and `optional = true` is accepted as config data.
+Project paths are resolved relative to the configuration file. `--project all` runs configured projects in config
+order. Repeated `--project NAME` selections also render in config order, and duplicate explicit selections are a
+usage error. `--project all` cannot be mixed with named project selections.
+
+Top-level filters and classification fields apply to every selected project. Project-specific overrides are not
+implemented yet.
+
+Required project paths must exist. Missing required projects fail with a `slopscope:` error and a non-zero exit.
+Missing optional projects are skipped with a concise stderr notice and appear in JSON output under
+`skipped_projects`. If all selected projects are optional and missing, `slopscope` still renders a successful
+multi-project report with no project rows and the skipped project list.
+
+`--project` cannot be combined with `--profile` in the current implementation.
 
 ## YAML Total Profile
 
@@ -181,9 +192,9 @@ exclude_dirs = [
 ## Notes
 
 - Project paths are resolved relative to the configuration file.
-- The positional path remains the repository inspected by the default single-repository report; configured projects
-  are not selected automatically.
-- Optional project skipping and required project failures are planned for the multi-project phase.
+- The positional path remains the repository inspected by the default single-repository report and the location used
+  for default config discovery when `--config` is not supplied. Configured projects are selected only when
+  `--project` is supplied.
 - Language filtering is applied to parsed `cloc` rows and to fallback file mappings. For profiles, non-empty profile
   language filters replace top-level language filters. If a profile leaves a language filter empty, the matching
   top-level filter is used.

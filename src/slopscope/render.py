@@ -13,12 +13,15 @@ from slopscope.report import (
     GroupedProfileReport,
     GroupedRow,
     LanguageRow,
+    MultiProjectReport,
     ProfileTotalReport,
+    ProjectSnapshotRow,
     RepositoryReport,
+    SkippedProject,
 )
 
 OutputFormat = Literal["rich", "plain", "json"]
-RenderableReport = RepositoryReport | ProfileTotalReport | GroupedProfileReport
+RenderableReport = RepositoryReport | ProfileTotalReport | GroupedProfileReport | MultiProjectReport
 
 
 def _is_profile_report(report: RenderableReport) -> bool:
@@ -47,6 +50,8 @@ def render_plain(report: RenderableReport) -> str:
         return render_profile_total_plain(report)
     if isinstance(report, GroupedProfileReport):
         return render_grouped_profile_plain(report)
+    if isinstance(report, MultiProjectReport):
+        return render_multi_project_plain(report)
 
     lines = [
         "Slopscope Report",
@@ -89,8 +94,31 @@ def render_json(report: RenderableReport) -> str:
             "rows": [_grouped_row_to_dict(row) for row in report.rows],
         }
         return json.dumps(payload, indent=2, sort_keys=False) + "\n"
+    if isinstance(report, MultiProjectReport):
+        payload = {
+            "engine": report.engine,
+            "projects": [
+                {
+                    "name": project_report.name,
+                    "path": str(project_report.report.path),
+                    "report": _repository_report_to_dict(project_report.report),
+                }
+                for project_report in report.projects
+            ],
+            "snapshot_rows": [_project_snapshot_row_to_dict(row) for row in report.snapshot_rows],
+            "skipped_projects": [
+                _skipped_project_to_dict(skipped_project)
+                for skipped_project in report.skipped_projects
+            ],
+        }
+        return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
-    payload = {
+    payload = _repository_report_to_dict(report)
+    return json.dumps(payload, indent=2, sort_keys=False) + "\n"
+
+
+def _repository_report_to_dict(report: RepositoryReport) -> dict[str, Any]:
+    return {
         "engine": report.engine,
         "path": str(report.path),
         "language_rows": [_language_row_to_dict(row) for row in report.language_rows],
@@ -103,7 +131,6 @@ def render_json(report: RenderableReport) -> str:
         "area_rows": [_named_row_to_dict(row) for row in report.area_rows],
         "directory_rows": [_named_row_to_dict(row) for row in report.directory_rows],
     }
-    return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
 
 def render_rich(report: RenderableReport, *, color: bool = True) -> str:
@@ -126,10 +153,26 @@ def render_rich(report: RenderableReport, *, color: bool = True) -> str:
         legacy_windows=False,
     )
 
-    title = "Slopscope Profile" if _is_profile_report(report) else "Slopscope Report"
+    if isinstance(report, MultiProjectReport):
+        title = "Slopscope Projects"
+    else:
+        title = "Slopscope Profile" if _is_profile_report(report) else "Slopscope Report"
     console.print(text_class(title, style="bold blue"))
-    console.print(text_class(f"Path: {report.path}", style="dim"))
     console.print(text_class(f"Engine: {_engine_label(report.engine)}", style="dim"))
+    if isinstance(report, MultiProjectReport):
+        console.print()
+        _print_rich_project_snapshot(console, table_class, report.snapshot_rows)
+        if report.skipped_projects:
+            console.print()
+            _print_rich_skipped_projects(console, table_class, report.skipped_projects)
+        for project_report in report.projects:
+            console.print()
+            console.print(text_class(f"Project: {project_report.name}", style="bold blue"))
+            console.print(text_class(f"Path: {project_report.report.path}", style="dim"))
+            _print_rich_repository_sections(console, table_class, project_report.report)
+        return buffer.getvalue()
+
+    console.print(text_class(f"Path: {report.path}", style="dim"))
     if isinstance(report, ProfileTotalReport):
         console.print(text_class(f"Profile: {report.profile}", style="dim"))
         console.print(text_class(f"Total: {report.total}", style="green"))
@@ -143,20 +186,7 @@ def render_rich(report: RenderableReport, *, color: bool = True) -> str:
         _print_rich_grouped_rows(console, table_class, report.rows)
         return buffer.getvalue()
 
-    console.print()
-    _print_rich_language_summary(console, table_class, report.language_rows)
-    console.print()
-    _print_rich_source_tests(console, table_class, report)
-    console.print()
-    _print_rich_named_rows(console, table_class, "Repository Areas", "Area", report.area_rows)
-    console.print()
-    _print_rich_named_rows(
-        console,
-        table_class,
-        "Directory Buckets",
-        "Directory",
-        report.directory_rows,
-    )
+    _print_rich_repository_sections(console, table_class, report)
     return buffer.getvalue()
 
 
@@ -189,6 +219,30 @@ def render_grouped_profile_plain(report: GroupedProfileReport) -> str:
         "",
     ]
     lines.extend(_render_grouped_rows(report.rows))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_multi_project_plain(report: MultiProjectReport) -> str:
+    """Render a multi-project report as deterministic plain text."""
+
+    lines = [
+        "Slopscope Projects",
+        f"Engine: {_engine_label(report.engine)}",
+        "",
+    ]
+    lines.extend(_render_project_snapshot(report.snapshot_rows))
+    if report.skipped_projects:
+        lines.append("")
+        lines.extend(_render_skipped_projects(report.skipped_projects))
+    lines.append("")
+    lines.append("Per-Project Reports")
+    if not report.projects:
+        lines.append("(no project reports)")
+    for project_report in report.projects:
+        lines.append("")
+        lines.append(f"Project: {project_report.name}")
+        lines.append(render_plain(project_report.report).rstrip())
     lines.append("")
     return "\n".join(lines)
 
@@ -262,6 +316,38 @@ def _render_grouped_rows(rows: tuple[GroupedRow, ...]) -> list[str]:
     return lines
 
 
+def _render_project_snapshot(rows: tuple[ProjectSnapshotRow, ...]) -> list[str]:
+    lines = [
+        "Project Snapshot",
+        f"{'Project':<16} {'Files':>5} {'Code':>8} {'Source':>8} {'Tests':>8} {'Test Share':>10}",
+        "-----------------------------------------------------------------",
+    ]
+    if not rows:
+        lines.append("(no project rows)")
+        return lines
+
+    for row in rows:
+        total = row.source_code + row.test_code
+        lines.append(
+            f"{row.name:<16} {row.files:>5} {row.code:>8} "
+            f"{row.source_code:>8} {row.test_code:>8} {_percent(row.test_code, total):>10}"
+        )
+        lines.append(f"  Path: {row.path}")
+        lines.append(f"  Engine: {_engine_label(row.engine)}")
+    return lines
+
+
+def _render_skipped_projects(rows: tuple[SkippedProject, ...]) -> list[str]:
+    lines = [
+        "Skipped Projects",
+        f"{'Project':<16} {'Reason':<32} Path",
+        "-----------------------------------------------------------------",
+    ]
+    for row in rows:
+        lines.append(f"{row.name:<16} {row.reason:<32} {row.path}")
+    return lines
+
+
 def _source_test_line(label: str, files: int, code: int, total: int) -> str:
     return f"{label:<16} {files:>5} {code:>8} {_percent(code, total):>7}"
 
@@ -304,6 +390,26 @@ def _grouped_row_to_dict(row: GroupedRow) -> dict[str, int | str]:
     }
 
 
+def _project_snapshot_row_to_dict(row: ProjectSnapshotRow) -> dict[str, int | str]:
+    return {
+        "name": row.name,
+        "path": str(row.path),
+        "engine": row.engine,
+        "files": row.files,
+        "code": row.code,
+        "source_code": row.source_code,
+        "test_code": row.test_code,
+    }
+
+
+def _skipped_project_to_dict(row: SkippedProject) -> dict[str, str]:
+    return {
+        "name": row.name,
+        "path": str(row.path),
+        "reason": row.reason,
+    }
+
+
 def _top_label(top: int | None) -> str:
     if top is None:
         return "all"
@@ -343,6 +449,73 @@ def _print_rich_language_summary(
             )
     else:
         table.add_row("(no language rows)", "", "", "", "")
+
+    console.print(table)
+
+
+def _print_rich_repository_sections(
+    console: Any,
+    table_class: Any,
+    report: RepositoryReport,
+) -> None:
+    console.print()
+    _print_rich_language_summary(console, table_class, report.language_rows)
+    console.print()
+    _print_rich_source_tests(console, table_class, report)
+    console.print()
+    _print_rich_named_rows(console, table_class, "Repository Areas", "Area", report.area_rows)
+    console.print()
+    _print_rich_named_rows(
+        console,
+        table_class,
+        "Directory Buckets",
+        "Directory",
+        report.directory_rows,
+    )
+
+
+def _print_rich_project_snapshot(
+    console: Any,
+    table_class: Any,
+    rows: tuple[ProjectSnapshotRow, ...],
+) -> None:
+    table = table_class(title="Project Snapshot", title_style="bold blue")
+    table.add_column("Project", style="cyan")
+    table.add_column("Files", justify="right", style="magenta")
+    table.add_column("Code", justify="right", style="green")
+    table.add_column("Source", justify="right", style="green")
+    table.add_column("Tests", justify="right", style="green")
+    table.add_column("Test Share", justify="right")
+
+    if rows:
+        for row in rows:
+            total = row.source_code + row.test_code
+            table.add_row(
+                row.name,
+                str(row.files),
+                str(row.code),
+                str(row.source_code),
+                str(row.test_code),
+                _percent(row.test_code, total),
+            )
+    else:
+        table.add_row("(no project rows)", "", "", "", "", "")
+
+    console.print(table)
+
+
+def _print_rich_skipped_projects(
+    console: Any,
+    table_class: Any,
+    rows: tuple[SkippedProject, ...],
+) -> None:
+    table = table_class(title="Skipped Projects", title_style="bold blue")
+    table.add_column("Project", style="cyan")
+    table.add_column("Reason")
+    table.add_column("Path")
+
+    for row in rows:
+        table.add_row(row.name, row.reason, str(row.path))
 
     console.print(table)
 

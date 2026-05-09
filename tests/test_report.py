@@ -9,7 +9,11 @@ from slopscope.report import (
     FileRow,
     LanguageRow,
     LanguageSummaryReport,
+    MultiProjectReport,
+    ProjectReport,
+    ProjectSnapshotRow,
     RepositoryReport,
+    SkippedProject,
     SourceTestSummary,
 )
 
@@ -90,3 +94,45 @@ def test_repository_report_from_reports_combines_language_and_aggregates() -> No
     assert report.source_test_summary.source_code == 10
     assert report.area_rows == aggregate_report.area_rows
     assert report.directory_rows == aggregate_report.directory_rows
+
+
+def test_multi_project_report_keeps_project_snapshot_and_skips() -> None:
+    repository_report = RepositoryReport(
+        engine="python",
+        path=Path("frontend"),
+        language_rows=(),
+        source_test_summary=SourceTestSummary(
+            source_files=0,
+            source_code=0,
+            test_files=0,
+            test_code=0,
+        ),
+        area_rows=(),
+        directory_rows=(),
+    )
+    project_report = ProjectReport(name="frontend", report=repository_report)
+    snapshot_row = ProjectSnapshotRow(
+        name="frontend",
+        path=Path("frontend"),
+        engine="python",
+        files=0,
+        code=0,
+        source_code=0,
+        test_code=0,
+    )
+    skipped_project = SkippedProject(
+        name="docs",
+        path=Path("docs"),
+        reason="missing optional project path",
+    )
+
+    report = MultiProjectReport(
+        engine="python",
+        projects=(project_report,),
+        snapshot_rows=(snapshot_row,),
+        skipped_projects=(skipped_project,),
+    )
+
+    assert report.projects == (project_report,)
+    assert report.snapshot_rows == (snapshot_row,)
+    assert report.skipped_projects == (skipped_project,)

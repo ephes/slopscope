@@ -47,9 +47,696 @@ def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cli_help_includes_profile_options() -> None:
     help_text = cli.build_parser().format_help()
 
+    assert "--project NAME" in help_text
     assert "--profile NAME" in help_text
     assert "--total-only" in help_text
     assert "--top N" in help_text
+
+
+def test_cli_project_name_selects_configured_project_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+    seen_paths: list[Path] = []
+
+    def fake_build_file_rows(path: Path | str, **_kwargs: object) -> list[FileRow]:
+        seen_paths.append(Path(path))
+        return [FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=4)]
+
+    monkeypatch.setattr("slopscope.cli.fallback.build_file_rows", fake_build_file_rows)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "frontend",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert seen_paths == [frontend.resolve()]
+    assert data["projects"][0]["name"] == "frontend"
+    assert data["snapshot_rows"][0]["code"] == 4
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_all_selects_all_configured_projects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    backend = tmp_path / "backend"
+    frontend.mkdir()
+    backend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.projects]]
+name = "backend"
+path = "backend"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def fake_build_file_rows(path: Path | str, **_kwargs: object) -> list[FileRow]:
+        name = Path(path).name
+        code = 4 if name == "frontend" else 6
+        return [FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=code)]
+
+    monkeypatch.setattr("slopscope.cli.fallback.build_file_rows", fake_build_file_rows)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "all",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert [project["name"] for project in data["projects"]] == ["frontend", "backend"]
+    assert [row["code"] for row in data["snapshot_rows"]] == [4, 6]
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_repeatable_selection_uses_config_order(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    backend = tmp_path / "backend"
+    docs = tmp_path / "docs"
+    frontend.mkdir()
+    backend.mkdir()
+    docs.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.projects]]
+name = "backend"
+path = "backend"
+
+[[tool.slopscope.projects]]
+name = "docs"
+path = "docs"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_file_rows",
+        lambda _path, **_kwargs: [
+            FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=4)
+        ],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "docs",
+            "--project",
+            "frontend",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert [project["name"] for project in data["projects"]] == ["frontend", "docs"]
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_unknown_name_returns_usage_error(tmp_path: Path) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--config", str(config_path), "--project", "backend", "--engine", "python"],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: no configured project named 'backend'" in stderr.getvalue()
+
+
+def test_cli_project_without_configured_projects_returns_usage_error(tmp_path: Path) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--project", "frontend", "--engine", "python", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: no configured project named 'frontend'" in stderr.getvalue()
+
+
+def test_cli_project_required_missing_path_fails(tmp_path: Path) -> None:
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "backend"
+path = "backend"
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--config", str(config_path), "--project", "backend", "--engine", "python"],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: project backend path not found:" in stderr.getvalue()
+
+
+def test_cli_project_optional_missing_path_is_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.projects]]
+name = "docs"
+path = "docs"
+optional = true
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_file_rows",
+        lambda _path, **_kwargs: [
+            FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=4)
+        ],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "all",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert [project["name"] for project in data["projects"]] == ["frontend"]
+    assert data["skipped_projects"] == [
+        {
+            "name": "docs",
+            "path": str((tmp_path / "docs").resolve()),
+            "reason": "missing optional project path",
+        }
+    ]
+    assert "slopscope: skipping optional project docs:" in stderr.getvalue()
+
+
+def test_cli_project_all_optional_missing_paths_render_json_success(tmp_path: Path) -> None:
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "docs"
+path = "docs"
+optional = true
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "all",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert data["projects"] == []
+    assert data["snapshot_rows"] == []
+    assert data["skipped_projects"] == [
+        {
+            "name": "docs",
+            "path": str((tmp_path / "docs").resolve()),
+            "reason": "missing optional project path",
+        }
+    ]
+    assert "slopscope: skipping optional project docs:" in stderr.getvalue()
+
+
+def test_cli_project_with_profile_is_usage_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.profiles]]
+name = "yaml"
+include_languages = ["YAML"]
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--config", str(config_path), "--project", "frontend", "--profile", "yaml"],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "slopscope: --project cannot be combined with --profile" in stderr.getvalue()
+
+
+def test_cli_project_plain_output_includes_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_file_rows",
+        lambda _path, **_kwargs: [
+            FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=4)
+        ],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "frontend",
+            "--engine",
+            "python",
+            "--format",
+            "plain",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    output = stdout.getvalue()
+    assert exit_code == 0
+    assert "Slopscope Projects" in output
+    assert "Project Snapshot" in output
+    assert "Per-Project Reports" in output
+    assert "Project: frontend" in output
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_cloc_engine_uses_cloc_for_each_project(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    backend = tmp_path / "backend"
+    frontend.mkdir()
+    backend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.projects]]
+name = "backend"
+path = "backend"
+""".strip(),
+        encoding="utf-8",
+    )
+    language_calls: list[Path] = []
+    file_calls: list[Path] = []
+
+    def fake_run_language_summary(path: Path | str) -> cloc.ClocResult:
+        language_calls.append(Path(path))
+        return cloc.ClocResult(
+            returncode=0,
+            stdout="language,filename,blank,comment,code\nPython,1,0,0,10\nSUM,1,0,0,10\n",
+            stderr="",
+        )
+
+    def fake_run_file_summary(path: Path | str) -> cloc.ClocResult:
+        file_calls.append(Path(path))
+        return cloc.ClocResult(
+            returncode=0,
+            stdout="language,filename,blank,comment,code\nPython,src/app.py,0,0,10\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
+    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
+    monkeypatch.setattr("slopscope.cli.cloc.run_file_summary", fake_run_file_summary)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "all",
+            "--engine",
+            "cloc",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    assert language_calls == [frontend.resolve(), backend.resolve()]
+    assert file_calls == [frontend.resolve(), backend.resolve()]
+    assert json.loads(stdout.getvalue())["engine"] == "cloc"
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_cloc_engine_fails_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: False)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--config", str(config_path), "--project", "frontend", "--engine", "cloc"],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 2
+    assert stdout.getvalue() == ""
+    assert "cloc engine requested, but cloc was not found" in stderr.getvalue()
+
+
+def test_cli_project_cloc_failure_includes_project_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    backend = tmp_path / "backend"
+    frontend.mkdir()
+    backend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+
+[[tool.slopscope.projects]]
+name = "backend"
+path = "backend"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def fake_run_language_summary(path: Path | str) -> cloc.ClocResult:
+        if Path(path).name == "backend":
+            return cloc.ClocResult(returncode=7, stdout="", stderr="cloc exploded\n")
+        return cloc.ClocResult(
+            returncode=0,
+            stdout="language,filename,blank,comment,code\nPython,1,0,0,10\nSUM,1,0,0,10\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
+    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
+    monkeypatch.setattr(
+        "slopscope.cli.cloc.run_file_summary",
+        lambda _path: cloc.ClocResult(
+            returncode=0,
+            stdout="language,filename,blank,comment,code\nPython,src/app.py,0,0,10\n",
+            stderr="",
+        ),
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "all",
+            "--engine",
+            "cloc",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 7
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "cloc exploded\nslopscope: project backend failed\n"
+
+
+def test_cli_project_auto_falls_back_to_python_when_cloc_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: False)
+    monkeypatch.setattr(
+        "slopscope.cli.fallback.build_file_rows",
+        lambda _path, **_kwargs: [
+            FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=4)
+        ],
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        ["--config", str(config_path), "--project", "frontend", "--format", "json"],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    data = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert data["engine"] == "python"
+    assert data["projects"][0]["report"]["engine"] == "python"
+    assert stderr.getvalue() == ""
+
+
+def test_cli_project_top_level_classification_applies_to_each_project(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "slopscope.fallback.run_git_ls_files",
+        lambda _path: fallback.GitLsFilesResult(returncode=128, stdout=b""),
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "pkg").mkdir()
+    (app / "checks").mkdir()
+    (app / "pkg" / "main.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (app / "checks" / "test_main.py").write_text("one\ntwo\n", encoding="utf-8")
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+source_dirs = ["pkg"]
+test_dirs = ["checks"]
+areas = ["pkg", "checks"]
+include_languages = ["Python"]
+
+[[tool.slopscope.projects]]
+name = "app"
+path = "app"
+""".strip(),
+        encoding="utf-8",
+    )
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "app",
+            "--engine",
+            "python",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    summary = json.loads(stdout.getvalue())["projects"][0]["report"]["source_test_summary"]
+    assert exit_code == 0
+    assert summary == {
+        "source_files": 1,
+        "source_code": 3,
+        "test_files": 1,
+        "test_code": 2,
+    }
+    assert stderr.getvalue() == ""
 
 
 def test_cli_missing_profile_returns_usage_error(tmp_path: Path) -> None:

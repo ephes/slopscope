@@ -10,11 +10,13 @@ from typing import TextIO
 
 from slopscope import classify, cloc, fallback, profile, render
 from slopscope import config as config_module
+from slopscope import project as project_module
 from slopscope.report import (
     FileAggregateReport,
     FileRow,
     LanguageRow,
     LanguageSummaryReport,
+    ProjectReport,
     RepositoryReport,
 )
 
@@ -56,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         metavar="NAME",
         help="Run the configured profile named NAME.",
+    )
+    parser.add_argument(
+        "--project",
+        metavar="NAME",
+        action="append",
+        help="Run the configured project named NAME. Repeatable; use 'all' for every project.",
     )
     parser.add_argument(
         "--total-only",
@@ -103,6 +111,10 @@ def run(
         print("slopscope: --total-only requires --profile", file=err)
         return 2
 
+    if args.project is not None and args.profile is not None:
+        print("slopscope: --project cannot be combined with --profile", file=err)
+        return 2
+
     if args.profile is not None:
         return _run_profile(
             args=args,
@@ -112,17 +124,27 @@ def run(
             err=err,
         )
 
-    if args.engine == "cloc" and not cloc.is_cloc_available():
-        print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
-        return 2
+    engine = _select_engine(args.engine, err)
+    if isinstance(engine, int):
+        return engine
 
-    if args.engine == "python" or (args.engine == "auto" and not cloc.is_cloc_available()):
-        report = _build_python_report(selected_path, slopscope_config)
-    else:
-        cloc_report = _build_cloc_report(selected_path, err, slopscope_config)
-        if isinstance(cloc_report, int):
-            return cloc_report
-        report = cloc_report
+    if args.project is not None:
+        return _run_projects(
+            args=args,
+            engine=engine,
+            slopscope_config=slopscope_config,
+            out=out,
+            err=err,
+        )
+
+    report = _build_repository_report(
+        path=selected_path,
+        engine=engine,
+        err=err,
+        slopscope_config=slopscope_config,
+    )
+    if isinstance(report, int):
+        return report
 
     out.write(
         render.render_report(
@@ -132,6 +154,84 @@ def run(
         )
     )
     return 0
+
+
+def _select_engine(requested_engine: str, err: TextIO) -> str | int:
+    if requested_engine == "python":
+        return "python"
+
+    cloc_available = cloc.is_cloc_available()
+    if requested_engine == "cloc" and not cloc_available:
+        print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
+        return 2
+
+    if requested_engine == "auto" and not cloc_available:
+        return "python"
+    return "cloc"
+
+
+def _run_projects(
+    *,
+    args: argparse.Namespace,
+    engine: str,
+    slopscope_config: config_module.SlopscopeConfig,
+    out: TextIO,
+    err: TextIO,
+) -> int:
+    try:
+        selected_projects = project_module.select_projects(slopscope_config, args.project)
+        existing_projects, skipped_projects = project_module.partition_existing_projects(
+            selected_projects
+        )
+    except project_module.ProjectError as exc:
+        print(f"slopscope: {exc}", file=err)
+        return 2
+
+    for skipped_project in skipped_projects:
+        print(
+            f"slopscope: skipping optional project {skipped_project.name}: "
+            f"{skipped_project.path} not found",
+            file=err,
+        )
+
+    project_reports: list[ProjectReport] = []
+    for configured_project in existing_projects:
+        report = _build_repository_report(
+            path=configured_project.path,
+            engine=engine,
+            err=err,
+            slopscope_config=slopscope_config,
+        )
+        if isinstance(report, int):
+            print(f"slopscope: project {configured_project.name} failed", file=err)
+            return report
+        project_reports.append(ProjectReport(name=configured_project.name, report=report))
+
+    multi_project_report = project_module.build_multi_project_report(
+        engine=engine,
+        project_reports=project_reports,
+        skipped_projects=skipped_projects,
+    )
+    out.write(
+        render.render_report(
+            multi_project_report,
+            output_format=args.format,
+            color=not args.no_color,
+        )
+    )
+    return 0
+
+
+def _build_repository_report(
+    *,
+    path: Path,
+    engine: str,
+    err: TextIO,
+    slopscope_config: config_module.SlopscopeConfig,
+) -> RepositoryReport | int:
+    if engine == "python":
+        return _build_python_report(path, slopscope_config)
+    return _build_cloc_report(path, err, slopscope_config)
 
 
 def _run_profile(
