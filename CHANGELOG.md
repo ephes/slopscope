@@ -28,6 +28,8 @@ All notable changes to `slopscope` will be documented here.
 - Add multi-project plain, Rich, and JSON reports with project snapshots, per-project default reports, and skipped
   optional projects.
 - Skip missing optional project paths with a concise stderr notice and fail missing required project paths clearly.
+- Add synthetic migration fixture coverage for standard Python, Django-style, infrastructure YAML, grouped YAML,
+  multi-project, and desktop-style repository layouts.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.

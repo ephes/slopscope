@@ -85,12 +85,12 @@ source repositories.
 
 Use public fixture repositories or synthetic test fixtures for these shapes:
 
-- [ ] standard Python `src/` + `tests/` package
-- [ ] Django package with Python, templates, docs, and JavaScript
-- [ ] infrastructure repo with YAML-only totals
-- [ ] role-like collection with grouped YAML counts
-- [ ] multi-project frontend/backend workspace
-- [ ] desktop-style repository with generated app shell build artifacts
+- [x] standard Python `src/` + `tests/` package
+- [x] Django package with Python, templates, docs, and JavaScript
+- [x] infrastructure repo with YAML-only totals
+- [x] role-like collection with grouped YAML counts
+- [x] multi-project frontend/backend workspace
+- [x] desktop-style repository with generated app shell build artifacts
 
 ## Phase 9: Release Readiness
 

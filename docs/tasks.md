@@ -5,7 +5,7 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Add fixture coverage for standard Python, infrastructure, grouped, multi-project, and desktop-style layouts.
+No active tasks.
 
 ## Done
 
@@ -41,6 +41,8 @@ repository shapes and product behavior, not private source projects.
 - [x] Render multi-project workspace snapshots and per-project default reports.
 - [x] Add multi-project JSON output with skipped optional projects.
 - [x] Skip optional missing projects and fail required missing projects.
+- [x] Add fixture coverage for standard Python, Django-style, infrastructure, grouped YAML, multi-project, and
+  desktop-style layouts.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.
