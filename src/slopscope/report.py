@@ -31,6 +31,43 @@ class FileRow:
 
 
 @dataclass(frozen=True)
+class SourceTestSummary:
+    """Source and test totals aggregated from file-level count rows."""
+
+    source_files: int
+    source_code: int
+    test_files: int
+    test_code: int
+
+
+@dataclass(frozen=True)
+class AreaRow:
+    """Repository area totals aggregated from file-level count rows."""
+
+    name: str
+    files: int
+    code: int
+
+
+@dataclass(frozen=True)
+class DirectoryRow:
+    """Directory bucket totals aggregated from file-level count rows."""
+
+    name: str
+    files: int
+    code: int
+
+
+@dataclass(frozen=True)
+class FileAggregateReport:
+    """Internal aggregate report data built from file-level count rows."""
+
+    source_tests: SourceTestSummary
+    area_rows: tuple[AreaRow, ...]
+    directory_rows: tuple[DirectoryRow, ...]
+
+
+@dataclass(frozen=True)
 class LanguageSummaryReport:
     """Language-summary report data independent of counting and rendering."""
 

@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from slopscope.report import LanguageRow, LanguageSummaryReport
+from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
 
 DEFAULT_EXCLUDED_PATH_SEGMENTS = frozenset(
     {
@@ -179,17 +179,9 @@ def build_language_summary(path: Path | str) -> LanguageSummaryReport:
     files_by_language: dict[str, int] = {}
     lines_by_language: dict[str, int] = {}
 
-    for relative_path in discover_files(root):
-        language = map_language(relative_path)
-        if language is None:
-            continue
-
-        physical_lines = count_physical_lines(root / relative_path)
-        if physical_lines is None:
-            continue
-
-        files_by_language[language] = files_by_language.get(language, 0) + 1
-        lines_by_language[language] = lines_by_language.get(language, 0) + physical_lines
+    for row in build_file_rows(root):
+        files_by_language[row.language] = files_by_language.get(row.language, 0) + 1
+        lines_by_language[row.language] = lines_by_language.get(row.language, 0) + row.code
 
     rows = [
         LanguageRow(
@@ -215,3 +207,31 @@ def build_language_summary(path: Path | str) -> LanguageSummaryReport:
         path=root,
         language_rows=rows,
     )
+
+
+def build_file_rows(path: Path | str) -> list[FileRow]:
+    """Build fallback file-level rows using physical line counts."""
+
+    root = Path(path)
+    rows: list[FileRow] = []
+
+    for relative_path in discover_files(root):
+        language = map_language(relative_path)
+        if language is None:
+            continue
+
+        physical_lines = count_physical_lines(root / relative_path)
+        if physical_lines is None:
+            continue
+
+        rows.append(
+            FileRow(
+                language=language,
+                path=relative_path.as_posix(),
+                blank=0,
+                comment=0,
+                code=physical_lines,
+            )
+        )
+
+    return rows

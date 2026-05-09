@@ -33,13 +33,13 @@ source repositories.
 
 ## Phase 3: Classification and Aggregation
 
-- [ ] Implement source-vs-tests classification.
-- [ ] Implement area classification.
-- [ ] Implement directory bucketing.
-- [ ] Support configurable source and test directories.
-- [ ] Support configurable named areas.
-- [ ] Support configurable nested buckets such as `shells/<name>`.
-- [ ] Sort output deterministically by lines, files, then name.
+- [x] Implement source-vs-tests classification.
+- [x] Implement area classification.
+- [x] Implement directory bucketing.
+- [x] Support configurable source and test directories.
+- [x] Support configurable named areas.
+- [x] Support configurable nested buckets such as `shells/<name>`.
+- [x] Sort output deterministically by lines, files, then name.
 
 ## Phase 4: Rendering
 

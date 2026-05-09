@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from slopscope import fallback
-from slopscope.report import LanguageRow
+from slopscope.report import FileRow, LanguageRow
 
 
 def test_build_git_ls_files_command() -> None:
@@ -242,3 +242,49 @@ def test_build_language_summary_skips_missing_discovered_files(
     report = fallback.build_language_summary(tmp_path)
 
     assert report.language_rows == ()
+
+
+def test_build_file_rows_uses_mapped_languages_and_physical_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run_git_ls_files(_path: Path | str) -> fallback.GitLsFilesResult:
+        return fallback.GitLsFilesResult(returncode=128, stdout=b"")
+
+    monkeypatch.setattr("slopscope.fallback.run_git_ls_files", fake_run_git_ls_files)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("one\ntwo\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("one\n", encoding="utf-8")
+
+    assert fallback.build_file_rows(tmp_path) == [
+        FileRow(language="Markdown", path="README.md", blank=0, comment=0, code=1),
+        FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=2),
+    ]
+
+
+def test_build_file_rows_skips_unknown_and_missing_or_unreadable_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original_count_physical_lines = fallback.count_physical_lines
+
+    def fake_discover_files(_path: Path | str) -> list[Path]:
+        return [
+            Path("known.py"),
+            Path("unknown.bin"),
+            Path("missing.py"),
+            Path("unreadable.py"),
+        ]
+
+    def fake_count_physical_lines(path: Path | str) -> int | None:
+        if Path(path).name == "unreadable.py":
+            return None
+        return original_count_physical_lines(path)
+
+    monkeypatch.setattr("slopscope.fallback.discover_files", fake_discover_files)
+    monkeypatch.setattr("slopscope.fallback.count_physical_lines", fake_count_physical_lines)
+    (tmp_path / "known.py").write_text("one\n", encoding="utf-8")
+
+    assert fallback.build_file_rows(tmp_path) == [
+        FileRow(language="Python", path="known.py", blank=0, comment=0, code=1),
+    ]

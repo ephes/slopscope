@@ -5,7 +5,6 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Implement path classification for source, tests, docs, examples, scripts, and tooling.
 - [ ] Implement plain text rendering.
 - [ ] Implement Rich rendering.
 - [ ] Implement JSON rendering.
@@ -27,6 +26,9 @@ repository shapes and product behavior, not private source projects.
 - [x] Implement `cloc` file-level parsing for directory/source/test aggregation.
 - [x] Implement fallback file discovery with Git and filesystem traversal.
 - [x] Implement pure-Python fallback language mapping, default excludes, and physical line counts.
+- [x] Implement fallback file-level rows with physical line counts.
+- [x] Implement path classification for source, tests, docs, examples, scripts, specs, and tooling.
+- [x] Implement source/test, area, and directory aggregation over file-level rows.
 - [x] Preserve `SUM` rows from `cloc` language summaries.
 - [x] Surface `cloc` failures with stderr and a non-zero exit.
 - [x] Create public documentation scaffold.

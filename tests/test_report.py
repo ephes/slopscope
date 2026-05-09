@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
+from slopscope.report import (
+    AreaRow,
+    DirectoryRow,
+    FileAggregateReport,
+    FileRow,
+    LanguageRow,
+    LanguageSummaryReport,
+    SourceTestSummary,
+)
 
 
 def test_language_summary_report_from_rows_normalizes_path_and_rows() -> None:
@@ -26,3 +34,26 @@ def test_file_row_keeps_cloc_path_text() -> None:
     row = FileRow(language="Python", path="./src/slopscope/cli.py", blank=2, comment=3, code=40)
 
     assert row.path == "./src/slopscope/cli.py"
+
+
+def test_file_aggregate_report_keeps_aggregate_rows() -> None:
+    report = FileAggregateReport(
+        source_tests=SourceTestSummary(
+            source_files=1,
+            source_code=10,
+            test_files=1,
+            test_code=3,
+        ),
+        area_rows=(
+            AreaRow(name="src", files=1, code=10),
+            AreaRow(name="tests", files=1, code=3),
+        ),
+        directory_rows=(
+            DirectoryRow(name="src/slopscope", files=1, code=10),
+            DirectoryRow(name="tests", files=1, code=3),
+        ),
+    )
+
+    assert report.source_tests.source_code == 10
+    assert report.area_rows[0].name == "src"
+    assert report.directory_rows[1].code == 3

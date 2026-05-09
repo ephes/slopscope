@@ -12,6 +12,8 @@ All notable changes to `slopscope` will be documented here.
 - Add internal pure-Python fallback file discovery using Git file lists or filesystem traversal.
 - Implement pure-Python fallback language summaries with default excludes, filename and suffix language mapping,
   physical-line counting, and explicit physical-line output labeling.
+- Add internal source/test, area, and directory classification plus deterministic aggregation over file-level rows.
+- Add pure-Python fallback file-level rows using mapped languages and physical line counts.
 - Add pytest, Ruff, mypy, and `just` developer commands.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.
