@@ -7,8 +7,6 @@ repository shapes and product behavior, not private source projects.
 
 - [ ] Confirm final pre-release version, package registry, and publishing credentials before publishing.
 - [ ] Publish first pre-release after explicit release-owner approval.
-- [ ] Migrate two more authorized representative repositories before `1.0`, recording only public-safe repository
-  shapes and validation notes.
 
 ## Done
 
@@ -62,6 +60,10 @@ repository shapes and product behavior, not private source projects.
 - [x] Expand the migration guide with prerequisites, validation commands, semantic-difference notes, and public-safe
   representative migration tracking.
 - [x] Document lightweight changelog workflow.
+- [x] Complete the pre-`1.0` representative migration requirement with at least three real authorized migrations,
+  recording only public-safe repository shapes and validation notes.
+- [x] Add small-tooling pre-release consumption evidence for the sibling-checkout `just loc` recipe without counting it
+  as a replacement migration.
 
 ## Later
 

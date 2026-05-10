@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from slopscope import cloc, fallback
+from slopscope import cloc, fallback, paths
 from slopscope import config as config_module
 from slopscope.report import FileRow, GroupedProfileReport, GroupedRow, ProfileTotalReport
 
@@ -135,7 +135,7 @@ def _filter_cloc_file_rows(
 
     rows: list[FileRow] = []
     for row in file_rows:
-        relative_path = _row_filter_path(row.path, root=path)
+        relative_path = paths.row_filter_path(row.path, root=path)
         if include_languages and row.language not in include_languages:
             continue
         if row.language in exclude_languages:
@@ -165,7 +165,7 @@ def _build_grouped_report(
 
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
-        relative_path = _row_filter_path(row.path, root=path)
+        relative_path = paths.row_filter_path(row.path, root=path)
         group_name = _group_name(relative_path, group_by)
         if group_name is None:
             continue
@@ -263,16 +263,6 @@ def _report_engine(
     if selected_profile.physical_lines:
         return "python"
     return engine
-
-
-def _row_filter_path(path: str, *, root: Path) -> Path:
-    file_path = Path(path)
-    if not file_path.is_absolute():
-        return file_path
-    try:
-        return file_path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return file_path
 
 
 def _path_parts(path: Path | str) -> tuple[str, ...]:

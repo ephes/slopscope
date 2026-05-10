@@ -46,3 +46,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   migration tracking before `1.0`.
 - Record the first public-safe representative migration tracking entry, including the expected count difference from
   removing a project-local counter implementation.
+- Complete the public-safe representative migration tracker for pre-`1.0` with real package, raw shell recipe, and
+  multi-project workspace migrations.
+- Record small-tooling pre-release consumption evidence for the sibling-checkout `just loc` recipe without counting it
+  as a replacement migration.
+- Normalize absolute `cloc --by-file` paths before classification so configured project reports keep source/test and
+  directory buckets relative to each selected project.

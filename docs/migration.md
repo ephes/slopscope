@@ -167,10 +167,21 @@ Track real, authorized migrations here using public-safe descriptions only:
   `just loc` recipe; added `[tool.slopscope]` excludes; validated the line-count command plus lint, typecheck, and
   tests; preserved `cloc` semantics when available; noted the expected total-count drop from removing the old local
   counter implementation; used a sibling checkout during the `slopscope` pre-release phase.
-- [ ] Infrastructure or configuration repository: YAML total or grouped profile migration, validation command, and
-  physical-line versus `cloc` semantics.
-- [ ] Multi-project or generated-artifact repository: project configuration or excludes added, validation command,
-  and skipped optional project behavior if applicable.
+- [x] Raw shell line-count recipe: replaced a `cloc` plus secondary folder-summary recipe with `slopscope` through a
+  sibling checkout; preserved `cloc` semantics for language totals when available; documented that the secondary
+  folder-only appendix is replaced by `slopscope` source/test, area, and directory summaries.
+- [x] Multi-project generated-artifact workspace: replaced a project-local multi-project counter with configured
+  `slopscope` projects; preserved all existing `just loc` project-selection recipes; kept generated/service
+  directories and non-code languages excluded; configured the sibling project as optional so workspaces without that
+  checkout keep a successful frontend-only report.
+
+Additional representative evidence:
+
+- A second standard package repository removed a local counter and shadowing compatibility script, switched `just loc`
+  to a sibling checkout, and kept generated documentation output excluded from fallback discovery. This is additional
+  validation evidence for the standard package shape above, not a separate counted migration shape.
+- A small tooling repository with no previous line-count workflow adopted the shared pre-release recipe; this is useful
+  consumption evidence but is not counted as a replacement migration.
 
 Do not record private repository names, private filesystem paths, private domains, internal hosts, or private
 provenance. If a real migration cannot be described safely, summarize only the generic repository shape and keep the

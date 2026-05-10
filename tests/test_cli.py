@@ -543,6 +543,83 @@ path = "backend"
     assert stderr.getvalue() == ""
 
 
+def test_cli_project_cloc_engine_normalizes_absolute_file_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Regression: configured projects can invoke cloc with an absolute root, and
+    # cloc may echo absolute by-file paths that still need repo-relative buckets.
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "src").mkdir()
+    (frontend / "tests").mkdir()
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        """
+[tool.slopscope]
+
+[[tool.slopscope.projects]]
+name = "frontend"
+path = "frontend"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def fake_run_language_summary(_path: Path | str) -> cloc.ClocResult:
+        return cloc.ClocResult(
+            returncode=0,
+            stdout="language,filename,blank,comment,code\nPython,2,0,0,10\nSUM,2,0,0,10\n",
+            stderr="",
+        )
+
+    def fake_run_file_summary(_path: Path | str) -> cloc.ClocResult:
+        return cloc.ClocResult(
+            returncode=0,
+            stdout=(
+                "language,filename,blank,comment,code\n"
+                f"Python,{frontend / 'src' / 'app.py'},0,0,7\n"
+                f"Python,{frontend / 'tests' / 'test_app.py'},0,0,3\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
+    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
+    monkeypatch.setattr("slopscope.cli.cloc.run_file_summary", fake_run_file_summary)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = cli.run(
+        [
+            "--config",
+            str(config_path),
+            "--project",
+            "frontend",
+            "--engine",
+            "cloc",
+            "--format",
+            "json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == 0
+    data = json.loads(stdout.getvalue())
+    report = data["projects"][0]["report"]
+    assert report["source_test_summary"] == {
+        "source_files": 1,
+        "source_code": 7,
+        "test_files": 1,
+        "test_code": 3,
+    }
+    assert report["directory_rows"] == [
+        {"name": "src", "files": 1, "code": 7},
+        {"name": "tests", "files": 1, "code": 3},
+    ]
+    assert stderr.getvalue() == ""
+
+
 def test_cli_project_cloc_engine_fails_when_unavailable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

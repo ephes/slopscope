@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from slopscope import classify, cloc, fallback, profile, render
+from slopscope import classify, cloc, fallback, paths, profile, render
 from slopscope import config as config_module
 from slopscope import project as project_module
 from slopscope.report import (
@@ -398,10 +398,23 @@ def _filter_file_rows(
     slopscope_config: config_module.SlopscopeConfig,
 ) -> tuple[FileRow, ...]:
     return tuple(
-        row
+        _normalize_file_row(row, root=path)
         for row in file_rows
         if _language_is_included(row.language, slopscope_config)
         and not _row_is_excluded(row, path=path, slopscope_config=slopscope_config)
+    )
+
+
+def _normalize_file_row(row: FileRow, *, root: Path) -> FileRow:
+    normalized_path = paths.row_filter_path(row.path, root=root)
+    if str(normalized_path) == row.path:
+        return row
+    return FileRow(
+        language=row.language,
+        path=normalized_path.as_posix(),
+        blank=row.blank,
+        comment=row.comment,
+        code=row.code,
     )
 
 
@@ -473,18 +486,8 @@ def _row_is_excluded(
     if not slopscope_config.exclude_dirs:
         return False
     return fallback.is_excluded_path(
-        _row_filter_path(row.path, root=path), slopscope_config.exclude_dirs
+        paths.row_filter_path(row.path, root=path), slopscope_config.exclude_dirs
     )
-
-
-def _row_filter_path(path: str, *, root: Path) -> Path:
-    file_path = Path(path)
-    if not file_path.is_absolute():
-        return file_path
-    try:
-        return file_path.resolve().relative_to(root.resolve())
-    except ValueError:
-        return file_path
 
 
 def _effective_fallback_excludes(
