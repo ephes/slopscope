@@ -3,11 +3,11 @@
 Colorful repository line-count reports by language, source, tests, and directory, with `cloc` support and a
 pure-Python fallback.
 
-This project is prepared for its first pre-release but is not published yet. The repository contains the installable
-Python package, `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python
-fallback for physical-line reports, default path classification, rendered reports for language, source/test, area,
-and directory summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, configured profile
-execution for YAML totals and grouped top-N reports, and configured multi-project workspace reports.
+The first pre-release is published as `0.1.0a1`. The repository contains the installable Python package,
+`cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
+physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
+summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, configured profile execution for YAML
+totals and grouped top-N reports, and configured multi-project workspace reports.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -38,24 +38,8 @@ reusable Python CLI that can be added as a development dependency.
 
 ## Installation
 
-Until the first package release is published, use a source checkout:
-
-```bash
-git clone https://github.com/ephes/slopscope.git
-cd slopscope
-uv run slopscope --help
-uv run slopscope --engine python .
-```
-
-To use the checkout as a development dependency in another repository before publication:
-
-```bash
-uv add --dev --editable ../slopscope
-uv run slopscope
-```
-
-After a pre-release is published to a package index, install it like any other development dependency. Pre-release
-resolution must be enabled when the latest available version is pre-release-only:
+Install the published pre-release as a development dependency. Pre-release resolution must be enabled while the latest
+available version is pre-release-only:
 
 ```bash
 uv add --dev --prerelease allow slopscope
@@ -69,12 +53,29 @@ python -m pip install --pre slopscope
 slopscope --help
 ```
 
+To use a source checkout:
+
+```bash
+git clone https://github.com/ephes/slopscope.git
+cd slopscope
+uv run slopscope --help
+uv run slopscope --engine python .
+```
+
+To use the checkout as an editable development dependency in another repository:
+
+```bash
+uv add --dev --editable ../slopscope
+uv run slopscope
+```
+
 `cloc` is optional. With `--engine auto`, `slopscope` uses `cloc` when the binary is available on `PATH` and falls
 back to the pure-Python engine otherwise. Install `cloc` separately if you want `cloc` code-line semantics.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
-falls back to plain text. Install Rich separately in projects that want colored tables; no runtime dependency is
-required for plain text or JSON output.
+falls back to plain text. Install Rich separately for colored tables when using `0.1.0a1`; the base install has no
+runtime dependencies and remains correct for `--format plain` and `--format json`. The unreleased development tree
+also exposes a `rich` extra for the next package release.
 
 ## Usage
 

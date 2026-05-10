@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Add a `rich` optional extra (`slopscope[rich]`) so downstream projects without Rich as a runtime dependency can opt
+  into colored Rich tables; without the extra, the default `--format rich` continues to fall back to plain output.
+- Update post-release documentation now that `0.1.0a1` is published on the package index and GitHub.
+
 ## 0.1.0a1 - 2026-05-10
 
 - Prepare first pre-release package metadata with version `0.1.0a1`, MIT license text, alpha classifiers, and

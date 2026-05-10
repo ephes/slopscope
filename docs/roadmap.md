@@ -98,5 +98,5 @@ Use public fixture repositories or synthetic test fixtures for these shapes:
 - [x] Add installation docs.
 - [x] Add migration guide.
 - [x] Add changelog workflow.
-- [ ] Publish first pre-release.
+- [x] Publish first pre-release.
 - [x] Migrate at least three representative repositories before `1.0`.

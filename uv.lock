@@ -311,6 +311,11 @@ name = "slopscope"
 version = "0.1.0a1"
 source = { editable = "." }
 
+[package.optional-dependencies]
+rich = [
+    { name = "rich" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
@@ -320,6 +325,8 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "rich", marker = "extra == 'rich'", specifier = ">=15.0.0" }]
+provides-extras = ["rich"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -4,19 +4,22 @@ This guide describes how repositories should replace local line-count logic with
 
 ## Prerequisites
 
-Use Python 3.11 or newer. Until the package is published, install from a source checkout or use the checkout directly
-with `uv run`.
+Use Python 3.11 or newer. Install the published pre-release with pre-release resolution enabled:
 
-For a repository that wants to depend on a local checkout before publication:
+```bash
+uv add --dev --prerelease allow slopscope
+```
+
+To depend on a local checkout instead:
 
 ```bash
 uv add --dev --editable ../slopscope
 ```
 
-After a pre-release is published to a package index:
+You can also use the checkout directly:
 
 ```bash
-uv add --dev --prerelease allow slopscope
+uv run slopscope
 ```
 
 `cloc` is optional. The default `--engine auto` uses `cloc` when the binary is available on `PATH` and otherwise
@@ -24,7 +27,9 @@ uses the Python fallback. Use `--engine python` when you want deterministic phys
 on a `cloc` binary. Use `--engine cloc` when you want the command to fail clearly if `cloc` is unavailable.
 
 Rich is optional. Human-readable output defaults to `--format rich`, but the command falls back to plain output when
-Rich is not installed. Use `--format plain` or `--format json` for dependency-free output.
+Rich is not installed. Install Rich separately when you want colored tables with `0.1.0a1`. The unreleased
+development tree also exposes `slopscope[rich]` for the next package release. Use `--format plain` or
+`--format json` for dependency-free output.
 
 ## Standard Python Repository
 

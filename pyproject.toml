@@ -29,6 +29,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+rich = ["rich>=15.0.0"]
+
 [project.scripts]
 slopscope = "slopscope.cli:main"
 count-lines-of-code = "slopscope.cli:main"

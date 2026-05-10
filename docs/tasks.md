@@ -5,8 +5,7 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Confirm final pre-release version, package registry, and publishing credentials before publishing.
-- [ ] Publish first pre-release after explicit release-owner approval.
+- [ ] Prepare the next pre-release if the `rich` optional extra should be available from the package index.
 
 ## Done
 
@@ -64,10 +63,13 @@ repository shapes and product behavior, not private source projects.
   recording only public-safe repository shapes and validation notes.
 - [x] Add small-tooling pre-release consumption evidence for the sibling-checkout `just loc` recipe without counting it
   as a replacement migration.
+- [x] Confirm final pre-release version, package registry, and publishing credentials before publishing.
+- [x] Publish first pre-release after explicit release-owner approval.
 
 ## Later
 
-- [ ] Decide whether Rich is a default dependency or optional extra.
+- [x] Decide whether Rich is a default dependency or optional extra. Resolved as the `rich` optional extra
+  (`slopscope[rich]`) so the base install stays dependency-free and downstream projects opt in for colored tables.
 - [ ] Decide whether the compatibility alias remains permanent.
 - [ ] Decide whether YAML total mode defaults to physical lines or `cloc` code lines.
 - [ ] Evaluate whether `sloccount` compatibility is worth implementing.
