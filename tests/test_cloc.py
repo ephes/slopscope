@@ -92,6 +92,23 @@ SUM,3,13,4,110
     ]
 
 
+def test_parse_language_summary_csv_accepts_files_column() -> None:
+    output = (
+        'files,language,blank,comment,code,"github.com/AlDanial/cloc v 2.08"\n'
+        "2,Python,10,4,90\n"
+        "1,TOML,3,0,20\n"
+        "3,SUM,13,4,110\n"
+    )
+
+    rows = cloc.parse_language_summary_csv(output)
+
+    assert rows == [
+        LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
+        LanguageRow(language="TOML", files=1, blank=3, comment=0, code=20),
+        LanguageRow(language="SUM", files=3, blank=13, comment=4, code=110),
+    ]
+
+
 def test_parse_language_summary_csv_skips_malformed_rows() -> None:
     output = """language,filename,blank,comment,code
 Python,2,10,4,90
@@ -132,6 +149,22 @@ SUM,,6,3,60
     assert rows == [
         FileRow(language="Python", path="src/slopscope/cli.py", blank=2, comment=3, code=40),
         FileRow(language="Markdown", path="README.md", blank=4, comment=0, code=20),
+    ]
+
+
+def test_parse_file_summary_csv_accepts_cloc_metadata_column() -> None:
+    output = (
+        'language,filename,blank,comment,code,"github.com/AlDanial/cloc v 2.08"\n'
+        "Python,src/slopscope/cli.py,2,3,40\n"
+        "TOML,pyproject.toml,1,0,20\n"
+        "SUM,,3,3,60\n"
+    )
+
+    rows = cloc.parse_file_summary_csv(output)
+
+    assert rows == [
+        FileRow(language="Python", path="src/slopscope/cli.py", blank=2, comment=3, code=40),
+        FileRow(language="TOML", path="pyproject.toml", blank=1, comment=0, code=20),
     ]
 
 

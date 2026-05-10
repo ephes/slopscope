@@ -7,8 +7,8 @@ repository shapes and product behavior, not private source projects.
 
 - [ ] Confirm final pre-release version, package registry, and publishing credentials before publishing.
 - [ ] Publish first pre-release after explicit release-owner approval.
-- [ ] Migrate at least three authorized representative repositories before `1.0`, recording only public-safe
-  repository shapes and validation notes.
+- [ ] Migrate two more authorized representative repositories before `1.0`, recording only public-safe repository
+  shapes and validation notes.
 
 ## Done
 

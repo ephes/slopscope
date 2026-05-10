@@ -163,8 +163,10 @@ evidence, but it does not complete the pre-1.0 requirement to migrate at least t
 
 Track real, authorized migrations here using public-safe descriptions only:
 
-- [ ] Standard package repository: command replaced, configuration added if any, validation command, and semantic
-  differences.
+- [x] Standard package repository: replaced a project-local line-count implementation with a `slopscope`-backed
+  `just loc` recipe; added `[tool.slopscope]` excludes; validated the line-count command plus lint, typecheck, and
+  tests; preserved `cloc` semantics when available; noted the expected total-count drop from removing the old local
+  counter implementation; used a sibling checkout during the `slopscope` pre-release phase.
 - [ ] Infrastructure or configuration repository: YAML total or grouped profile migration, validation command, and
   physical-line versus `cloc` semantics.
 - [ ] Multi-project or generated-artifact repository: project configuration or excludes added, validation command,

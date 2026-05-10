@@ -37,6 +37,7 @@ count-lines-of-code = "slopscope.cli:main"
 dev = [
   "mypy>=1.10",
   "pytest>=8",
+  "rich>=15.0.0",
   "ruff>=0.8",
 ]
 

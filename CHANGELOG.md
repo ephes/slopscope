@@ -34,11 +34,15 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 - Add multi-project plain, Rich, and JSON reports with project snapshots, per-project default reports, and skipped
   optional projects.
 - Skip missing optional project paths with a concise stderr notice and fail missing required project paths clearly.
+- Accept `cloc` language summary CSV files that use `files` instead of `filename` for the file-count column.
 - Add synthetic migration fixture coverage for standard Python, Django-style, infrastructure YAML, grouped YAML,
   multi-project, and desktop-style repository layouts.
 - Add pytest, Ruff, mypy, and `just` developer commands.
+- Add Rich to the development dependency group and add a `just loc` dogfood recipe for the local repository report.
 - Start public project documentation and initial product requirements.
 - Clarify migration, configuration, and roadmap docs after initial review.
 - Add installation and release workflow documentation for first pre-release readiness.
 - Expand the migration guide with prerequisites, validation commands, semantic-difference notes, and representative
   migration tracking before `1.0`.
+- Record the first public-safe representative migration tracking entry, including the expected count difference from
+  removing a project-local counter implementation.

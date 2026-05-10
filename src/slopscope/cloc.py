@@ -94,8 +94,8 @@ def _parse_language_row(row: dict[str, str | None]) -> LanguageRow | None:
     try:
         return LanguageRow(
             language=language,
-            # cloc summary CSV uses "filename" as the file-count column name.
-            files=_parse_int(row.get("filename")),
+            # cloc summary CSV has used both "filename" and "files" for file counts.
+            files=_parse_int(row.get("filename") or row.get("files")),
             blank=_parse_int(row.get("blank")),
             comment=_parse_int(row.get("comment")),
             code=_parse_int(row.get("code")),

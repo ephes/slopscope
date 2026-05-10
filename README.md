@@ -169,7 +169,8 @@ uv run mypy
 ```
 
 The same commands are available through the `justfile` as `just test`, `just lint`, `just format-check`,
-`just typecheck`, and `just check`.
+`just typecheck`, and `just check`. Use `just loc` to dogfood the local `slopscope` package with the Python engine
+and Rich output from the development environment.
 
 Build the local package without publishing:
 

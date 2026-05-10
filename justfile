@@ -13,6 +13,9 @@ format-check:
 typecheck:
     uv run mypy
 
+loc:
+    uv run slopscope --engine python .
+
 check:
     uv run pytest
     uv run ruff check .
