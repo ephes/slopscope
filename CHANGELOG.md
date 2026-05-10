@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+## 0.1.0a1 - 2026-05-10
+
 - Prepare first pre-release package metadata with version `0.1.0a1`, MIT license text, alpha classifiers, and
   synchronized package version metadata.
 - Add the initial installable Python package scaffold with `src/slopscope`.

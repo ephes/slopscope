@@ -41,7 +41,7 @@ reusable Python CLI that can be added as a development dependency.
 Until the first package release is published, use a source checkout:
 
 ```bash
-git clone <public-repository-url> slopscope
+git clone https://github.com/ephes/slopscope.git
 cd slopscope
 uv run slopscope --help
 uv run slopscope --engine python .
