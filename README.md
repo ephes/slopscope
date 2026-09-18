@@ -33,8 +33,9 @@ reusable Python CLI that can be added as a development dependency.
 - JSON output for future CI or badge integrations.
 - Python composition report (`--composition`): every physical line of every Python file in one structural category
   (blank, comment, docstring, import, definition, assertion, error handling, literal data, other code), statement
-  counts, continuation lines, and the largest modules, classes, and functions. Standard library `ast` and `tokenize`
-  only.
+  counts, continuation lines, overlapping semantic tags (Qt, logging, data shapes) resolved through imports, a
+  compatibility-wording marker, test-file placement (tests, fixtures, setup, module level, helpers), and the largest
+  modules, classes, and functions. Standard library `ast` and `tokenize` only.
 
 ## Planned Features
 
@@ -174,6 +175,9 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - line categories that add up to the physical line count, split by source, tests, and other files
 - statements (`ast.stmt` nodes), code lines per statement, and continuation lines, which are size signals independent
   of formatter layout
+- semantic tags that overlap the categories: `qt`, `logging`, and `data_shape`, each resolved through the file's own
+  imports, plus a `compat` marker for identifiers that name themselves legacy, fallback, or compat code
+- construct counts, and where test-file code lines sit: tests, fixtures, setup, module level, or helpers
 - per-area totals
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`

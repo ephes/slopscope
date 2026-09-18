@@ -9,9 +9,14 @@ from typing import Any
 from slopscope.render import OutputFormat, _load_rich, _percent
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
+    COMPOSITION_CONSTRUCTS,
+    COMPOSITION_MARKERS,
+    COMPOSITION_TAGS,
+    COMPOSITION_TEST_PLACEMENTS,
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
+    CompositionDetector,
     CompositionFailure,
     CompositionFileRow,
     CompositionFunctionRow,
@@ -50,6 +55,7 @@ def render_composition_json(report: RenderableCompositionReport) -> str:
                 "version": report.analyzer_version,
                 "python_version": report.python_version,
             },
+            "detectors": [_detector_to_dict(detector) for detector in report.detectors],
             "projects": [
                 {
                     "name": project.name,
@@ -82,7 +88,13 @@ def render_composition_plain(report: RenderableCompositionReport) -> str:
     ]
     lines.extend(_plain_categories(report))
     lines.append("")
+    lines.extend(_plain_tags(report))
+    lines.append("")
     lines.extend(_plain_statements("Statements", "Kind", (*report.kinds, report.total)))
+    lines.append("")
+    lines.extend(_plain_constructs((*report.kinds, report.total)))
+    lines.append("")
+    lines.extend(_plain_test_placement(report))
     lines.append("")
     lines.extend(_plain_statements("Areas", "Area", report.areas))
     lines.append("")
@@ -152,6 +164,7 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
             "version": report.analyzer_version,
             "python_version": report.python_version,
         },
+        "detectors": [_detector_to_dict(detector) for detector in report.detectors],
         "path": str(report.path),
         "settings": {
             "language": "Python",
@@ -163,6 +176,10 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
             "areas": list(settings.areas),
         },
         "categories": list(COMPOSITION_CATEGORIES),
+        "tags": list(COMPOSITION_TAGS),
+        "markers": list(COMPOSITION_MARKERS),
+        "test_placements": list(COMPOSITION_TEST_PLACEMENTS),
+        "constructs": list(COMPOSITION_CONSTRUCTS),
         "total": _aggregate_to_dict(report.total),
         "kinds": [_aggregate_to_dict(aggregate) for aggregate in report.kinds],
         "areas": [_aggregate_to_dict(aggregate) for aggregate in report.areas],
@@ -183,6 +200,10 @@ def _counts_to_dict(counts: CompositionCounts) -> dict[str, Any]:
         "continuation_lines": counts.continuation_lines,
         "code_per_statement": None if ratio is None else round(ratio, 2),
         "categories": counts.as_mapping(),
+        "tags": counts.tag_mapping(),
+        "markers": counts.marker_mapping(),
+        "test_placement": counts.placement_mapping(),
+        "constructs": counts.construct_mapping(),
     }
 
 
@@ -227,6 +248,10 @@ def _function_to_dict(row: CompositionFunctionRow) -> dict[str, Any]:
     }
 
 
+def _detector_to_dict(detector: CompositionDetector) -> dict[str, str | int]:
+    return {"name": detector.name, "kind": detector.kind, "version": detector.version}
+
+
 def _failure_to_dict(failure: CompositionFailure) -> dict[str, str]:
     return {"path": failure.path, "error": failure.error}
 
@@ -269,6 +294,71 @@ def _plain_categories(report: CompositionReport) -> list[str]:
             f"{label:<16} {value:>9} {_percent(value, total_physical):>7}"
             + "".join(f" {getattr(column.counts, attribute):>9}" for column in columns[1:])
         )
+    return lines
+
+
+def _tests_aggregate(report: CompositionReport) -> CompositionAggregate:
+    return next(kind for kind in report.kinds if kind.name == "tests")
+
+
+def _tag_rows(report: CompositionReport) -> list[tuple[str, int, list[int]]]:
+    columns = _category_columns(report)[1:]
+    rows = [
+        (name, report.total.counts.tag(name), [column.counts.tag(name) for column in columns])
+        for name in COMPOSITION_TAGS
+    ]
+    rows.extend(
+        (
+            f"{name} (marker)",
+            report.total.counts.marker(name),
+            [column.counts.marker(name) for column in columns],
+        )
+        for name in COMPOSITION_MARKERS
+    )
+    return rows
+
+
+def _plain_tags(report: CompositionReport) -> list[str]:
+    columns = _category_columns(report)[1:]
+    total_code = report.total.counts.code
+    header = f"{'Tag':<16} {'Lines':>9} {'Share':>7}" + "".join(
+        f" {column.name.capitalize():>9}" for column in columns
+    )
+    lines = ["Semantic Tags (code lines; tags overlap)", header, "-" * len(header)]
+    for name, total, values in _tag_rows(report):
+        lines.append(
+            f"{name:<16} {total:>9} {_percent(total, total_code):>7}"
+            + "".join(f" {value:>9}" for value in values)
+        )
+    return lines
+
+
+def _plain_constructs(rows: tuple[CompositionAggregate, ...]) -> list[str]:
+    header = f"{'Kind':<16}" + "".join(f" {name:>18}" for name in COMPOSITION_CONSTRUCTS)
+    lines = ["Constructs", header, "-" * len(header)]
+    for row in rows:
+        lines.append(
+            f"{row.name:<16}"
+            + "".join(f" {row.counts.construct(name):>18}" for name in COMPOSITION_CONSTRUCTS)
+        )
+    return lines
+
+
+def _tests_summary(tests: CompositionAggregate) -> str:
+    count = tests.counts.construct("tests")
+    if not count:
+        return "No test functions or methods found."
+    return f"{count} tests, {tests.counts.code / count:.1f} test-file code lines per test"
+
+
+def _plain_test_placement(report: CompositionReport) -> list[str]:
+    tests = _tests_aggregate(report)
+    header = f"{'Placement':<18} {'Lines':>9} {'Share':>7}"
+    lines = ["Test Placement (test-file code lines)", header, "-" * len(header)]
+    for name in COMPOSITION_TEST_PLACEMENTS:
+        value = tests.counts.placement(name)
+        lines.append(f"{name:<18} {value:>9} {_percent(value, tests.counts.code):>7}")
+    lines.append(_tests_summary(tests))
     return lines
 
 
@@ -404,9 +494,15 @@ def _print_rich_report(
     console.print()
     _print_rich_categories(console, table_class, report)
     console.print()
+    _print_rich_tags(console, table_class, report)
+    console.print()
     _print_rich_statements(
         console, table_class, "Statements", "Kind", (*report.kinds, report.total)
     )
+    console.print()
+    _print_rich_constructs(console, table_class, (*report.kinds, report.total))
+    console.print()
+    _print_rich_test_placement(console, table_class, text_class, report)
     console.print()
     _print_rich_statements(console, table_class, "Areas", "Area", report.areas)
     console.print()
@@ -452,6 +548,54 @@ def _print_rich_categories(console: Any, table_class: Any, report: CompositionRe
             style="bold",
         )
     console.print(table)
+
+
+def _print_rich_tags(console: Any, table_class: Any, report: CompositionReport) -> None:
+    columns = _category_columns(report)[1:]
+    total_code = report.total.counts.code
+    table = table_class(title="Semantic Tags (code lines; tags overlap)", title_style="bold blue")
+    table.add_column("Tag", style="cyan")
+    table.add_column("Lines", justify="right", style="green")
+    table.add_column("Share", justify="right")
+    for column in columns:
+        table.add_column(column.name.capitalize(), justify="right", style="green")
+    for name, total, values in _tag_rows(report):
+        table.add_row(name, str(total), _percent(total, total_code), *(str(v) for v in values))
+    console.print(table)
+
+
+def _print_rich_constructs(
+    console: Any,
+    table_class: Any,
+    rows: tuple[CompositionAggregate, ...],
+) -> None:
+    table = table_class(title="Constructs", title_style="bold blue")
+    table.add_column("Kind", style="cyan")
+    for name in COMPOSITION_CONSTRUCTS:
+        table.add_column(name, justify="right", style="magenta")
+    for row in rows:
+        table.add_row(
+            row.name, *(str(row.counts.construct(name)) for name in COMPOSITION_CONSTRUCTS)
+        )
+    console.print(table)
+
+
+def _print_rich_test_placement(
+    console: Any,
+    table_class: Any,
+    text_class: Any,
+    report: CompositionReport,
+) -> None:
+    tests = _tests_aggregate(report)
+    table = table_class(title="Test Placement (test-file code lines)", title_style="bold blue")
+    table.add_column("Placement", style="cyan")
+    table.add_column("Lines", justify="right", style="green")
+    table.add_column("Share", justify="right")
+    for name in COMPOSITION_TEST_PLACEMENTS:
+        value = tests.counts.placement(name)
+        table.add_row(name, str(value), _percent(value, tests.counts.code))
+    console.print(table)
+    console.print(text_class(_tests_summary(tests), style="dim"))
 
 
 def _print_rich_statements(

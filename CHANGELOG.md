@@ -18,10 +18,16 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   totals, and the largest modules, classes, and functions. It supports `--config`, `--project`, `--format`, and
   `--no-color`; `--limit N` sets the largest-item list size. Read, decode, and parse failures are reported on stderr
   and exit with code 1. JSON output uses a new, separate shape with `report_type: "composition"` and
-  `schema_version: 1`.
+  `schema_version: 2`.
 - Reject `--engine`, `--profile`, `--total-only`, and `--top` together with `--composition`, and `--limit` without
   it, with argparse usage errors. The default report, profiles, and existing JSON shapes are unchanged; `--help` now
   lists the new options and shows `--engine`'s `auto` default in its help text.
+- Add semantic tags to the composition report as a separate, overlapping dimension over code lines: `qt` for names
+  bound from PySide/PyQt/qtpy imports, `logging` for the `logging` module and loggers assigned from
+  `logging.getLogger()`, and `data_shape` for fields of dataclass, attrs, enum, NamedTuple, TypedDict, and pydantic
+  classes, all resolved through imports. Add a `compat` wording marker, construct counts, and test-file placement into
+  `test`, `fixture`, `setup`, `module_level`, and `helper_or_unknown` with conservative pytest and unittest rules. JSON
+  output lists every detector with its version.
 - Amend the "deep language parsing" non-goal to allow the opt-in, Python-only composition report.
 
 ## 0.1.0a1 - 2026-05-10

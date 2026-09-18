@@ -179,6 +179,9 @@ Composition report:
 - Must assign every physical line of every discovered Python file exactly one structural category, so categories add
   up to the physical line count.
 - Must report statement counts, continuation lines, and the largest modules, classes, and functions.
+- Semantic labels such as framework, logging, or data-shape code must be overlapping tags, separate from the structural
+  categories, resolved through imports rather than naming conventions, and versioned per detector in JSON.
+- Test-file placement must use conservative pytest and unittest rules with an explicit helper-or-unknown bucket.
 - Must report files that cannot be read, decoded, or parsed on stderr and exit non-zero, without dropping them
   silently.
 - Must use a distinct JSON shape with `report_type`, `schema_version`, analyzer version, and the parsing Python

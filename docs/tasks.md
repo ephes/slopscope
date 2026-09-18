@@ -6,13 +6,11 @@ repository shapes and product behavior, not private source projects.
 ## Current
 
 - [ ] Prepare the next pre-release if the `rich` optional extra should be available from the package index.
-- [ ] Composition report slice 2: semantic tags as an overlapping dimension (framework detection only with framework
-  imports, `logging`-based logging detection, import-resolving data-shape detection, separate compatibility-marker
-  counts, detector versions in JSON) and conservative pytest/unittest test placement with an `unknown/helper` bucket.
 - [ ] Composition report slice 3: token-based duplication detection with preserved adjacency, verified matches, and
   merged intervals; `--snapshot PATH` and `--baseline PATH` with schema-version checks.
 - [ ] Composition report later: monthly Git churn for the analyzed repository and configured branch, `--jobs`, a
-  `[tool.slopscope.composition]` section, and a release.
+  `[tool.slopscope.composition]` section with configured framework modules and opt-in logging patterns, and a
+  release.
 
 ## Done
 
@@ -75,6 +73,9 @@ repository shapes and product behavior, not private source projects.
 - [x] Composition report slice 1: `--composition` and `--limit N`, structural line categories from `ast` and
   `tokenize`, statement and continuation-line counts, largest modules, classes, and functions, failure reporting,
   plain/Rich/JSON output, project support, and documentation.
+- [x] Composition report slice 2: overlapping semantic tags resolved through imports (`qt`, `logging`, `data_shape`),
+  a separate `compat` marker, construct counts, detector versions in JSON, and conservative pytest/unittest test
+  placement with a `helper_or_unknown` bucket.
 
 ## Later
 

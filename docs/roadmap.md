@@ -121,15 +121,14 @@ Slice 1: structural composition.
 
 Slice 2: semantic tags and test placement.
 
-- [ ] Add semantic tags as an overlapping dimension next to the structural categories, never as extra categories.
-- [ ] Detect framework usage such as Qt only when framework imports are present or configured. Naming conventions such
-  as CamelCase method names, or `.connect`/`.emit` calls alone, must never be enough.
-- [ ] Detect logging through the `logging` module and names assigned from `logging.getLogger()`; substring patterns
-  only as opt-in configuration.
-- [ ] Detect data-shape classes by resolving imports and aliases.
-- [ ] Count compatibility markers separately from constructs.
-- [ ] Record detector names and versions in the JSON output.
-- [ ] Classify where test lines sit with conservative pytest and unittest rules and an `unknown/helper` bucket,
+- [x] Add semantic tags as an overlapping dimension next to the structural categories, never as extra categories.
+- [x] Detect framework usage such as Qt only when framework imports are present. Naming conventions such as CamelCase
+  method names, or `.connect`/`.emit` calls alone, are never enough.
+- [x] Detect logging through the `logging` module and names assigned from `logging.getLogger()`.
+- [x] Detect data-shape classes by resolving imports and aliases.
+- [x] Count compatibility markers separately from constructs.
+- [x] Record detector names and versions in the JSON output.
+- [x] Classify where test lines sit with conservative pytest and unittest rules and a `helper_or_unknown` bucket,
   rather than name-prefix, whole-`Test*`-class, or fixture-substring rules.
 
 Slice 3: duplication, snapshots, and baselines.
@@ -143,5 +142,6 @@ Later:
 - [ ] Report monthly churn from Git in the analyzed repository: use the configured branch rather than assuming
   `main`, handle renames and subdirectory paths, and skip the section outside Git.
 - [ ] Add parallel parsing (`--jobs`) if measurements show a need.
-- [ ] Add a `[tool.slopscope.composition]` configuration section.
+- [ ] Add a `[tool.slopscope.composition]` configuration section, including configured framework modules and opt-in
+  logging substring patterns.
 - [ ] Release the composition report.

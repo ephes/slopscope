@@ -208,36 +208,93 @@ COMPOSITION_CATEGORIES = (
     "other_code",
 )
 COMPOSITION_NON_CODE_CATEGORIES = ("blank", "comment", "docstring")
+COMPOSITION_TAGS = ("qt", "logging", "data_shape")
+COMPOSITION_MARKERS = ("compat",)
+COMPOSITION_TEST_PLACEMENTS = ("test", "fixture", "setup", "module_level", "helper_or_unknown")
+COMPOSITION_CONSTRUCTS = ("classes", "functions", "data_shape_classes", "qt_classes", "tests")
+
+
+def _zeros(names: tuple[str, ...]) -> tuple[int, ...]:
+    return (0,) * len(names)
+
+
+def _add(left: tuple[int, ...], right: tuple[int, ...]) -> tuple[int, ...]:
+    return tuple(a + b for a, b in zip(left, right, strict=True))
 
 
 @dataclass(frozen=True)
 class CompositionCounts:
-    """Structural line categories and statement counts for one file or aggregate.
+    """Structural line categories, semantic tags, and statement counts for files.
 
-    ``categories`` holds one count per name in ``COMPOSITION_CATEGORIES``, in that order.
+    Each tuple holds one count per name in the matching ``COMPOSITION_*`` constant, in order.
+    ``categories`` add up to the physical line count. ``tags`` and ``markers`` count code lines
+    and may overlap. ``placements`` count code lines of test files only.
     """
 
     categories: tuple[int, ...]
     statements: int
     continuation_lines: int
+    tags: tuple[int, ...] = _zeros(COMPOSITION_TAGS)
+    markers: tuple[int, ...] = _zeros(COMPOSITION_MARKERS)
+    placements: tuple[int, ...] = _zeros(COMPOSITION_TEST_PLACEMENTS)
+    constructs: tuple[int, ...] = _zeros(COMPOSITION_CONSTRUCTS)
 
     @classmethod
     def sum(cls, counts: Iterable[CompositionCounts]) -> Self:
-        """Add counts category by category."""
+        """Add counts field by field."""
 
-        categories = [0] * len(COMPOSITION_CATEGORIES)
-        statements = 0
-        continuation_lines = 0
+        total = cls(categories=_zeros(COMPOSITION_CATEGORIES), statements=0, continuation_lines=0)
         for item in counts:
-            for index, value in enumerate(item.categories):
-                categories[index] += value
-            statements += item.statements
-            continuation_lines += item.continuation_lines
-        return cls(
-            categories=tuple(categories),
-            statements=statements,
-            continuation_lines=continuation_lines,
-        )
+            total = cls(
+                categories=_add(total.categories, item.categories),
+                statements=total.statements + item.statements,
+                continuation_lines=total.continuation_lines + item.continuation_lines,
+                tags=_add(total.tags, item.tags),
+                markers=_add(total.markers, item.markers),
+                placements=_add(total.placements, item.placements),
+                constructs=_add(total.constructs, item.constructs),
+            )
+        return total
+
+    def tag(self, name: str) -> int:
+        """Return the code line count for one semantic tag."""
+
+        return self.tags[COMPOSITION_TAGS.index(name)]
+
+    def marker(self, name: str) -> int:
+        """Return the code line count for one marker."""
+
+        return self.markers[COMPOSITION_MARKERS.index(name)]
+
+    def placement(self, name: str) -> int:
+        """Return the test-file code line count for one test placement."""
+
+        return self.placements[COMPOSITION_TEST_PLACEMENTS.index(name)]
+
+    def construct(self, name: str) -> int:
+        """Return the count for one construct."""
+
+        return self.constructs[COMPOSITION_CONSTRUCTS.index(name)]
+
+    def tag_mapping(self) -> dict[str, int]:
+        """Return every tag with its count, in tag order."""
+
+        return dict(zip(COMPOSITION_TAGS, self.tags, strict=True))
+
+    def marker_mapping(self) -> dict[str, int]:
+        """Return every marker with its count, in marker order."""
+
+        return dict(zip(COMPOSITION_MARKERS, self.markers, strict=True))
+
+    def placement_mapping(self) -> dict[str, int]:
+        """Return every test placement with its count, in placement order."""
+
+        return dict(zip(COMPOSITION_TEST_PLACEMENTS, self.placements, strict=True))
+
+    def construct_mapping(self) -> dict[str, int]:
+        """Return every construct with its count, in construct order."""
+
+        return dict(zip(COMPOSITION_CONSTRUCTS, self.constructs, strict=True))
 
     def category(self, name: str) -> int:
         """Return the line count for one category name."""
@@ -333,6 +390,15 @@ class CompositionFailure:
 
 
 @dataclass(frozen=True)
+class CompositionDetector:
+    """A named, versioned semantic detector that contributed to a composition report."""
+
+    name: str
+    kind: str
+    version: int
+
+
+@dataclass(frozen=True)
 class CompositionSettings:
     """Settings that shaped a composition report."""
 
@@ -353,6 +419,7 @@ class CompositionReport:
     analyzer_version: int
     schema_version: int
     python_version: str
+    detectors: tuple[CompositionDetector, ...]
     settings: CompositionSettings
     total: CompositionAggregate
     kinds: tuple[CompositionAggregate, ...]
@@ -380,6 +447,7 @@ class MultiProjectCompositionReport:
     analyzer_version: int
     schema_version: int
     python_version: str
+    detectors: tuple[CompositionDetector, ...]
     projects: tuple[CompositionProjectReport, ...]
     skipped_projects: tuple[SkippedProject, ...]
 

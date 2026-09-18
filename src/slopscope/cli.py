@@ -13,6 +13,7 @@ from slopscope import (
     cloc,
     composition,
     composition_render,
+    composition_semantics,
     fallback,
     paths,
     profile,
@@ -269,6 +270,7 @@ def _run_composition(
             analyzer_version=composition.ANALYZER_VERSION,
             schema_version=composition.SCHEMA_VERSION,
             python_version=composition.python_version(),
+            detectors=composition_semantics.DETECTORS,
             projects=tuple(project_reports),
             skipped_projects=skipped_projects,
         )

@@ -2,7 +2,8 @@
 
 The default report answers "how many lines". The composition report answers "lines of what": it puts every physical
 line of every discovered Python file into exactly one structural category, reports statement counts that do not depend
-on formatting, and lists the largest modules, classes, and functions.
+on formatting, adds overlapping semantic tags, places test-file lines, and lists the largest modules, classes, and
+functions.
 
 ```bash
 slopscope --composition
@@ -106,6 +107,72 @@ count, and report totals add up to the sum over files.
   are not the first line of something", not as pure formatter inflation.
 - `code_per_statement` is code lines divided by statements.
 
+## Semantic Tags
+
+Tags are a second, separate dimension. A tag marks code lines (lines that are not blank, comment, or docstring lines)
+with what the code is about. Unlike categories, tags overlap: a line can carry several tags or none, tag counts do not
+add up to anything, and tags never change a line's category.
+
+Every tag is resolved through the file's own imports. Naming conventions alone never trigger a tag, and a name that is
+reassigned or shadowed after its import still counts as imported. Imports anywhere in the file count, including
+imports inside functions. A name keeps every binding it gets, so importing another object under the same name later
+does not erase an earlier Qt, logging, or data-shape binding. Relative imports never match a third-party or standard
+library module. A star import (`from PySide6.QtWidgets import *`) tags its own line, but the names it brings in are
+unknown, so their uses are not tagged.
+
+A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
+signature of a `def`, bases of a `class`, the condition of an `if` or `while`, the target and iterable of a `for`, the
+items of a `with`, the subject of a `match`, the pattern and guard of a `case`, the type of an `except`). A tag on a
+header never spreads to the block below it.
+
+| Tag | Code lines |
+|---|---|
+| `qt` | Units that use a name bound by an import from `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, or `qtpy`, including those imports. Without such an import no line is tagged: CamelCase method names, or `.connect()` and `.emit()` calls, are never enough on their own. Calls on objects whose type is only known at runtime, such as `self.setText(...)`, are not tagged. |
+| `logging` | Units that import from `logging`, call anything resolved into the `logging` module (such as `logging.info(...)` or `logging.getLogger(...)`), or call a logger method (`debug`, `info`, `warning`, `warn`, `error`, `exception`, `critical`, `fatal`, `log`) on a name or attribute chain assigned from `logging.getLogger()` anywhere in the file. Names such as `logger` or `log_metric` that are not tied to `logging` are never tagged. |
+| `data_shape` | Field declarations (annotated and plain assignments directly in the class body) of classes decorated with `dataclasses.dataclass` or an `attr`/`attrs` class decorator, or deriving from `enum.Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `typing` or `typing_extensions` `NamedTuple` or `TypedDict`, or `pydantic.BaseModel`. Only direct bases count; subclasses of a local data-shape class are not detected. |
+
+### Markers
+
+Markers are text-level counts, reported next to tags but kept apart from constructs and categories.
+
+- `compat` counts code lines that contain an identifier with `legacy`, `fallback`, or `compat` in it (case-insensitive,
+  so `compatibility` and `use_fallback` match). Comments, docstrings, and string contents do not count. This is a
+  wording heuristic: it finds code that names itself as compatibility code, and also unrelated identifiers that happen
+  to use these words.
+
+## Constructs
+
+Per file and aggregated:
+
+- `classes` and `functions`: every `class` and `def`/`async def`, including nested ones and methods.
+- `data_shape_classes`: classes that the `data_shape` tag recognizes.
+- `qt_classes`: classes with a direct base resolved into a Qt module.
+- `tests`: test functions and methods found by test placement, in test files only.
+
+## Test Placement
+
+For files classified as tests, every code line is placed in exactly one bucket, so the buckets add up to the test
+files' code lines. Other files are not placed and report zero for every bucket.
+
+| Placement | Code lines |
+|---|---|
+| `test` | Test functions and test methods (see below), including decorators and nested helpers inside them. |
+| `fixture` | Top-level functions, and direct methods of any top-level class, decorated with `pytest.fixture` or `pytest_asyncio.fixture`, called or bare, resolved through imports. A fixture named `test_*` is still a fixture. |
+| `setup` | pytest xunit-style `setup_module`, `teardown_module`, `setup_function`, `teardown_function` at module level and `setup_method`, `teardown_method`, `setup_class`, `teardown_class`, `setup`, `teardown` in pytest test classes; unittest `setUp`, `tearDown`, `setUpClass`, `tearDownClass`, `asyncSetUp`, `asyncTearDown` in unittest classes; `setUpModule` and `tearDownModule`. |
+| `module_level` | Code outside top-level functions and classes: imports, constants, `pytestmark`, and top-level control flow. |
+| `helper_or_unknown` | Everything else: other top-level functions and classes, class headers, class-level attributes, and non-test methods. |
+
+Test functions and methods are recognized conservatively:
+
+- A top-level function is a test when its name is `test` or starts with `test_`. pytest itself also collects names such
+  as `testing_helper`; they are placed in `helper_or_unknown` instead.
+- A class is a pytest test class when its name starts with `Test` and it defines no `__init__` method. Its methods named
+  `test` or `test_*` are tests.
+- A class is a unittest test class when a direct base resolves to `unittest.TestCase`,
+  `unittest.IsolatedAsyncioTestCase`, or one of Django's test case classes, or is a unittest test class defined earlier
+  in the same file. Its methods starting with `test` are tests, as unittest's loader collects them.
+- Only top-level classes and their direct methods are placed; nested classes belong to their enclosing bucket.
+
 ## Largest Items
 
 - Largest modules are ranked by code lines.
@@ -126,9 +193,13 @@ count, and report totals add up to the sum over files.
 Plain and Rich output contain these sections:
 
 - Line Categories: every category with total, share of physical lines, and source/tests/other columns.
+- Semantic Tags: every tag and marker with lines, share of code lines, and source/tests/other columns.
 - Statements: files, physical, code, statements, code per statement, and continuation lines for source, tests, other,
   and total.
-- Areas: the same columns per repository area.
+- Constructs: construct counts for source, tests, other, and total.
+- Test Placement: every placement with lines and share of test-file code lines, and the number of tests with test-file
+  code lines per test.
+- Areas: the same columns as Statements, per repository area.
 - Largest Modules, Largest Classes, and Largest Functions.
 - Failures, when any file failed.
 
@@ -142,8 +213,15 @@ file to keep a snapshot.
 ```json
 {
   "report_type": "composition",
-  "schema_version": 1,
+  "schema_version": 2,
   "analyzer": {"name": "slopscope.composition", "version": 1, "python_version": "3.13.1"},
+  "detectors": [
+    {"name": "qt", "kind": "tag", "version": 1},
+    {"name": "logging", "kind": "tag", "version": 1},
+    {"name": "data_shape", "kind": "tag", "version": 1},
+    {"name": "compat", "kind": "marker", "version": 1},
+    {"name": "test_placement", "kind": "placement", "version": 1}
+  ],
   "path": ".",
   "settings": {
     "language": "Python",
@@ -156,6 +234,10 @@ file to keep a snapshot.
   },
   "categories": ["blank", "comment", "docstring", "import", "definition", "assertion", "error_handling",
                  "literal_data", "other_code"],
+  "tags": ["qt", "logging", "data_shape"],
+  "markers": ["compat"],
+  "test_placements": ["test", "fixture", "setup", "module_level", "helper_or_unknown"],
+  "constructs": ["classes", "functions", "data_shape_classes", "qt_classes", "tests"],
   "total": {
     "name": "total",
     "files": 2,
@@ -165,7 +247,11 @@ file to keep a snapshot.
     "continuation_lines": 12,
     "code_per_statement": 1.82,
     "categories": {"blank": 6, "comment": 1, "docstring": 2, "import": 3, "definition": 5, "assertion": 0,
-                   "error_handling": 1, "literal_data": 4, "other_code": 18}
+                   "error_handling": 1, "literal_data": 4, "other_code": 18},
+    "tags": {"qt": 0, "logging": 2, "data_shape": 3},
+    "markers": {"compat": 0},
+    "test_placement": {"test": 4, "fixture": 1, "setup": 0, "module_level": 2, "helper_or_unknown": 0},
+    "constructs": {"classes": 2, "functions": 5, "data_shape_classes": 1, "qt_classes": 0, "tests": 2}
   },
   "kinds": [{"name": "source", "files": 1, "...": "same fields as total"}],
   "areas": [{"name": "src", "files": 1, "...": "same fields as total"}],
@@ -179,21 +265,28 @@ file to keep a snapshot.
 }
 ```
 
-- Every category is present in every `categories` object, even when its count is zero.
+- Every category, tag, marker, placement, and construct is present in every count object, even when its count is
+  zero. The top-level `categories`, `tags`, `markers`, `test_placements`, and `constructs` lists give their order.
+- `detectors` lists every semantic detector with its version. A detector's version changes when its rules change, so
+  its counts should only be compared between reports with the same detector version.
 - `kinds` always contains `source`, `tests`, and `other`, in that order. `areas` contains the areas that have files,
   sorted by code lines, files, then name.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
 
-With `--project`, the top level has `report_type: "composition_projects"`, `schema_version`, `analyzer`, a `projects`
+With `--project`, the top level has `report_type: "composition_projects"`, `schema_version`, `analyzer`, `detectors`, a
+`projects`
 array whose items contain `name`, `path`, and a full `report` object as above, and `skipped_projects` for missing
 optional projects.
 
 ## Known Limits
 
-- Categories are structural only. They do not say whether code is framework glue, logging, or compatibility code;
-  semantic tags are planned as a separate, overlapping dimension.
+- Tags only see names bound through imports. They cannot follow objects through attributes, parameters, or return
+  values, so framework and logging usage through `self` or injected objects is undercounted.
+- Framework detection covers Qt only, and the `compat` marker is a wording heuristic.
+- Test placement follows default pytest and unittest conventions; custom `python_functions` or `python_classes`
+  settings are not read.
 - Parsing is limited to the syntax supported by the running interpreter.
 - Files are analyzed sequentially.
 - There is no configuration section for the composition report yet; defaults are used for everything not listed under

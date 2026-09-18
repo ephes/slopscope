@@ -50,9 +50,14 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
         "report_type",
         "schema_version",
         "analyzer",
+        "detectors",
         "path",
         "settings",
         "categories",
+        "tags",
+        "markers",
+        "test_placements",
+        "constructs",
         "total",
         "kinds",
         "areas",
@@ -63,7 +68,7 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
         "failures",
     ]
     assert data["report_type"] == "composition"
-    assert data["schema_version"] == composition.SCHEMA_VERSION
+    assert data["schema_version"] == composition.SCHEMA_VERSION == 2
     assert data["analyzer"] == {
         "name": "slopscope.composition",
         "version": composition.ANALYZER_VERSION,
@@ -84,6 +89,29 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
     assert data["largest_functions"][0]["qualified_name"] == "src/pkg/app.py:App.run"
     assert data["files"][0]["path"] == "docs/conf.py"
     assert data["failures"] == []
+    assert data["detectors"] == [
+        {"name": "qt", "kind": "tag", "version": 1},
+        {"name": "logging", "kind": "tag", "version": 1},
+        {"name": "data_shape", "kind": "tag", "version": 1},
+        {"name": "compat", "kind": "marker", "version": 1},
+        {"name": "test_placement", "kind": "placement", "version": 1},
+    ]
+    assert total["tags"] == {"qt": 0, "logging": 0, "data_shape": 0}
+    assert total["markers"] == {"compat": 0}
+    assert total["test_placement"] == {
+        "test": 2,
+        "fixture": 0,
+        "setup": 0,
+        "module_level": 0,
+        "helper_or_unknown": 0,
+    }
+    assert total["constructs"] == {
+        "classes": 1,
+        "functions": 2,
+        "data_shape_classes": 0,
+        "qt_classes": 0,
+        "tests": 1,
+    }
 
 
 def test_composition_json_is_deterministic(tmp_path: Path) -> None:
@@ -264,7 +292,7 @@ optional = true
     assert exit_code == 0
     data = json.loads(stdout)
     assert data["report_type"] == "composition_projects"
-    assert data["schema_version"] == composition.SCHEMA_VERSION
+    assert data["schema_version"] == composition.SCHEMA_VERSION == 2
     assert [project["name"] for project in data["projects"]] == ["frontend", "backend"]
     assert data["projects"][0]["report"]["report_type"] == "composition"
     assert data["projects"][0]["report"]["total"]["categories"]["import"] == 1
