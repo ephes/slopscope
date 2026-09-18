@@ -14,7 +14,10 @@ from slopscope import (
     cloc,
     composition,
     composition_baseline,
+    composition_churn,
+    composition_duplication,
     composition_render,
+    composition_semantics,
     fallback,
     paths,
     profile,
@@ -121,6 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Compare the composition report with an earlier JSON snapshot at PATH.",
     )
+    parser.add_argument(
+        "--churn",
+        action="store_true",
+        help="Add monthly churn of Python lines from Git history to the composition report.",
+    )
     return parser
 
 
@@ -221,6 +229,7 @@ def _validate_composition_options(
             (args.limit, "--limit"),
             (args.snapshot, "--snapshot"),
             (args.baseline, "--baseline"),
+            (args.churn or None, "--churn"),
         ):
             if value is not None:
                 parser.error(f"{flag} requires --composition")
@@ -239,7 +248,13 @@ def _run_composition(
     out: TextIO,
     err: TextIO,
 ) -> int:
-    limit = args.limit if args.limit is not None else composition.DEFAULT_LIMIT
+    composition_config = slopscope_config.composition
+    if args.limit is not None:
+        limit = args.limit
+    elif composition_config.limit is not None:
+        limit = composition_config.limit
+    else:
+        limit = composition.DEFAULT_LIMIT
     baseline_path = None if args.baseline is None else Path(args.baseline)
     baseline: dict[str, Any] | None = None
     if baseline_path is not None:
@@ -258,6 +273,8 @@ def _run_composition(
     rendered_report: CompositionReport | MultiProjectCompositionReport
     if args.project is None:
         report = _build_composition_report(path, slopscope_config, limit)
+        if args.churn:
+            report = _with_churn(report, path, slopscope_config, err, label=None)
         if baseline is not None and baseline_path is not None:
             report = _with_baseline(report, baseline, baseline_path, err, label=None)
         for failure in report.failures:
@@ -291,6 +308,14 @@ def _run_composition(
         )
         for configured_project in existing_projects:
             report = _build_composition_report(configured_project.path, slopscope_config, limit)
+            if args.churn:
+                report = _with_churn(
+                    report,
+                    configured_project.path,
+                    slopscope_config,
+                    err,
+                    label=configured_project.name,
+                )
             if baseline_path is not None:
                 project_baseline = baseline_projects.get(configured_project.name)
                 if project_baseline is None:
@@ -350,6 +375,30 @@ def _run_composition(
     return 1 if failed else 0
 
 
+def _with_churn(
+    report: CompositionReport,
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    err: TextIO,
+    *,
+    label: str | None,
+) -> CompositionReport:
+    composition_config = slopscope_config.composition
+    churn = composition_churn.collect_churn(
+        path,
+        ref=composition_config.churn_branch or composition_churn.DEFAULT_REF,
+        months=composition_config.churn_months or composition_churn.DEFAULT_MONTHS,
+        excluded_paths=_effective_fallback_excludes(slopscope_config),
+        include_globs=slopscope_config.include_globs,
+        source_dirs=slopscope_config.source_dirs,
+        test_dirs=slopscope_config.test_dirs,
+    )
+    if churn.status != "ok":
+        prefix = "slopscope: " if label is None else f"slopscope: project {label}: "
+        print(f"{prefix}skipping churn: {churn.reason}", file=err)
+    return dataclasses.replace(report, churn=churn)
+
+
 def _with_baseline(
     report: CompositionReport,
     baseline: dict[str, Any],
@@ -370,6 +419,7 @@ def _build_composition_report(
     slopscope_config: config_module.SlopscopeConfig,
     limit: int,
 ) -> CompositionReport:
+    composition_config = slopscope_config.composition
     return composition.build_composition_report(
         path,
         excluded_paths=_effective_fallback_excludes(slopscope_config),
@@ -378,6 +428,13 @@ def _build_composition_report(
         test_dirs=slopscope_config.test_dirs,
         named_areas=slopscope_config.areas,
         limit=limit,
+        min_duplicate_tokens=composition_config.min_duplicate_tokens
+        or composition_duplication.DEFAULT_MIN_TOKENS,
+        semantic_settings=composition_semantics.SemanticSettings.configured(
+            qt_modules=composition_config.qt_modules,
+            logging_patterns=composition_config.logging_patterns,
+            compat_markers=composition_config.compat_markers,
+        ),
     )
 
 

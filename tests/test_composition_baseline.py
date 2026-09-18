@@ -131,7 +131,7 @@ def test_baseline_can_be_overwritten_by_the_snapshot(tmp_path: Path) -> None:
         (None, "baseline file not found"),
         ("{not json", "is not valid JSON"),
         ("[]", "is not a composition report"),
-        ('{"report_type": "composition_projects", "schema_version": 3}', "has report_type"),
+        ('{"report_type": "composition_projects", "schema_version": 4}', "has report_type"),
         ('{"engine": "python", "path": "."}', "has report_type None"),
         ('{"report_type": "composition", "schema_version": 1}', "has schema_version 1"),
     ],
@@ -256,7 +256,7 @@ def test_snapshot_and_baseline_require_composition(
 
 
 def test_schema_version_is_current() -> None:
-    assert composition.SCHEMA_VERSION == 3
+    assert composition.SCHEMA_VERSION == 4
 
 
 @pytest.mark.parametrize(

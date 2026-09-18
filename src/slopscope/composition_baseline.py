@@ -40,6 +40,10 @@ METRICS = (
 )
 
 
+# Settings that only change what is listed, not what is counted.
+_PRESENTATION_SETTINGS = frozenset({"language", "limit"})
+
+
 class BaselineError(Exception):
     """User-facing baseline loading error."""
 
@@ -147,6 +151,16 @@ def compare(
             warnings.append(
                 f"detector {detector.name} version differs: baseline "
                 f"{baseline_detectors.get(detector.name)!r}, current {detector.version}"
+            )
+    baseline_settings = baseline.get("settings")
+    baseline_settings = baseline_settings if isinstance(baseline_settings, dict) else {}
+    for name, value in report.settings.as_mapping().items():
+        if name in _PRESENTATION_SETTINGS:
+            continue
+        if baseline_settings.get(name) != value:
+            warnings.append(
+                f"setting {name} differs: baseline {baseline_settings.get(name)!r}, "
+                f"current {value!r}"
             )
     comparable = not warnings
     if baseline_python_version != report.python_version:

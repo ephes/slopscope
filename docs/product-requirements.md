@@ -100,6 +100,7 @@ Required options:
 - `--limit N`: limit the largest modules, classes, functions, and duplicate blocks lists in the composition report.
 - `--snapshot PATH`: also write the composition JSON report to a file.
 - `--baseline PATH`: compare the composition report with an earlier snapshot.
+- `--churn`: add monthly churn of Python lines from Git history to the composition report.
 
 ## Configuration Requirements
 
@@ -117,6 +118,7 @@ Configuration must support:
 - named projects with relative paths
 - optional projects that can be skipped when missing
 - named profiles for YAML totals or grouped reports
+- composition report defaults under `[tool.slopscope.composition]`
 
 Example:
 
@@ -186,6 +188,8 @@ Composition report:
 - Test-file placement must use conservative pytest and unittest rules with an explicit helper-or-unknown bucket.
 - Duplicate detection must be token-based, verify every match, and merge matched intervals instead of scoring pairs.
 - Snapshots and baselines must reject a baseline with a different schema version.
+- Git churn must be opt-in, read the configured branch rather than assuming `main`, handle renames and subdirectories,
+  and skip cleanly outside Git.
 - Must report files that cannot be read, decoded, or parsed on stderr and exit non-zero, without dropping them
   silently.
 - Must use a distinct JSON shape with `report_type`, `schema_version`, analyzer version, and the parsing Python

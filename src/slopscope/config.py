@@ -37,6 +37,19 @@ class ProfileConfig:
 
 
 @dataclass(frozen=True)
+class CompositionConfig:
+    """Validated ``[tool.slopscope.composition]`` settings; ``None`` means built-in default."""
+
+    limit: int | None = None
+    min_duplicate_tokens: int | None = None
+    qt_modules: tuple[str, ...] = ()
+    logging_patterns: tuple[str, ...] = ()
+    compat_markers: tuple[str, ...] | None = None
+    churn_branch: str | None = None
+    churn_months: int | None = None
+
+
+@dataclass(frozen=True)
 class SlopscopeConfig:
     """Validated ``[tool.slopscope]`` configuration."""
 
@@ -50,6 +63,7 @@ class SlopscopeConfig:
     nested_bucket_dirs: tuple[str, ...] = classify.DEFAULT_NESTED_BUCKET_DIRS
     projects: tuple[ProjectConfig, ...] = ()
     profiles: tuple[ProfileConfig, ...] = ()
+    composition: CompositionConfig = CompositionConfig()
 
 
 _STRING_LIST_FIELDS = {
@@ -62,7 +76,16 @@ _STRING_LIST_FIELDS = {
     "areas",
     "nested_bucket_dirs",
 }
-_TOP_LEVEL_FIELDS = _STRING_LIST_FIELDS | {"projects", "profiles"}
+_TOP_LEVEL_FIELDS = _STRING_LIST_FIELDS | {"projects", "profiles", "composition"}
+_COMPOSITION_FIELDS = {
+    "limit",
+    "min_duplicate_tokens",
+    "qt_modules",
+    "logging_patterns",
+    "compat_markers",
+    "churn_branch",
+    "churn_months",
+}
 _PROFILE_FIELDS = {
     "name",
     "include_languages",
@@ -152,7 +175,43 @@ def parse_config_mapping(
         ),
         projects=_projects_tuple(data, config_path=config_path),
         profiles=_profiles_tuple(data),
+        composition=_composition_config(data),
     )
+
+
+def _composition_config(data: Mapping[str, object]) -> CompositionConfig:
+    value = data.get("composition")
+    if value is None:
+        return CompositionConfig()
+    if not isinstance(value, dict):
+        raise ConfigError("composition must be a table")
+    unknown = sorted(set(value) - _COMPOSITION_FIELDS)
+    if unknown:
+        raise ConfigError(f"unknown [tool.slopscope.composition] field: {unknown[0]}")
+
+    context = "composition"
+    compat_markers = (
+        _string_tuple(value, "compat_markers", default=()) if "compat_markers" in value else None
+    )
+    return CompositionConfig(
+        limit=_optional_positive_int(value, "limit", context=context),
+        min_duplicate_tokens=_optional_positive_int(value, "min_duplicate_tokens", context=context),
+        qt_modules=_string_tuple(value, "qt_modules", default=()),
+        logging_patterns=_string_tuple(value, "logging_patterns", default=()),
+        compat_markers=compat_markers,
+        churn_branch=_optional_string(value, "churn_branch", context=context),
+        churn_months=_churn_months(value),
+    )
+
+
+_MAX_CHURN_MONTHS = 1200
+
+
+def _churn_months(data: Mapping[str, object]) -> int | None:
+    months = _optional_positive_int(data, "churn_months", context="composition")
+    if months is not None and months > _MAX_CHURN_MONTHS:
+        raise ConfigError(f"composition.churn_months must be at most {_MAX_CHURN_MONTHS}")
+    return months
 
 
 def _string_tuple(

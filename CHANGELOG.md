@@ -17,10 +17,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   modules, and reports statement counts, continuation lines, code lines per statement, per source/test and area
   totals, and the largest modules, classes, and functions. It supports `--config`, `--project`, `--format`, and
   `--no-color`; `--limit N` sets the largest-item list size. Read, decode, and parse failures are reported on stderr
-  and exit with code 1. JSON output uses a new, separate shape with `report_type: "composition"` and
-  `schema_version: 2`.
-- Reject `--engine`, `--profile`, `--total-only`, and `--top` together with `--composition`, and `--limit` without
-  it, with argparse usage errors. The default report, profiles, and existing JSON shapes are unchanged; `--help` now
+  and exit with code 1. JSON output uses a new, separate shape with `report_type: "composition"` (or
+  `"composition_projects"` with `--project`); its first released `schema_version` is 4, because the shape changed
+  while the report was developed.
+- Reject `--engine`, `--profile`, `--total-only`, and `--top` together with `--composition`, and `--limit`,
+  `--snapshot`, `--baseline`, and `--churn` without it, with argparse usage errors. The default report, profiles, and existing JSON shapes are unchanged; `--help` now
   lists the new options and shows `--engine`'s `auto` default in its help text.
 - Add semantic tags to the composition report as a separate, overlapping dimension over code lines: `qt` for names
   bound from PySide/PyQt/qtpy imports, `logging` for the `logging` module and loggers assigned from
@@ -33,7 +34,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   of the largest duplicate blocks with all their copies.
 - Add `--snapshot PATH` to write the composition JSON to a file and `--baseline PATH` to compare with an earlier
   snapshot. Baselines with a different report type or schema version are rejected; analyzer or detector version
-  differences are reported as warnings. The composition JSON schema version is now 3.
+  differences are reported as warnings.
+- Add a `[tool.slopscope.composition]` configuration section with `limit`, `min_duplicate_tokens`, extra `qt_modules`,
+  opt-in `logging_patterns`, `compat_markers`, `churn_branch`, and `churn_months`. Baselines report differing counting
+  settings as warnings.
+- Add `--churn` to the composition report: Python lines added and removed per month on the configured branch's
+  first-parent history, limited to the analyzed path, following renames, and skipped with a notice outside Git.
 - Amend the "deep language parsing" non-goal to allow the opt-in, Python-only composition report.
 
 ## 0.1.0a1 - 2026-05-10

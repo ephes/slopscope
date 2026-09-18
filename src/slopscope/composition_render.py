@@ -15,6 +15,7 @@ from slopscope.report import (
     COMPOSITION_TAGS,
     COMPOSITION_TEST_PLACEMENTS,
     CompositionAggregate,
+    CompositionChurn,
     CompositionClassRow,
     CompositionComparison,
     CompositionCounts,
@@ -111,6 +112,9 @@ def render_composition_plain(report: RenderableCompositionReport) -> str:
     lines.extend(_plain_functions(report.largest_functions))
     lines.append("")
     lines.extend(_plain_duplication(report))
+    if report.churn is not None:
+        lines.append("")
+        lines.extend(_plain_churn(report.churn))
     if report.failures:
         lines.append("")
         lines.extend(_plain_failures(report.failures))
@@ -174,16 +178,7 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
         },
         "detectors": [_detector_to_dict(detector) for detector in report.detectors],
         "path": str(report.path),
-        "settings": {
-            "language": "Python",
-            "limit": settings.limit,
-            "min_duplicate_tokens": settings.min_duplicate_tokens,
-            "excluded_paths": list(settings.excluded_paths),
-            "include_globs": list(settings.include_globs),
-            "source_dirs": list(settings.source_dirs),
-            "test_dirs": list(settings.test_dirs),
-            "areas": list(settings.areas),
-        },
+        "settings": settings.as_mapping(),
         "categories": list(COMPOSITION_CATEGORIES),
         "tags": list(COMPOSITION_TAGS),
         "markers": list(COMPOSITION_MARKERS),
@@ -197,6 +192,7 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
         "largest_functions": [_function_to_dict(row) for row in report.largest_functions],
         "duplicates": [_duplicate_to_dict(block) for block in report.duplicates],
         "baseline": None if report.baseline is None else _comparison_to_dict(report.baseline),
+        "churn": None if report.churn is None else _churn_to_dict(report.churn),
         "files": [_file_to_dict(row) for row in report.files],
         "failures": [_failure_to_dict(failure) for failure in report.failures],
     }
@@ -258,6 +254,58 @@ def _function_to_dict(row: CompositionFunctionRow) -> dict[str, Any]:
         "lines": row.lines,
         "kind": row.kind,
     }
+
+
+_CHURN_KINDS = ("source", "tests", "other")
+
+
+def _churn_to_dict(churn: CompositionChurn) -> dict[str, Any]:
+    return {
+        "ref": churn.ref,
+        "months": churn.months,
+        "since": churn.since,
+        "status": churn.status,
+        "reason": churn.reason,
+        "rows": [
+            {
+                "month": row.month,
+                "added": {
+                    "total": sum(row.added),
+                    **dict(zip(_CHURN_KINDS, row.added, strict=True)),
+                },
+                "removed": {
+                    "total": sum(row.removed),
+                    **dict(zip(_CHURN_KINDS, row.removed, strict=True)),
+                },
+                "net": {
+                    "total": sum(row.net),
+                    **dict(zip(_CHURN_KINDS, row.net, strict=True)),
+                },
+            }
+            for row in churn.rows
+        ],
+    }
+
+
+def _churn_title(churn: CompositionChurn) -> str:
+    return f"Monthly Churn (Python lines on {churn.ref}, first-parent, since {churn.since})"
+
+
+def _plain_churn(churn: CompositionChurn) -> list[str]:
+    if churn.status != "ok":
+        return ["Monthly Churn", f"(skipped: {churn.reason})"]
+    header = (
+        f"{'Month':<8} {'Added':>9} {'Removed':>9} {'Net':>9} "
+        f"{'Source Net':>10} {'Tests Net':>10} {'Other Net':>10}"
+    )
+    lines = [_churn_title(churn), header, "-" * len(header)]
+    for row in churn.rows:
+        source, tests, other = row.net
+        lines.append(
+            f"{row.month:<8} {sum(row.added):>9} {sum(row.removed):>9} {sum(row.net):>+9} "
+            f"{source:>+10} {tests:>+10} {other:>+10}"
+        )
+    return lines
 
 
 def _comparison_to_dict(comparison: CompositionComparison) -> dict[str, Any]:
@@ -643,6 +691,9 @@ def _print_rich_report(
     _print_rich_functions(console, table_class, report.largest_functions)
     console.print()
     _print_rich_duplication(console, table_class, report)
+    if report.churn is not None:
+        console.print()
+        _print_rich_churn(console, table_class, text_class, report.churn)
     if report.failures:
         console.print()
         table = table_class(title="Failures", title_style="bold red")
@@ -837,6 +888,33 @@ def _print_rich_functions(
         table.add_row("(no functions)", "", "", "")
     for row in rows:
         table.add_row(row.qualified_name, str(row.line), row.kind, str(row.lines))
+    console.print(table)
+
+
+def _print_rich_churn(
+    console: Any,
+    table_class: Any,
+    text_class: Any,
+    churn: CompositionChurn,
+) -> None:
+    if churn.status != "ok":
+        console.print(text_class(f"Monthly Churn skipped: {churn.reason}", style="yellow"))
+        return
+    table = table_class(title=_churn_title(churn), title_style="bold blue")
+    table.add_column("Month", style="cyan")
+    for name in ("Added", "Removed", "Net", "Source Net", "Tests Net", "Other Net"):
+        table.add_column(name, justify="right", style="green")
+    for row in churn.rows:
+        source, tests, other = row.net
+        table.add_row(
+            row.month,
+            str(sum(row.added)),
+            str(sum(row.removed)),
+            f"{sum(row.net):+d}",
+            f"{source:+d}",
+            f"{tests:+d}",
+            f"{other:+d}",
+        )
     console.print(table)
 
 

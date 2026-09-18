@@ -70,7 +70,7 @@ DATA_SHAPE_BASES = frozenset(
         "pydantic.BaseModel",
     }
 )
-COMPAT_MARKER = re.compile(r"legacy|fallback|compat", re.IGNORECASE)
+DEFAULT_COMPAT_MARKERS = ("legacy", "fallback", "compat")
 
 PYTEST_FIXTURES = frozenset({"pytest.fixture", "pytest_asyncio.fixture"})
 UNITTEST_BASES = frozenset(
@@ -104,6 +104,42 @@ _FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 @dataclass(frozen=True)
+class SemanticSettings:
+    """Detector settings: built-in defaults plus ``[tool.slopscope.composition]`` values."""
+
+    qt_modules: tuple[str, ...] = tuple(sorted(QT_MODULES))
+    logging_patterns: tuple[str, ...] = ()
+    compat_markers: tuple[str, ...] = DEFAULT_COMPAT_MARKERS
+
+    @classmethod
+    def configured(
+        cls,
+        *,
+        qt_modules: Iterable[str] = (),
+        logging_patterns: Iterable[str] = (),
+        compat_markers: Iterable[str] | None = None,
+    ) -> SemanticSettings:
+        """Add configured Qt modules to the defaults and apply the other settings."""
+
+        return cls(
+            qt_modules=tuple(dict.fromkeys((*sorted(QT_MODULES), *qt_modules))),
+            logging_patterns=tuple(logging_patterns),
+            compat_markers=DEFAULT_COMPAT_MARKERS
+            if compat_markers is None
+            else tuple(compat_markers),
+        )
+
+
+DEFAULT_SETTINGS = SemanticSettings()
+
+
+def in_modules(qualified: str, modules: Iterable[str]) -> bool:
+    """Return whether a qualified name is one of the modules or lies inside one."""
+
+    return any(qualified == module or qualified.startswith(f"{module}.") for module in modules)
+
+
+@dataclass(frozen=True)
 class Unit:
     """Lines claimed by one simple statement or compound-statement header, with its nodes."""
 
@@ -134,9 +170,9 @@ class ImportMap:
 
     def __init__(self, nodes: Iterable[ast.Import | ast.ImportFrom]) -> None:
         self.names: dict[str, set[str]] = {}
-        self.roots: set[str] = set()
+        self.modules: set[str] = set()
         for node in nodes:
-            self.roots.update(_import_roots(node))
+            self.modules.update(_imported_modules(node))
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.asname is not None:
@@ -162,15 +198,36 @@ class ImportMap:
             return frozenset(f"{base}.{node.attr}" for base in self.resolve(node.value))
         return frozenset()
 
-    def names_from(self, modules: Iterable[str]) -> frozenset[str]:
-        """Return local names bound from any of the given top-level modules."""
+    def names_from(self, modules: Sequence[str]) -> frozenset[str]:
+        """Return local names bound to one of the modules or to something inside one."""
 
-        roots = set(modules)
         return frozenset(
             name
             for name, qualified_names in self.names.items()
-            if any(qualified.split(".", 1)[0] in roots for qualified in qualified_names)
+            if any(in_modules(qualified, modules) for qualified in qualified_names)
         )
+
+    def names_above(self, modules: Sequence[str]) -> frozenset[str]:
+        """Return local names bound to a package that contains one of the modules.
+
+        ``import app.qt`` binds ``app``; attribute chains such as ``app.qt.Label`` on it must be
+        resolved before they can count.
+        """
+
+        return frozenset(
+            name
+            for name, qualified_names in self.names.items()
+            if any(
+                module.startswith(f"{qualified}.")
+                for qualified in qualified_names
+                for module in modules
+            )
+        )
+
+    def imports_any(self, modules: Sequence[str]) -> bool:
+        """Return whether the file imports one of the modules or something inside one."""
+
+        return any(in_modules(module, modules) for module in self.modules)
 
 
 def dotted_name(node: ast.AST) -> str | None:
@@ -192,6 +249,7 @@ def detect(
     tokens: Sequence[tokenize.TokenInfo],
     first_line: dict[int, int],
     test_file: bool,
+    settings: SemanticSettings = DEFAULT_SETTINGS,
 ) -> SemanticCounts:
     """Run every detector over one parsed file.
 
@@ -202,20 +260,24 @@ def detect(
     imports = ImportMap(scan.imports)
     tag_lines: dict[str, set[int]] = {tag: set() for tag in COMPOSITION_TAGS}
 
-    qt_names = imports.names_from(QT_MODULES)
-    qt_active = bool(imports.roots & QT_MODULES)
+    qt_modules = settings.qt_modules
+    qt_names = imports.names_from(qt_modules)
+    qt_active = imports.imports_any(qt_modules)
     logger_targets = _logger_targets(scan.assignments, imports)
-    logging_active = "logging" in imports.roots
+    logging_active = imports.imports_any(("logging",)) or bool(settings.logging_patterns)
     if qt_active or logging_active:
+        context = _TagContext(
+            imports=imports,
+            qt_modules=qt_modules,
+            qt_names=qt_names,
+            qt_packages=imports.names_above(qt_modules),
+            qt_active=qt_active,
+            logger_targets=logger_targets,
+            logging_patterns=settings.logging_patterns,
+            logging_active=logging_active,
+        )
         for unit in units:
-            is_qt, is_logging = _unit_tags(
-                unit.nodes,
-                imports,
-                qt_names=qt_names,
-                qt_active=qt_active,
-                logger_targets=logger_targets,
-                logging_active=logging_active,
-            )
+            is_qt, is_logging = _unit_tags(unit.nodes, context)
             if not is_qt and not is_logging:
                 continue
             unit_lines = [line for line in range(unit.start, unit.end + 1) if line in code_lines]
@@ -227,7 +289,7 @@ def detect(
     data_shape_classes = 0
     qt_classes = 0
     for node in scan.classes:
-        if qt_names and any(_resolves_to_qt(base, imports) for base in node.bases):
+        if qt_active and any(_resolves_into(base, imports, qt_modules) for base in node.bases):
             qt_classes += 1
         if _is_data_shape(node, imports):
             data_shape_classes += 1
@@ -237,7 +299,7 @@ def detect(
                         line for line in range(stmt.lineno, _end(stmt) + 1) if line in code_lines
                     )
 
-    marker_lines = _compat_marker_lines(tokens, code_lines)
+    marker_lines = _compat_marker_lines(tokens, code_lines, settings.compat_markers)
 
     placements = (0,) * len(COMPOSITION_TEST_PLACEMENTS)
     tests = 0
@@ -267,8 +329,8 @@ def _walk(nodes: Iterable[ast.AST]) -> Iterator[ast.AST]:
         yield from ast.walk(node)
 
 
-def _resolves_to_qt(node: ast.AST, imports: ImportMap) -> bool:
-    return any(qualified.split(".", 1)[0] in QT_MODULES for qualified in imports.resolve(node))
+def _resolves_into(node: ast.AST, imports: ImportMap, modules: Sequence[str]) -> bool:
+    return any(in_modules(qualified, modules) for qualified in imports.resolve(node))
 
 
 class _Scan:
@@ -306,12 +368,16 @@ def _statements(body: Iterable[ast.stmt]) -> Iterator[ast.stmt]:
         stack.extend(reversed(blocks))
 
 
-def _import_roots(node: ast.Import | ast.ImportFrom) -> set[str]:
+def _imported_modules(node: ast.Import | ast.ImportFrom) -> set[str]:
+    """Return the absolute module names an import statement imports from or binds."""
+
     if isinstance(node, ast.Import):
-        return {alias.name.split(".", 1)[0] for alias in node.names}
-    if node.level:
+        return {alias.name for alias in node.names}
+    if node.level or not node.module:
         return set()
-    return {(node.module or "").split(".", 1)[0]}
+    return {node.module} | {
+        f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"
+    }
 
 
 def _is_logging_getlogger(node: ast.AST, imports: ImportMap) -> bool:
@@ -336,41 +402,62 @@ def _logger_targets(
     return frozenset(targets)
 
 
-def _is_logging_call(node: ast.Call, imports: ImportMap, logger_targets: frozenset[str]) -> bool:
+def _is_logging_call(node: ast.Call, context: _TagContext) -> bool:
+    imports = context.imports
     if any(qualified.startswith("logging.") for qualified in imports.resolve(node.func)):
         return True
     func = node.func
     if isinstance(func, ast.Attribute) and func.attr in LOGGER_METHODS:
         receiver = func.value
-        return dotted_name(receiver) in logger_targets or _is_logging_getlogger(receiver, imports)
+        if dotted_name(receiver) in context.logger_targets or _is_logging_getlogger(
+            receiver, imports
+        ):
+            return True
+    if context.logging_patterns:
+        name = dotted_name(func)
+        return name is not None and any(pattern in name for pattern in context.logging_patterns)
     return False
 
 
-def _unit_tags(
-    nodes: Sequence[ast.AST],
-    imports: ImportMap,
-    *,
-    qt_names: frozenset[str],
-    qt_active: bool,
-    logger_targets: frozenset[str],
-    logging_active: bool,
-) -> tuple[bool, bool]:
+@dataclass(frozen=True)
+class _TagContext:
+    imports: ImportMap
+    qt_modules: tuple[str, ...]
+    qt_names: frozenset[str]
+    qt_packages: frozenset[str]
+    qt_active: bool
+    logger_targets: frozenset[str]
+    logging_patterns: tuple[str, ...]
+    logging_active: bool
+
+
+def _root_name(node: ast.AST) -> str | None:
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def _unit_tags(nodes: Sequence[ast.AST], context: _TagContext) -> tuple[bool, bool]:
     """Return whether a unit references Qt names and whether it makes a logging call."""
 
+    imports = context.imports
     is_qt = False
     is_logging = False
     for node in _walk(nodes):
         if isinstance(node, ast.Name):
-            is_qt = is_qt or node.id in qt_names
-        elif isinstance(node, ast.Call):
-            is_logging = is_logging or (
-                logging_active and _is_logging_call(node, imports, logger_targets)
+            is_qt = is_qt or node.id in context.qt_names
+        elif isinstance(node, ast.Attribute):
+            is_qt = is_qt or (
+                _root_name(node) in context.qt_packages
+                and _resolves_into(node, imports, context.qt_modules)
             )
+        elif isinstance(node, ast.Call):
+            is_logging = is_logging or (context.logging_active and _is_logging_call(node, context))
         elif isinstance(node, ast.Import | ast.ImportFrom):
-            roots = _import_roots(node)
-            is_qt = is_qt or bool(roots & QT_MODULES)
-            is_logging = is_logging or "logging" in roots
-        if (is_qt or not qt_active) and (is_logging or not logging_active):
+            modules = _imported_modules(node)
+            is_qt = is_qt or any(in_modules(module, context.qt_modules) for module in modules)
+            is_logging = is_logging or any(in_modules(module, ("logging",)) for module in modules)
+        if (is_qt or not context.qt_active) and (is_logging or not context.logging_active):
             break
     return is_qt, is_logging
 
@@ -391,15 +478,19 @@ def _is_data_shape(node: ast.ClassDef, imports: ImportMap) -> bool:
 def _compat_marker_lines(
     tokens: Sequence[tokenize.TokenInfo],
     code_lines: frozenset[int],
+    words: Sequence[str],
 ) -> set[int]:
     """Return code lines with an identifier that contains a compatibility marker word."""
 
+    if not words:
+        return set()
+    pattern = re.compile("|".join(re.escape(word) for word in words), re.IGNORECASE)
     return {
         token.start[0]
         for token in tokens
         if token.type == tokenize.NAME
         and token.start[0] in code_lines
-        and COMPAT_MARKER.search(token.string)
+        and pattern.search(token.string)
     }
 
 

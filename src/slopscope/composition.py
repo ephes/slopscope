@@ -38,7 +38,7 @@ from slopscope.report import (
 
 ANALYZER_NAME = "slopscope.composition"
 ANALYZER_VERSION = 1
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"
 SOURCE_TEST_KINDS = ("source", "tests", "other")
@@ -118,6 +118,7 @@ def analyze_source(
     path: str = "<source>",
     test_file: bool = False,
     interner: dict[str, int] | None = None,
+    settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
 ) -> FileAnalysis:
     """Classify every physical line of Python source text and run the semantic detectors.
 
@@ -146,7 +147,7 @@ def analyze_source(
     classifier = _LineClassifier(lines)
     classifier.mark_blank_and_comment_lines(tokens)
     classifier.visit_body(tree.body, allow_docstring=True)
-    analysis = classifier.result(tree, tokens, test_file=test_file)
+    analysis = classifier.result(tree, tokens, test_file=test_file, settings=settings)
     if interner is None:
         return analysis
     segments = composition_duplication.token_segments(tokens, analysis.line_categories, interner)
@@ -159,6 +160,7 @@ def analyze_file(
     *,
     test_file: bool = False,
     interner: dict[str, int] | None = None,
+    settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
 ) -> FileAnalysis:
     """Read one file with PEP 263 encoding detection and classify its lines."""
 
@@ -173,7 +175,9 @@ def analyze_file(
         raise CompositionAnalysisError(f"decode error: {exc.msg}") from exc
     except OSError as exc:
         raise CompositionAnalysisError(f"I/O error: {exc.strerror or exc}") from exc
-    return analyze_source(source, path=relative_path, test_file=test_file, interner=interner)
+    return analyze_source(
+        source, path=relative_path, test_file=test_file, interner=interner, settings=settings
+    )
 
 
 def discover_python_files(
@@ -210,6 +214,9 @@ def build_composition_report(
     named_areas: Sequence[str] = classify.DEFAULT_NAMED_AREAS,
     limit: int = DEFAULT_LIMIT,
     min_duplicate_tokens: int = composition_duplication.DEFAULT_MIN_TOKENS,
+    semantic_settings: composition_semantics.SemanticSettings = (
+        composition_semantics.DEFAULT_SETTINGS
+    ),
 ) -> CompositionReport:
     """Discover, analyze, classify, and aggregate Python files below a path."""
 
@@ -231,7 +238,11 @@ def build_composition_report(
         )
         try:
             analysis = analyze_file(
-                root, relative_path, test_file=kind == "tests", interner=interner
+                root,
+                relative_path,
+                test_file=kind == "tests",
+                interner=interner,
+                settings=semantic_settings,
             )
         except CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
@@ -320,6 +331,9 @@ def build_composition_report(
         settings=CompositionSettings(
             limit=limit,
             min_duplicate_tokens=min_duplicate_tokens,
+            qt_modules=semantic_settings.qt_modules,
+            logging_patterns=semantic_settings.logging_patterns,
+            compat_markers=semantic_settings.compat_markers,
             excluded_paths=tuple(excluded_paths),
             include_globs=tuple(include_globs),
             source_dirs=tuple(source_dirs),
@@ -489,6 +503,7 @@ class _LineClassifier:
         tokens: Sequence[tokenize.TokenInfo],
         *,
         test_file: bool,
+        settings: composition_semantics.SemanticSettings,
     ) -> FileAnalysis:
         counts = [0] * len(COMPOSITION_CATEGORIES)
         line_categories: list[str] = []
@@ -511,6 +526,7 @@ class _LineClassifier:
             tokens=tokens,
             first_line=self.first_lines,
             test_file=test_file,
+            settings=settings,
         )
         constructs = {
             "classes": len(self.classes),

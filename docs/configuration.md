@@ -191,10 +191,26 @@ exclude_dirs = [
 
 ## Composition Report
 
-`slopscope --composition` uses the same configuration without a section of its own. `exclude_dirs` and
-`include_globs` shape discovery; `source_dirs`, `test_dirs`, and `areas` shape the source/test and area breakdowns;
-`projects` work with `--project`. `include_languages`, `exclude_languages`, and `profiles` do not apply, because the
-report is Python-only and cannot be combined with `--profile`. See [Composition Report](composition.md).
+`slopscope --composition` uses the same top-level configuration: `exclude_dirs` and `include_globs` shape discovery;
+`source_dirs`, `test_dirs`, and `areas` shape the source/test and area breakdowns; `projects` work with `--project`.
+`include_languages`, `exclude_languages`, and `profiles` do not apply, because the report is Python-only and cannot be
+combined with `--profile`.
+
+The composition report also has its own optional section:
+
+```toml
+[tool.slopscope.composition]
+limit = 20
+min_duplicate_tokens = 80
+qt_modules = ["app.ui.qt"]
+logging_patterns = ["audit_log"]
+compat_markers = ["legacy", "fallback", "compat", "deprecated"]
+churn_branch = "main"
+churn_months = 24
+```
+
+See [Composition Report](composition.md#configuration) for what each field does. `0.1.0a1` rejects this section as an
+unknown field.
 
 ## Notes
 

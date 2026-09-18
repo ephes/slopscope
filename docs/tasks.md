@@ -6,9 +6,7 @@ repository shapes and product behavior, not private source projects.
 ## Current
 
 - [ ] Prepare the next pre-release if the `rich` optional extra should be available from the package index.
-- [ ] Composition report later: monthly Git churn for the analyzed repository and configured branch, `--jobs`, a
-  `[tool.slopscope.composition]` section with configured framework modules and opt-in logging patterns, and a
-  release.
+- [ ] Release the composition report with the next pre-release.
 
 ## Done
 
@@ -76,6 +74,8 @@ repository shapes and product behavior, not private source projects.
   placement with a `helper_or_unknown` bucket.
 - [x] Composition report slice 3: token-based duplication detection with preserved adjacency, verified matches, and
   merged intervals; `--snapshot PATH` and `--baseline PATH` with schema-version checks.
+- [x] Composition report: `[tool.slopscope.composition]` configuration, opt-in monthly Git churn on the configured
+  branch, and a `--jobs` measurement that showed no need for parallel parsing.
 
 ## Later
 

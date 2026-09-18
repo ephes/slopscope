@@ -436,11 +436,31 @@ class CompositionSettings:
 
     limit: int
     min_duplicate_tokens: int
+    qt_modules: tuple[str, ...]
+    logging_patterns: tuple[str, ...]
+    compat_markers: tuple[str, ...]
     excluded_paths: tuple[str, ...]
     include_globs: tuple[str, ...]
     source_dirs: tuple[str, ...]
     test_dirs: tuple[str, ...]
     areas: tuple[str, ...]
+
+    def as_mapping(self) -> dict[str, object]:
+        """Return the settings as JSON-ready values, in output order."""
+
+        return {
+            "language": "Python",
+            "limit": self.limit,
+            "min_duplicate_tokens": self.min_duplicate_tokens,
+            "qt_modules": list(self.qt_modules),
+            "logging_patterns": list(self.logging_patterns),
+            "compat_markers": list(self.compat_markers),
+            "excluded_paths": list(self.excluded_paths),
+            "include_globs": list(self.include_globs),
+            "source_dirs": list(self.source_dirs),
+            "test_dirs": list(self.test_dirs),
+            "areas": list(self.areas),
+        }
 
 
 @dataclass(frozen=True)
@@ -487,6 +507,33 @@ class CompositionComparison:
 
 
 @dataclass(frozen=True)
+class CompositionChurnMonth:
+    """Python lines added and removed in one month, per source/tests/other kind."""
+
+    month: str
+    added: tuple[int, ...]
+    removed: tuple[int, ...]
+
+    @property
+    def net(self) -> tuple[int, ...]:
+        """Added minus removed, per kind."""
+
+        return tuple(a - r for a, r in zip(self.added, self.removed, strict=True))
+
+
+@dataclass(frozen=True)
+class CompositionChurn:
+    """Monthly churn of Python lines on one Git ref, or why it was skipped."""
+
+    ref: str
+    months: int
+    since: str
+    status: str
+    reason: str | None
+    rows: tuple[CompositionChurnMonth, ...]
+
+
+@dataclass(frozen=True)
 class CompositionReport:
     """Complete Python composition report for one path."""
 
@@ -507,6 +554,7 @@ class CompositionReport:
     duplicates: tuple[CompositionDuplicateBlock, ...]
     failures: tuple[CompositionFailure, ...]
     baseline: CompositionComparison | None = None
+    churn: CompositionChurn | None = None
 
 
 @dataclass(frozen=True)

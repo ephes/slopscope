@@ -35,8 +35,9 @@ reusable Python CLI that can be added as a development dependency.
   (blank, comment, docstring, import, definition, assertion, error handling, literal data, other code), statement
   counts, continuation lines, overlapping semantic tags (Qt, logging, data shapes) resolved through imports, a
   compatibility-wording marker, test-file placement (tests, fixtures, setup, module level, helpers), token-based
-  duplicate detection, the largest modules, classes, and functions, and JSON snapshots with baseline comparison.
-  Standard library `ast` and `tokenize` only.
+  duplicate detection, the largest modules, classes, and functions, JSON snapshots with baseline comparison, and
+  opt-in monthly churn from Git history. Standard library `ast` and `tokenize` only, configurable through
+  `[tool.slopscope.composition]`.
 
 ## Planned Features
 
@@ -104,6 +105,7 @@ uv run slopscope --composition --format json > composition.json
 uv run slopscope --composition --project all --limit 20
 uv run slopscope --composition --snapshot composition.json
 uv run slopscope --composition --baseline composition.json
+uv run slopscope --composition --churn
 ```
 
 For migration compatibility, the package also exposes:
@@ -189,7 +191,10 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
-file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version. `--engine`, `--profile`, `--total-only`, and `--top`
+file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
+`--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
+`[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
+patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and `--top`
 cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr and in
 the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"` shape. See
 [Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and known limits.

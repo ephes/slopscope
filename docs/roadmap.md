@@ -139,9 +139,10 @@ Slice 3: duplication, snapshots, and baselines.
 
 Later:
 
-- [ ] Report monthly churn from Git in the analyzed repository: use the configured branch rather than assuming
+- [x] Report monthly churn from Git in the analyzed repository: use the configured branch rather than assuming
   `main`, handle renames and subdirectory paths, and skip the section outside Git.
-- [ ] Add parallel parsing (`--jobs`) if measurements show a need.
-- [ ] Add a `[tool.slopscope.composition]` configuration section, including configured framework modules and opt-in
+- [x] Measure whether parallel parsing (`--jobs`) is needed. A repository of about 980 Python files and 536,000 lines
+  takes about 5 seconds sequentially, so `--jobs` is not added.
+- [x] Add a `[tool.slopscope.composition]` configuration section, including configured framework modules and opt-in
   logging substring patterns.
 - [ ] Release the composition report.

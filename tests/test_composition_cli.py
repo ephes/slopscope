@@ -66,11 +66,12 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
         "largest_functions",
         "duplicates",
         "baseline",
+        "churn",
         "files",
         "failures",
     ]
     assert data["report_type"] == "composition"
-    assert data["schema_version"] == composition.SCHEMA_VERSION == 3
+    assert data["schema_version"] == composition.SCHEMA_VERSION == 4
     assert data["analyzer"] == {
         "name": "slopscope.composition",
         "version": composition.ANALYZER_VERSION,
@@ -103,6 +104,7 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
     assert total["duplicated_lines"] == 0
     assert data["duplicates"] == []
     assert data["baseline"] is None
+    assert data["churn"] is None
     assert total["tags"] == {"qt": 0, "logging": 0, "data_shape": 0}
     assert total["markers"] == {"compat": 0}
     assert total["test_placement"] == {
@@ -299,7 +301,7 @@ optional = true
     assert exit_code == 0
     data = json.loads(stdout)
     assert data["report_type"] == "composition_projects"
-    assert data["schema_version"] == composition.SCHEMA_VERSION == 3
+    assert data["schema_version"] == composition.SCHEMA_VERSION == 4
     assert [project["name"] for project in data["projects"]] == ["frontend", "backend"]
     assert data["projects"][0]["report"]["report_type"] == "composition"
     assert data["projects"][0]["report"]["total"]["categories"]["import"] == 1

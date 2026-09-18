@@ -3,7 +3,7 @@
 The default report answers "how many lines". The composition report answers "lines of what": it puts every physical
 line of every discovered Python file into exactly one structural category, reports statement counts that do not depend
 on formatting, adds overlapping semantic tags, places test-file lines, finds duplicated code, lists the largest modules,
-classes, and functions, and compares with earlier snapshots.
+classes, and functions, compares with earlier snapshots, and can add monthly churn from Git history.
 
 ```bash
 slopscope --composition
@@ -15,6 +15,7 @@ slopscope --composition --project all
 slopscope --composition --config path/to/pyproject.toml
 slopscope --composition --snapshot composition.json
 slopscope --composition --baseline composition.json
+slopscope --composition --churn
 ```
 
 The mode is opt-in, Python-only, and uses only the standard library `ast` and `tokenize` modules. It does not change
@@ -27,11 +28,43 @@ the default report, profiles, or any existing JSON shape. `count-lines-of-code -
   default is 10.
 - `--snapshot PATH` also writes the JSON report to `PATH`, whatever `--format` is.
 - `--baseline PATH` compares the report with an earlier snapshot. See [Snapshots And Baselines](#snapshots-and-baselines).
-- `--limit`, `--snapshot`, and `--baseline` are usage errors without `--composition`.
+- `--churn` adds monthly churn from Git history. See [Monthly Churn](#monthly-churn).
+- `--limit`, `--snapshot`, `--baseline`, and `--churn` are usage errors without `--composition`.
+- `[tool.slopscope.composition]` sets defaults. See [Configuration](#configuration).
 - `PATH`, `--config PATH`, `--project NAME` (repeatable, or `all`), `--format rich|plain|json`, and `--no-color` work
   as they do for the default report.
 - `--engine`, `--profile`, `--total-only`, and `--top` cannot be combined with `--composition`; the command fails with
   a usage error and exit code 2 instead of silently ignoring them.
+
+## Configuration
+
+The report works without configuration. `[tool.slopscope.composition]` in `pyproject.toml` (or the `--config` file)
+adjusts it:
+
+```toml
+[tool.slopscope.composition]
+limit = 20
+min_duplicate_tokens = 80
+qt_modules = ["app.ui.qt"]
+logging_patterns = ["audit_log"]
+compat_markers = ["legacy", "fallback", "compat", "deprecated"]
+churn_branch = "main"
+churn_months = 24
+```
+
+| Field | Effect | Default |
+|---|---|---|
+| `limit` | Rows in the largest-item and duplicate lists. `--limit` overrides it. | 10 |
+| `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
+| `qt_modules` | Extra modules treated as Qt, added to `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, and `qtpy`. Dotted names match the module and everything inside it, so a project's own Qt wrapper package can count. | none |
+| `logging_patterns` | Opt-in substrings: a call whose dotted function name contains one of them, such as `audit_log.write()` for `audit_log`, gets the `logging` tag. | none |
+| `compat_markers` | Words for the `compat` marker, replacing the defaults. An empty list turns the marker off. | `legacy`, `fallback`, `compat` |
+| `churn_branch` | Branch or ref whose first-parent history `--churn` reads. | `HEAD` |
+| `churn_months` | Number of months, including the current one, that `--churn` covers, at most 1200. | 12 |
+
+Unknown fields and invalid values fail with a `slopscope:` error and exit code 2. The detector settings and
+`min_duplicate_tokens` appear under `settings` in JSON output. `0.1.0a1` does not know this section and rejects it as
+an unknown field.
 
 ## Discovered Files
 
@@ -132,8 +165,8 @@ header never spreads to the block below it.
 
 | Tag | Code lines |
 |---|---|
-| `qt` | Units that use a name bound by an import from `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, or `qtpy`, including those imports. Without such an import no line is tagged: CamelCase method names, or `.connect()` and `.emit()` calls, are never enough on their own. Calls on objects whose type is only known at runtime, such as `self.setText(...)`, are not tagged. |
-| `logging` | Units that import from `logging`, call anything resolved into the `logging` module (such as `logging.info(...)` or `logging.getLogger(...)`), or call a logger method (`debug`, `info`, `warning`, `warn`, `error`, `exception`, `critical`, `fatal`, `log`) on a name or attribute chain assigned from `logging.getLogger()` anywhere in the file. Names such as `logger` or `log_metric` that are not tied to `logging` are never tagged. |
+| `qt` | Units that use a name bound by an import from `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, `qtpy`, or a configured `qt_modules` entry, including those imports. Without such an import no line is tagged: CamelCase method names, or `.connect()` and `.emit()` calls, are never enough on their own. Calls on objects whose type is only known at runtime, such as `self.setText(...)`, are not tagged. |
+| `logging` | Units that import from `logging`, call anything resolved into the `logging` module (such as `logging.info(...)` or `logging.getLogger(...)`), or call a logger method (`debug`, `info`, `warning`, `warn`, `error`, `exception`, `critical`, `fatal`, `log`) on a name or attribute chain assigned from `logging.getLogger()` anywhere in the file. Names such as `logger` or `log_metric` that are not tied to `logging` are never tagged, unless configured `logging_patterns` match them. |
 | `data_shape` | Field declarations (annotated and plain assignments directly in the class body) of classes decorated with `dataclasses.dataclass` or an `attr`/`attrs` class decorator, or deriving from `enum.Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `typing` or `typing_extensions` `NamedTuple` or `TypedDict`, or `pydantic.BaseModel`. Only direct bases count; subclasses of a local data-shape class are not detected. |
 
 ### Markers
@@ -141,7 +174,7 @@ header never spreads to the block below it.
 Markers are text-level counts, reported next to tags but kept apart from constructs and categories.
 
 - `compat` counts code lines that contain an identifier with `legacy`, `fallback`, or `compat` in it (case-insensitive,
-  so `compatibility` and `use_fallback` match). Comments, docstrings, and string contents do not count. This is a
+  so `compatibility` and `use_fallback` match), or with a configured `compat_markers` word instead. Comments, docstrings, and string contents do not count. This is a
   wording heuristic: it finds code that names itself as compatibility code, and also unrelated identifiers that happen
   to use these words.
 
@@ -247,7 +280,7 @@ file to keep a snapshot.
 ```json
 {
   "report_type": "composition",
-  "schema_version": 3,
+  "schema_version": 4,
   "analyzer": {"name": "slopscope.composition", "version": 1, "python_version": "3.13.1"},
   "detectors": [
     {"name": "qt", "kind": "tag", "version": 1},
@@ -262,6 +295,9 @@ file to keep a snapshot.
     "language": "Python",
     "limit": 10,
     "min_duplicate_tokens": 50,
+    "qt_modules": ["PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"],
+    "logging_patterns": [],
+    "compat_markers": ["legacy", "fallback", "compat"],
     "excluded_paths": [".git", ".venv", "build", "dist"],
     "include_globs": [],
     "source_dirs": ["src"],
@@ -301,6 +337,7 @@ file to keep a snapshot.
     {"path": "src/pkg/app.py", "start_line": 20, "end_line": 25, "kind": "source"},
     {"path": "tests/test_app.py", "start_line": 4, "end_line": 9, "kind": "tests"}]}],
   "baseline": null,
+  "churn": null,
   "files": [{"path": "src/pkg/app.py", "kind": "source", "area": "src", "...": "same count fields as total"}],
   "failures": [{"path": "src/pkg/broken.py", "error": "syntax error: invalid syntax (line 3)"}]
 }
@@ -330,8 +367,9 @@ a release. slopscope adds no timestamp or commit to it, so name the file accordi
 
 - A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
   different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
-- A different analyzer version or detector version prints a `slopscope: warning:` line on stderr and marks the
-  comparison as not comparable, because the numbers may differ from changed rules alone. A different Python version is
+- A different analyzer version, detector version, or counting setting (every `settings` entry except `limit`) prints a
+  `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
+  changed rules or settings alone. A different Python version is
   reported as a warning but stays comparable.
 - Deltas are computed for `total`, `source`, `tests`, and `other`, for files, physical, code, statements, continuation
   lines, duplicated lines, and every category, tag, marker, construct, and test placement.
@@ -345,6 +383,29 @@ a release. slopscope adds no timestamp or commit to it, so name the file accordi
   baseline lacks gets a warning and a comparison without baseline values.
 - `--baseline` and `--snapshot` may name the same file: the baseline is read before the new snapshot is written.
 
+## Monthly Churn
+
+`--churn` adds Python lines added and removed per month from Git history. It is opt-in, because it runs `git log` in the
+analyzed path.
+
+- It reads the first-parent history of `churn_branch` (default `HEAD`), so a merged branch counts once, as the merge's
+  diff against the branch it was merged into, in the month of the merge. No branch name such as `main` is assumed.
+- Only paths below the analyzed path count, with paths relative to it, so a subdirectory of a repository or a
+  configured project reports its own churn.
+- Renames are detected and count toward the new path, so moving a file adds only its changed lines.
+- The same rules as the report apply: only Python files, the same excludes and include globs, and the same source,
+  tests, and other split. Binary changes are ignored.
+- Months use the committer date in the commit's own time zone. The window covers `churn_months` months including the
+  current one, and months without commits are listed with zeros.
+- Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
+  `slopscope: skipping churn:` notice, and the exit code does not change.
+
+This is churn, not growth: net lines per month mix new code with rewrites, moves between kinds, and deletions.
+
+In JSON, `churn` is `null` without `--churn`. Otherwise it holds `ref`, `months`, `since` (the first month), `status`
+(`ok` or `skipped`), `reason`, and `rows`, one per month, each with `added`, `removed`, and `net` counts for `total`,
+`source`, `tests`, and `other`.
+
 ## Known Limits
 
 - Tags only see names bound through imports. They cannot follow objects through attributes, parameters, or return
@@ -353,8 +414,7 @@ a release. slopscope adds no timestamp or commit to it, so name the file accordi
 - Test placement follows default pytest and unittest conventions; custom `python_functions` or `python_classes`
   settings are not read.
 - Parsing is limited to the syntax supported by the running interpreter.
-- Files are analyzed sequentially.
-- There is no configuration section for the composition report yet; defaults are used for everything not listed under
-  [Discovered Files](#discovered-files).
+- Files are analyzed sequentially. On a repository of about 980 Python files and 536,000 lines, the full report takes
+  about 5 seconds, so there is no parallel mode.
 - Duplicate detection finds exact token copies that start at a line start in every copy. Copies with renamed names or
   changed literals, and copies that start mid-line in one file, are not found.
