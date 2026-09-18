@@ -84,6 +84,10 @@ No open tasks. See the [roadmap](roadmap.md) for the next phases.
 
 - [x] Decide whether Rich is a default dependency or optional extra. Resolved as the `rich` optional extra
   (`slopscope[rich]`) so the base install stays dependency-free and downstream projects opt in for colored tables.
-- [ ] Decide whether the compatibility alias remains permanent.
-- [ ] Decide whether YAML total mode defaults to physical lines or `cloc` code lines.
-- [ ] Evaluate whether `sloccount` compatibility is worth implementing.
+- [x] Decide whether the compatibility alias remains permanent. Resolved as permanent: `count-lines-of-code` costs
+  one console-script line, and migrated repositories depend on it.
+- [x] Decide whether YAML total mode defaults to physical lines or `cloc` code lines. Resolved as no change: profiles
+  keep `physical_lines = false` as the default, so existing totals do not shift, and `wc -l`-style recipes set
+  `physical_lines = true`. Without it, a profile total depends on whether `cloc` is installed.
+- [x] Evaluate whether `sloccount` compatibility is worth implementing. Resolved as not planned: `sloccount` is long
+  unmaintained, `cloc` covers the need, and no migration has asked for it. Revisit only if a real migration needs it.
