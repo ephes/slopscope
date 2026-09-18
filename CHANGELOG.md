@@ -8,6 +8,14 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+## 0.2.0a1 - 2026-09-18
+
+Compatibility notes: the default report, profiles, multi-project reports, and their JSON shapes are unchanged. The
+composition report is opt-in through `--composition` and has its own JSON shape (`schema_version` 4). The new
+`[tool.slopscope.composition]` configuration section is rejected by `0.1.0a1`, so repositories that add it need
+`0.2.0a1` or later. `--help` lists new options and shows `--engine`'s `auto` default. `--churn` runs `git log` only
+when requested; no new runtime dependencies are required.
+
 - Add a `rich` optional extra (`slopscope[rich]`) so downstream projects without Rich as a runtime dependency can opt
   into colored Rich tables; without the extra, the default `--format rich` continues to fall back to plain output.
 - Update post-release documentation now that `0.1.0a1` is published on the package index and GitHub.

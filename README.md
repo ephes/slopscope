@@ -3,11 +3,12 @@
 Colorful repository line-count reports by language, source, tests, and directory, with `cloc` support and a
 pure-Python fallback.
 
-The first pre-release is published as `0.1.0a1`. The repository contains the installable Python package,
+The latest pre-release is `0.2.0a1`. The repository contains the installable Python package,
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
 physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
 summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, configured profile execution for YAML
-totals and grouped top-N reports, and configured multi-project workspace reports.
+totals and grouped top-N reports, configured multi-project workspace reports, and an opt-in Python composition
+report.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
@@ -80,9 +81,8 @@ uv run slopscope
 back to the pure-Python engine otherwise. Install `cloc` separately if you want `cloc` code-line semantics.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
-falls back to plain text. Install Rich separately for colored tables when using `0.1.0a1`; the base install has no
-runtime dependencies and remains correct for `--format plain` and `--format json`. The unreleased development tree
-also exposes a `rich` extra for the next package release.
+falls back to plain text. Install the `rich` extra (`slopscope[rich]`, available since `0.2.0a1`) for colored
+tables; the base install has no runtime dependencies and remains correct for `--format plain` and `--format json`.
 
 ## Usage
 

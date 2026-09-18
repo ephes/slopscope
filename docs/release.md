@@ -5,8 +5,9 @@ set up.
 
 ## Pre-Release Metadata
 
-The first pre-release version is `0.1.0a1`. The `0.1.0` base marks the first usable package line after the initial
-implementation phases, and the `a1` suffix keeps the release clearly pre-1.0 and pre-stable.
+The first pre-release version was `0.1.0a1`. The `0.1.0` base marked the first usable package line after the initial
+implementation phases, and the `a1` suffix keeps the release clearly pre-1.0 and pre-stable. `0.2.0a1` raised the
+minor version for the composition report, a new report mode with its own JSON shape.
 
 Before publishing, confirm that:
 

@@ -27,8 +27,8 @@ uses the Python fallback. Use `--engine python` when you want deterministic phys
 on a `cloc` binary. Use `--engine cloc` when you want the command to fail clearly if `cloc` is unavailable.
 
 Rich is optional. Human-readable output defaults to `--format rich`, but the command falls back to plain output when
-Rich is not installed. Install Rich separately when you want colored tables with `0.1.0a1`. The unreleased
-development tree also exposes `slopscope[rich]` for the next package release. Use `--format plain` or
+Rich is not installed. Install the `slopscope[rich]` extra (available since `0.2.0a1`) when you want colored tables.
+Use `--format plain` or
 `--format json` for dependency-free output.
 
 ## Standard Python Repository

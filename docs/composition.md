@@ -64,7 +64,7 @@ churn_months = 24
 
 Unknown fields and invalid values fail with a `slopscope:` error and exit code 2. The detector settings and
 `min_duplicate_tokens` appear under `settings` in JSON output. `0.1.0a1` does not know this section and rejects it as
-an unknown field.
+an unknown field; use `0.2.0a1` or later.
 
 ## Discovered Files
 

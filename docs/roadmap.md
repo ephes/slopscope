@@ -145,4 +145,4 @@ Later:
   takes about 5 seconds sequentially, so `--jobs` is not added.
 - [x] Add a `[tool.slopscope.composition]` configuration section, including configured framework modules and opt-in
   logging substring patterns.
-- [ ] Release the composition report.
+- [x] Release the composition report in `0.2.0a1`.

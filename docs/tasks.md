@@ -5,8 +5,7 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] Prepare the next pre-release if the `rich` optional extra should be available from the package index.
-- [ ] Release the composition report with the next pre-release.
+- [ ] No open tasks; see the roadmap for the next phases.
 
 ## Done
 
@@ -66,6 +65,7 @@ repository shapes and product behavior, not private source projects.
   as a replacement migration.
 - [x] Confirm final pre-release version, package registry, and publishing credentials before publishing.
 - [x] Publish first pre-release after explicit release-owner approval.
+- [x] Release `0.2.0a1` with the composition report and the `rich` optional extra.
 - [x] Composition report slice 1: `--composition` and `--limit N`, structural line categories from `ast` and
   `tokenize`, statement and continuation-line counts, largest modules, classes, and functions, failure reporting,
   plain/Rich/JSON output, project support, and documentation.
