@@ -5,7 +5,7 @@ repository shapes and product behavior, not private source projects.
 
 ## Current
 
-- [ ] No open tasks; see the roadmap for the next phases.
+No open tasks. See the [roadmap](roadmap.md) for the next phases.
 
 ## Done
 
