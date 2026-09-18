@@ -146,3 +146,15 @@ Later:
 - [x] Add a `[tool.slopscope.composition]` configuration section, including configured framework modules and opt-in
   logging substring patterns.
 - [x] Release the composition report in `0.2.0a1`.
+
+## Phase 11: Size Limits
+
+A local check that holds oversized units at their current size, built on the composition analyzer's spans and code
+lines. See [Size Limits](size-limits.md).
+
+- [x] Add `--size-limits` with configurable function, class, and test-file limits.
+- [x] Key units as `path::Qualified.name`, skipping `@overload` stubs and numbering repeated names.
+- [x] Report new offenders, grown, shrunk, and stale allowlist entries; exit 1 with `--strict` on new or grown.
+- [x] Add `--seed-allowlist` and `--update-allowlist`, which never adds or raises an entry.
+- [x] Support one allowlist per configured project.
+- [ ] Release the size-limits check.

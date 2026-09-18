@@ -8,6 +8,17 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Add `slopscope --size-limits`, a local check that holds oversized units at their current size. Functions and
+  methods (default 150 span lines), classes (1,500 span lines), and test files (3,000 code lines) are measured with
+  the composition report's span and code-line definitions. Units over a limit must be recorded in a JSON allowlist
+  keyed as `path::Qualified.name`, where they may shrink but not grow. The report lists new offenders, grown and
+  shrunk allowlisted units, and stale entries; `--strict` exits 1 on new or grown offenders; `--seed-allowlist` writes
+  the first allowlist and refuses to overwrite one; `--update-allowlist` lowers and drops entries but never adds or
+  raises one. Configure limits and the allowlist path in `[tool.slopscope.size_limits]`; with `--project`, each
+  project has its own allowlist. JSON output uses `report_type: "size_limits"` with `schema_version: 1`.
+- Split duplicate-block assembly out of the composition report builder, which the new check flagged as a function
+  over 150 span lines. Composition output is unchanged.
+
 ## 0.2.0a1 - 2026-09-18
 
 Compatibility notes: the default report, profiles, multi-project reports, and their JSON shapes are unchanged. The

@@ -8,6 +8,7 @@ This directory tracks the public product planning and user-facing documentation 
 - [Configuration](configuration.md): `pyproject.toml` configuration shape and supported commands.
 - [Composition Report](composition.md): the Python composition report, its line categories, counting rules, and JSON
   shape.
+- [Size Limits](size-limits.md): the size-limits check, unit keys, allowlist, and JSON shape.
 - [Migration Guide](migration.md): migration patterns from local line-count recipes.
 - [Release Workflow](release.md): build, changelog, and publish-readiness checklist.
 - [Changelog](../CHANGELOG.md): public change history.

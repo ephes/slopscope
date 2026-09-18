@@ -50,6 +50,16 @@ class CompositionConfig:
 
 
 @dataclass(frozen=True)
+class SizeLimitsConfig:
+    """Validated ``[tool.slopscope.size_limits]`` settings; ``None`` means built-in default."""
+
+    max_function_lines: int | None = None
+    max_class_lines: int | None = None
+    max_test_file_code_lines: int | None = None
+    allowlist: str | None = None
+
+
+@dataclass(frozen=True)
 class SlopscopeConfig:
     """Validated ``[tool.slopscope]`` configuration."""
 
@@ -64,6 +74,7 @@ class SlopscopeConfig:
     projects: tuple[ProjectConfig, ...] = ()
     profiles: tuple[ProfileConfig, ...] = ()
     composition: CompositionConfig = CompositionConfig()
+    size_limits: SizeLimitsConfig = SizeLimitsConfig()
 
 
 _STRING_LIST_FIELDS = {
@@ -76,7 +87,13 @@ _STRING_LIST_FIELDS = {
     "areas",
     "nested_bucket_dirs",
 }
-_TOP_LEVEL_FIELDS = _STRING_LIST_FIELDS | {"projects", "profiles", "composition"}
+_TOP_LEVEL_FIELDS = _STRING_LIST_FIELDS | {"projects", "profiles", "composition", "size_limits"}
+_SIZE_LIMITS_FIELDS = {
+    "max_function_lines",
+    "max_class_lines",
+    "max_test_file_code_lines",
+    "allowlist",
+}
 _COMPOSITION_FIELDS = {
     "limit",
     "min_duplicate_tokens",
@@ -176,6 +193,27 @@ def parse_config_mapping(
         projects=_projects_tuple(data, config_path=config_path),
         profiles=_profiles_tuple(data),
         composition=_composition_config(data),
+        size_limits=_size_limits_config(data),
+    )
+
+
+def _size_limits_config(data: Mapping[str, object]) -> SizeLimitsConfig:
+    value = data.get("size_limits")
+    if value is None:
+        return SizeLimitsConfig()
+    if not isinstance(value, dict):
+        raise ConfigError("size_limits must be a table")
+    unknown = sorted(set(value) - _SIZE_LIMITS_FIELDS)
+    if unknown:
+        raise ConfigError(f"unknown [tool.slopscope.size_limits] field: {unknown[0]}")
+    context = "size_limits"
+    return SizeLimitsConfig(
+        max_function_lines=_optional_positive_int(value, "max_function_lines", context=context),
+        max_class_lines=_optional_positive_int(value, "max_class_lines", context=context),
+        max_test_file_code_lines=_optional_positive_int(
+            value, "max_test_file_code_lines", context=context
+        ),
+        allowlist=_optional_string(value, "allowlist", context=context),
     )
 
 

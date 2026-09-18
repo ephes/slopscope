@@ -39,6 +39,9 @@ reusable Python CLI that can be added as a development dependency.
   duplicate detection, the largest modules, classes, and functions, JSON snapshots with baseline comparison, and
   opt-in monthly churn from Git history. Standard library `ast` and `tokenize` only, configurable through
   `[tool.slopscope.composition]`.
+- Size-limits check (`--size-limits`): functions, methods, and classes over a span limit and test files over a
+  code-line limit must be recorded in a JSON allowlist, where they may shrink but not grow. Report, strict, seed, and
+  update modes, configurable through `[tool.slopscope.size_limits]`.
 
 ## Planned Features
 
@@ -106,6 +109,10 @@ uv run slopscope --composition --project all --limit 20
 uv run slopscope --composition --snapshot composition.json
 uv run slopscope --composition --baseline composition.json
 uv run slopscope --composition --churn
+uv run slopscope --size-limits
+uv run slopscope --size-limits --strict
+uv run slopscope --size-limits --seed-allowlist
+uv run slopscope --size-limits --update-allowlist
 ```
 
 For migration compatibility, the package also exposes:
@@ -194,10 +201,19 @@ It reuses discovery, excludes, source/test classification, `--config`, `--projec
 file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
-patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and `--top`
-cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr and in
-the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"` shape. See
-[Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and known limits.
+patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and
+`--top` cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr
+and in the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"`
+shape. See [Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and
+known limits.
+
+`--size-limits` holds oversized units at their current size. Functions and methods may span at most 150 lines,
+classes 1,500, and test files may have at most 3,000 code lines, using the composition report's span and code-line
+definitions. Units over a limit must be recorded in an allowlist (`size-limits.json` by default) keyed as
+`path::Qualified.name`; they may shrink but not grow. The report lists new offenders, grown and shrunk allowlisted
+units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offenders. `--seed-allowlist` writes the
+first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
+one. See [Size Limits](docs/size-limits.md).
 
 ## Development
 
@@ -240,6 +256,7 @@ Python composition report. See:
 - [Tasks](docs/tasks.md)
 - [Configuration](docs/configuration.md)
 - [Composition Report](docs/composition.md)
+- [Size Limits](docs/size-limits.md)
 - [Migration Guide](docs/migration.md)
 - [Release Workflow](docs/release.md)
 - [Changelog](CHANGELOG.md)

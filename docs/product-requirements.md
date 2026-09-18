@@ -101,6 +101,7 @@ Required options:
 - `--snapshot PATH`: also write the composition JSON report to a file.
 - `--baseline PATH`: compare the composition report with an earlier snapshot.
 - `--churn`: add monthly churn of Python lines from Git history to the composition report.
+- `--size-limits`: check functions, classes, and test files against size limits and a JSON allowlist.
 
 ## Configuration Requirements
 

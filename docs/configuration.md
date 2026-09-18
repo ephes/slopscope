@@ -212,6 +212,21 @@ churn_months = 24
 See [Composition Report](composition.md#configuration) for what each field does. `0.1.0a1` rejects this section as an
 unknown field.
 
+## Size Limits
+
+`slopscope --size-limits` reads its limits and allowlist path from an optional section:
+
+```toml
+[tool.slopscope.size_limits]
+max_function_lines = 150
+max_class_lines = 1500
+max_test_file_code_lines = 3000
+allowlist = "size-limits.json"
+```
+
+The allowlist path is relative to the analyzed project root, or to each configured project's root with `--project`.
+See [Size Limits](size-limits.md). `0.2.0a1` and earlier reject this section as an unknown field.
+
 ## Notes
 
 - Project paths are resolved relative to the configuration file.

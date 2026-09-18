@@ -22,6 +22,8 @@ from slopscope import (
     paths,
     profile,
     render,
+    size_limits,
+    size_limits_render,
 )
 from slopscope import config as config_module
 from slopscope import project as project_module
@@ -33,10 +35,25 @@ from slopscope.report import (
     LanguageRow,
     LanguageSummaryReport,
     MultiProjectCompositionReport,
+    MultiProjectSizeLimitsReport,
     ProjectReport,
     RepositoryReport,
+    SizeLimitSettings,
+    SizeLimitsProjectReport,
+    SizeLimitsReport,
 )
 
+_SIZE_LIMITS_CONFLICTS = (
+    ("composition", "--composition"),
+    ("engine", "--engine"),
+    ("profile", "--profile"),
+    ("total_only", "--total-only"),
+    ("top", "--top"),
+    ("limit", "--limit"),
+    ("snapshot", "--snapshot"),
+    ("baseline", "--baseline"),
+    ("churn", "--churn"),
+)
 _COMPOSITION_CONFLICTS = (
     ("engine", "--engine"),
     ("profile", "--profile"),
@@ -129,6 +146,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add monthly churn of Python lines from Git history to the composition report.",
     )
+    parser.add_argument(
+        "--size-limits",
+        action="store_true",
+        help="Check functions, classes, and test files against size limits and the allowlist.",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="With --size-limits, exit 1 when a unit is new over its limit or grew.",
+    )
+    parser.add_argument(
+        "--update-allowlist",
+        action="store_true",
+        help="With --size-limits, lower recorded sizes and drop entries that are gone or fit.",
+    )
+    parser.add_argument(
+        "--seed-allowlist",
+        action="store_true",
+        help="With --size-limits, write a new allowlist from every unit over its limit.",
+    )
+    parser.add_argument(
+        "--allowlist",
+        metavar="PATH",
+        help="With --size-limits, use the allowlist at PATH instead of the configured one.",
+    )
     return parser
 
 
@@ -150,6 +192,7 @@ def run(
     err = stderr if stderr is not None else sys.stderr
     parser = build_parser()
     args = parser.parse_args(argv)
+    _validate_size_limits_options(parser, args)
     _validate_composition_options(parser, args)
     selected_path = Path(args.path)
 
@@ -161,6 +204,15 @@ def run(
     except config_module.ConfigError as exc:
         print(f"slopscope: {exc}", file=err)
         return 2
+
+    if args.size_limits:
+        return _run_size_limits(
+            args=args,
+            path=selected_path,
+            slopscope_config=slopscope_config,
+            out=out,
+            err=err,
+        )
 
     if args.composition:
         return _run_composition(
@@ -238,6 +290,173 @@ def _validate_composition_options(
         value = getattr(args, attribute)
         if value is not None and value is not False:
             parser.error(f"--composition cannot be combined with {flag}")
+
+
+def _validate_size_limits_options(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    if not args.size_limits:
+        for value, flag in (
+            (args.strict, "--strict"),
+            (args.update_allowlist, "--update-allowlist"),
+            (args.seed_allowlist, "--seed-allowlist"),
+            (args.allowlist is not None, "--allowlist"),
+        ):
+            if value:
+                parser.error(f"{flag} requires --size-limits")
+        return
+    for attribute, flag in _SIZE_LIMITS_CONFLICTS:
+        value = getattr(args, attribute)
+        if value is not None and value is not False:
+            parser.error(f"--size-limits cannot be combined with {flag}")
+    if args.update_allowlist and args.seed_allowlist:
+        parser.error("--update-allowlist cannot be combined with --seed-allowlist")
+    if args.allowlist is not None and args.project is not None:
+        parser.error("--allowlist cannot be combined with --project; each project uses its own")
+
+
+def _run_size_limits(
+    *,
+    args: argparse.Namespace,
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    out: TextIO,
+    err: TextIO,
+) -> int:
+    if args.seed_allowlist:
+        action = size_limits.SEED
+    elif args.update_allowlist:
+        action = size_limits.UPDATE
+    else:
+        action = size_limits.REPORT
+
+    rendered: SizeLimitsReport | MultiProjectSizeLimitsReport
+    reports: list[SizeLimitsReport] = []
+    try:
+        if args.project is None:
+            allowlist = (
+                Path(args.allowlist)
+                if args.allowlist is not None
+                else _allowlist_path(path, slopscope_config)
+            )
+            report, pending = _plan_size_limits(path, allowlist, action, slopscope_config)
+            if pending is not None:
+                size_limits.write_allowlist(allowlist, pending)
+            reports.append(report)
+            rendered = report
+        else:
+            selected_projects = project_module.select_projects(slopscope_config, args.project)
+            existing_projects, skipped_projects = project_module.partition_existing_projects(
+                selected_projects
+            )
+            for skipped_project in skipped_projects:
+                print(
+                    f"slopscope: skipping optional project {skipped_project.name}: "
+                    f"{skipped_project.path} not found",
+                    file=err,
+                )
+            allowlists = {
+                configured_project.name: _allowlist_path(configured_project.path, slopscope_config)
+                for configured_project in existing_projects
+            }
+            shared = _first_shared_allowlist(allowlists)
+            if shared is not None and action != size_limits.REPORT:
+                raise size_limits.SizeLimitsError(
+                    f"projects {shared[0]} and {shared[1]} share the allowlist {shared[2]}"
+                )
+            # Plan every project first: all refusals happen before any allowlist is written.
+            planned: list[tuple[str, SizeLimitsReport, size_limits.Units | None, Path]] = []
+            for configured_project in existing_projects:
+                report, pending = _plan_size_limits(
+                    configured_project.path,
+                    allowlists[configured_project.name],
+                    action,
+                    slopscope_config,
+                    label=configured_project.name,
+                )
+                planned.append(
+                    (configured_project.name, report, pending, allowlists[configured_project.name])
+                )
+            for _name, _report, pending, allowlist in planned:
+                if pending is not None:
+                    size_limits.write_allowlist(allowlist, pending)
+            project_reports = [
+                SizeLimitsProjectReport(name=name, report=report)
+                for name, report, _pending, _allowlist in planned
+            ]
+            reports.extend(report for _name, report, _pending, _allowlist in planned)
+            rendered = MultiProjectSizeLimitsReport(
+                projects=tuple(project_reports), skipped_projects=skipped_projects
+            )
+    except (project_module.ProjectError, size_limits.SizeLimitsError) as exc:
+        print(f"slopscope: {exc}", file=err)
+        return 2
+
+    for report in reports:
+        for failure in report.failures:
+            print(
+                f"slopscope: could not analyze {report.path / failure.path}: {failure.error}",
+                file=err,
+            )
+    out.write(
+        size_limits_render.render_size_limits_report(
+            rendered, output_format=args.format, color=not args.no_color
+        )
+    )
+    if any(report.failures for report in reports):
+        return 1
+    if args.strict and any(report.check_failed for report in reports):
+        return 1
+    return 0
+
+
+def _allowlist_path(root: Path, slopscope_config: config_module.SlopscopeConfig) -> Path:
+    configured = slopscope_config.size_limits.allowlist or size_limits.DEFAULT_ALLOWLIST
+    allowlist = Path(configured)
+    return allowlist if allowlist.is_absolute() else root / allowlist
+
+
+def _first_shared_allowlist(allowlists: dict[str, Path]) -> tuple[str, str, Path] | None:
+    seen: dict[Path, str] = {}
+    for name, allowlist in allowlists.items():
+        resolved = allowlist.resolve()
+        if resolved in seen:
+            return seen[resolved], name, allowlist
+        seen[resolved] = name
+    return None
+
+
+def _plan_size_limits(
+    root: Path,
+    allowlist: Path,
+    action: str,
+    slopscope_config: config_module.SlopscopeConfig,
+    *,
+    label: str | None = None,
+) -> tuple[SizeLimitsReport, size_limits.Units | None]:
+    configured = slopscope_config.size_limits
+    defaults = SizeLimitSettings()
+    try:
+        return size_limits.plan(
+            root,
+            allowlist_path=allowlist,
+            settings=SizeLimitSettings(
+                max_function_lines=configured.max_function_lines or defaults.max_function_lines,
+                max_class_lines=configured.max_class_lines or defaults.max_class_lines,
+                max_test_file_code_lines=configured.max_test_file_code_lines
+                or defaults.max_test_file_code_lines,
+            ),
+            action=action,
+            excluded_paths=_effective_fallback_excludes(slopscope_config),
+            include_globs=slopscope_config.include_globs,
+            source_dirs=slopscope_config.source_dirs,
+            test_dirs=slopscope_config.test_dirs,
+        )
+    except size_limits.SizeLimitsError as exc:
+        if label is None:
+            raise
+        raise size_limits.SizeLimitsError(f"project {label}: {exc}") from exc
 
 
 def _run_composition(
