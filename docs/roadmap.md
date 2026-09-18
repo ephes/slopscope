@@ -157,4 +157,4 @@ lines. See [Size Limits](size-limits.md).
 - [x] Report new offenders, grown, shrunk, and stale allowlist entries; exit 1 with `--strict` on new or grown.
 - [x] Add `--seed-allowlist` and `--update-allowlist`, which never adds or raises an entry.
 - [x] Support one allowlist per configured project.
-- [ ] Release the size-limits check.
+- [x] Release the size-limits check in `0.3.0a1`.

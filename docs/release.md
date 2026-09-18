@@ -7,7 +7,8 @@ set up.
 
 The first pre-release version was `0.1.0a1`. The `0.1.0` base marked the first usable package line after the initial
 implementation phases, and the `a1` suffix keeps the release clearly pre-1.0 and pre-stable. `0.2.0a1` raised the
-minor version for the composition report, a new report mode with its own JSON shape.
+minor version for the composition report, a new report mode with its own JSON shape, and `0.3.0a1` for the
+size-limits check.
 
 Before publishing, confirm that:
 

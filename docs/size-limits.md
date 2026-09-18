@@ -116,7 +116,7 @@ allowlist = "size-limits.json"
 ```
 
 All fields are optional. Unknown fields and invalid values fail with a `slopscope:` error and exit code 2. `0.2.0a1`
-and earlier reject this section as an unknown field.
+and earlier reject this section as an unknown field; use `0.3.0a1` or later.
 
 ## JSON Shape
 

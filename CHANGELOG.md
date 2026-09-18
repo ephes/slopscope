@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+## 0.3.0a1 - 2026-09-18
+
+Compatibility notes: the default report, profiles, multi-project reports, the composition report, and their JSON shapes
+are unchanged. `--size-limits` is a new, opt-in mode with its own JSON shape (`report_type: "size_limits"`,
+`schema_version` 1). The new `[tool.slopscope.size_limits]` configuration section is rejected by `0.2.0a1` and earlier,
+so repositories that add it need `0.3.0a1` or later. No new runtime dependencies are required.
+
 - Add `slopscope --size-limits`, a local check that holds oversized units at their current size. Functions and
   methods (default 150 span lines), classes (1,500 span lines), and test files (3,000 code lines) are measured with
   the composition report's span and code-line definitions. Units over a limit must be recorded in a JSON allowlist

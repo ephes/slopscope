@@ -3,12 +3,12 @@
 Colorful repository line-count reports by language, source, tests, and directory, with `cloc` support and a
 pure-Python fallback.
 
-The latest pre-release is `0.2.0a1`. The repository contains the installable Python package,
+The latest pre-release is `0.3.0a1`. The repository contains the installable Python package,
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
 physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
 summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, configured profile execution for YAML
-totals and grouped top-N reports, configured multi-project workspace reports, and an opt-in Python composition
-report.
+totals and grouped top-N reports, configured multi-project workspace reports, an opt-in Python composition
+report, and a size-limits check.
 
 `slopscope` is intended to replace small, repeated `just loc` and `just yaml-lines` implementations with one
 reusable Python CLI that can be added as a development dependency.
