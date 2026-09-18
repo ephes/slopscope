@@ -31,6 +31,10 @@ reusable Python CLI that can be added as a development dependency.
 - Multi-project workspace reports from `[tool.slopscope.projects]`.
 - Optional project skipping for missing configured projects.
 - JSON output for future CI or badge integrations.
+- Python composition report (`--composition`): every physical line of every Python file in one structural category
+  (blank, comment, docstring, import, definition, assertion, error handling, literal data, other code), statement
+  counts, continuation lines, and the largest modules, classes, and functions. Standard library `ast` and `tokenize`
+  only.
 
 ## Planned Features
 
@@ -93,6 +97,9 @@ uv run slopscope --project frontend --project backend
 uv run slopscope --project all
 uv run slopscope --profile yaml --total-only
 uv run slopscope --profile roles --top 20
+uv run slopscope --composition
+uv run slopscope --composition --format json > composition.json
+uv run slopscope --composition --project all --limit 20
 ```
 
 For migration compatibility, the package also exposes:
@@ -160,6 +167,23 @@ Default rendered sections are:
 - Repository Areas
 - Directory Buckets
 
+`--composition` switches to the Python composition report. Where the default report answers "how many lines", the
+composition report answers "lines of what". It parses each discovered `.py` and `.pyi` file with the standard library
+`ast` and `tokenize` modules and reports:
+
+- line categories that add up to the physical line count, split by source, tests, and other files
+- statements (`ast.stmt` nodes), code lines per statement, and continuation lines, which are size signals independent
+  of formatter layout
+- per-area totals
+- the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
+  `src/pkg/module.py:Outer.method`
+
+It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
+`--limit N` sets the size of the largest-item lists (default 10). `--engine`, `--profile`, `--total-only`, and `--top`
+cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr and in
+the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"` shape. See
+[Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and known limits.
+
 ## Development
 
 ```bash
@@ -192,13 +216,15 @@ console scripts, `cloc` availability detection, language-summary and file-summar
 discovery, fallback language mapping, physical-line counting, internal aggregation for source/test, area, and
 directory summaries, plain/Rich/JSON rendering for the default single-repository report, configuration loading for
 that report, named profile execution for YAML totals and grouped top-N reports, configured multi-project workspace
-reports, synthetic migration fixture coverage, and release workflow documentation. See:
+reports, synthetic migration fixture coverage, release workflow documentation, and the first, structural slice of the
+Python composition report. See:
 
 - [Product Requirements](docs/product-requirements.md)
 - [Documentation Index](docs/README.md)
 - [Roadmap](docs/roadmap.md)
 - [Tasks](docs/tasks.md)
 - [Configuration](docs/configuration.md)
+- [Composition Report](docs/composition.md)
 - [Migration Guide](docs/migration.md)
 - [Release Workflow](docs/release.md)
 - [Changelog](CHANGELOG.md)

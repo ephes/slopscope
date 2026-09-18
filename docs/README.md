@@ -6,6 +6,8 @@ This directory tracks the public product planning and user-facing documentation 
 - [Roadmap](roadmap.md): public backlog organized by implementation phase.
 - [Tasks](tasks.md): lightweight task checklist until issue tracking is set up.
 - [Configuration](configuration.md): `pyproject.toml` configuration shape and supported commands.
+- [Composition Report](composition.md): the Python composition report, its line categories, counting rules, and JSON
+  shape.
 - [Migration Guide](migration.md): migration patterns from local line-count recipes.
 - [Release Workflow](release.md): build, changelog, and publish-readiness checklist.
 - [Changelog](../CHANGELOG.md): public change history.

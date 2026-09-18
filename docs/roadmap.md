@@ -100,3 +100,48 @@ Use public fixture repositories or synthetic test fixtures for these shapes:
 - [x] Add changelog workflow.
 - [x] Publish first pre-release.
 - [x] Migrate at least three representative repositories before `1.0`.
+
+## Phase 10: Python Composition Report
+
+An opt-in, Python-only report that answers "lines of what" instead of "how many lines". See
+[Composition Report](composition.md).
+
+Slice 1: structural composition.
+
+- [x] Add `--composition` and `--limit N` to the flat CLI, rejecting `--engine`, `--profile`, `--total-only`, and
+  `--top` in composition mode.
+- [x] Classify every physical Python line into one structural category with the standard library `ast` and
+  `tokenize` modules: blank, comment, docstring, import, definition, assertion, error handling, literal data, and
+  other code.
+- [x] Report statements, continuation lines, and code lines per statement.
+- [x] Report the largest modules, classes, and functions with qualified names.
+- [x] Reuse discovery, excludes, source/test/area classification, configuration, and configured projects.
+- [x] Report read, decode, and parse failures on stderr with a non-zero exit.
+- [x] Add plain, Rich, and JSON output with a distinct, versioned JSON shape.
+
+Slice 2: semantic tags and test placement.
+
+- [ ] Add semantic tags as an overlapping dimension next to the structural categories, never as extra categories.
+- [ ] Detect framework usage such as Qt only when framework imports are present or configured. Naming conventions such
+  as CamelCase method names, or `.connect`/`.emit` calls alone, must never be enough.
+- [ ] Detect logging through the `logging` module and names assigned from `logging.getLogger()`; substring patterns
+  only as opt-in configuration.
+- [ ] Detect data-shape classes by resolving imports and aliases.
+- [ ] Count compatibility markers separately from constructs.
+- [ ] Record detector names and versions in the JSON output.
+- [ ] Classify where test lines sit with conservative pytest and unittest rules and an `unknown/helper` bucket,
+  rather than name-prefix, whole-`Test*`-class, or fixture-substring rules.
+
+Slice 3: duplication, snapshots, and baselines.
+
+- [ ] Detect repeated code token-based: keep adjacency, verify matches instead of trusting hashes, and merge matched
+  intervals rather than counting overlapping windows or growing file pairs quadratically.
+- [ ] Add `--snapshot PATH` and `--baseline PATH`, rejecting baselines with a different schema version.
+
+Later:
+
+- [ ] Report monthly churn from Git in the analyzed repository: use the configured branch rather than assuming
+  `main`, handle renames and subdirectory paths, and skip the section outside Git.
+- [ ] Add parallel parsing (`--jobs`) if measurements show a need.
+- [ ] Add a `[tool.slopscope.composition]` configuration section.
+- [ ] Release the composition report.

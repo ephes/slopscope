@@ -8,16 +8,35 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from slopscope import classify, cloc, fallback, paths, profile, render
+from slopscope import (
+    classify,
+    cloc,
+    composition,
+    composition_render,
+    fallback,
+    paths,
+    profile,
+    render,
+)
 from slopscope import config as config_module
 from slopscope import project as project_module
 from slopscope.report import (
+    CompositionProjectReport,
+    CompositionReport,
     FileAggregateReport,
     FileRow,
     LanguageRow,
     LanguageSummaryReport,
+    MultiProjectCompositionReport,
     ProjectReport,
     RepositoryReport,
+)
+
+_COMPOSITION_CONFLICTS = (
+    ("engine", "--engine"),
+    ("profile", "--profile"),
+    ("total_only", "--total-only"),
+    ("top", "--top"),
 )
 
 
@@ -35,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--engine",
         choices=("auto", "cloc", "python"),
-        default="auto",
-        help="Counting engine to use.",
+        default=None,
+        help="Counting engine to use (default: auto).",
     )
     parser.add_argument(
         "--format",
@@ -76,6 +95,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         help="Override a grouped profile top-N limit.",
     )
+    parser.add_argument(
+        "--composition",
+        action="store_true",
+        help="Print the Python composition report: lines by structural category.",
+    )
+    parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=_positive_int,
+        help=(
+            "Rows in the composition report's largest modules, classes, and functions lists "
+            f"(default: {composition.DEFAULT_LIMIT})."
+        ),
+    )
     return parser
 
 
@@ -95,7 +128,9 @@ def run(
 
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _validate_composition_options(parser, args)
     selected_path = Path(args.path)
 
     try:
@@ -106,6 +141,15 @@ def run(
     except config_module.ConfigError as exc:
         print(f"slopscope: {exc}", file=err)
         return 2
+
+    if args.composition:
+        return _run_composition(
+            args=args,
+            path=selected_path,
+            slopscope_config=slopscope_config,
+            out=out,
+            err=err,
+        )
 
     if args.total_only and args.profile is None:
         print("slopscope: --total-only requires --profile", file=err)
@@ -124,7 +168,7 @@ def run(
             err=err,
         )
 
-    engine = _select_engine(args.engine, err)
+    engine = _select_engine(args.engine or "auto", err)
     if isinstance(engine, int):
         return engine
 
@@ -154,6 +198,105 @@ def run(
         )
     )
     return 0
+
+
+def _validate_composition_options(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    if not args.composition:
+        if args.limit is not None:
+            parser.error("--limit requires --composition")
+        return
+    for attribute, flag in _COMPOSITION_CONFLICTS:
+        value = getattr(args, attribute)
+        if value is not None and value is not False:
+            parser.error(f"--composition cannot be combined with {flag}")
+
+
+def _run_composition(
+    *,
+    args: argparse.Namespace,
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    out: TextIO,
+    err: TextIO,
+) -> int:
+    limit = args.limit if args.limit is not None else composition.DEFAULT_LIMIT
+    rendered_report: CompositionReport | MultiProjectCompositionReport
+    if args.project is None:
+        report = _build_composition_report(path, slopscope_config, limit)
+        for failure in report.failures:
+            print(
+                f"slopscope: could not analyze {path / failure.path}: {failure.error}",
+                file=err,
+            )
+        failed = bool(report.failures)
+        rendered_report = report
+    else:
+        try:
+            selected_projects = project_module.select_projects(slopscope_config, args.project)
+            existing_projects, skipped_projects = project_module.partition_existing_projects(
+                selected_projects
+            )
+        except project_module.ProjectError as exc:
+            print(f"slopscope: {exc}", file=err)
+            return 2
+
+        for skipped_project in skipped_projects:
+            print(
+                f"slopscope: skipping optional project {skipped_project.name}: "
+                f"{skipped_project.path} not found",
+                file=err,
+            )
+
+        project_reports: list[CompositionProjectReport] = []
+        failed = False
+        for configured_project in existing_projects:
+            report = _build_composition_report(configured_project.path, slopscope_config, limit)
+            for failure in report.failures:
+                print(
+                    f"slopscope: project {configured_project.name}: could not analyze "
+                    f"{configured_project.path / failure.path}: {failure.error}",
+                    file=err,
+                )
+            failed = failed or bool(report.failures)
+            project_reports.append(
+                CompositionProjectReport(name=configured_project.name, report=report)
+            )
+        rendered_report = MultiProjectCompositionReport(
+            analyzer=composition.ANALYZER_NAME,
+            analyzer_version=composition.ANALYZER_VERSION,
+            schema_version=composition.SCHEMA_VERSION,
+            python_version=composition.python_version(),
+            projects=tuple(project_reports),
+            skipped_projects=skipped_projects,
+        )
+
+    out.write(
+        composition_render.render_composition_report(
+            rendered_report,
+            output_format=args.format,
+            color=not args.no_color,
+        )
+    )
+    return 1 if failed else 0
+
+
+def _build_composition_report(
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    limit: int,
+) -> CompositionReport:
+    return composition.build_composition_report(
+        path,
+        excluded_paths=_effective_fallback_excludes(slopscope_config),
+        include_globs=slopscope_config.include_globs,
+        source_dirs=slopscope_config.source_dirs,
+        test_dirs=slopscope_config.test_dirs,
+        named_areas=slopscope_config.areas,
+        limit=limit,
+    )
 
 
 def _select_engine(requested_engine: str, err: TextIO) -> str | int:

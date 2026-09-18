@@ -11,6 +11,18 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 - Add a `rich` optional extra (`slopscope[rich]`) so downstream projects without Rich as a runtime dependency can opt
   into colored Rich tables; without the extra, the default `--format rich` continues to fall back to plain output.
 - Update post-release documentation now that `0.1.0a1` is published on the package index and GitHub.
+- Add an opt-in Python composition report, `slopscope --composition [PATH]`. It assigns every physical line of every
+  discovered Python file one structural category (`blank`, `comment`, `docstring`, `import`, `definition`,
+  `assertion`, `error_handling`, `literal_data`, `other_code`) using the standard library `ast` and `tokenize`
+  modules, and reports statement counts, continuation lines, code lines per statement, per source/test and area
+  totals, and the largest modules, classes, and functions. It supports `--config`, `--project`, `--format`, and
+  `--no-color`; `--limit N` sets the largest-item list size. Read, decode, and parse failures are reported on stderr
+  and exit with code 1. JSON output uses a new, separate shape with `report_type: "composition"` and
+  `schema_version: 1`.
+- Reject `--engine`, `--profile`, `--total-only`, and `--top` together with `--composition`, and `--limit` without
+  it, with argparse usage errors. The default report, profiles, and existing JSON shapes are unchanged; `--help` now
+  lists the new options and shows `--engine`'s `auto` default in its help text.
+- Amend the "deep language parsing" non-goal to allow the opt-in, Python-only composition report.
 
 ## 0.1.0a1 - 2026-05-10
 

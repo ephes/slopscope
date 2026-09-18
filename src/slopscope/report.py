@@ -194,3 +194,201 @@ class RepositoryReport:
             area_rows=aggregate_report.area_rows,
             directory_rows=aggregate_report.directory_rows,
         )
+
+
+COMPOSITION_CATEGORIES = (
+    "blank",
+    "comment",
+    "docstring",
+    "import",
+    "definition",
+    "assertion",
+    "error_handling",
+    "literal_data",
+    "other_code",
+)
+COMPOSITION_NON_CODE_CATEGORIES = ("blank", "comment", "docstring")
+
+
+@dataclass(frozen=True)
+class CompositionCounts:
+    """Structural line categories and statement counts for one file or aggregate.
+
+    ``categories`` holds one count per name in ``COMPOSITION_CATEGORIES``, in that order.
+    """
+
+    categories: tuple[int, ...]
+    statements: int
+    continuation_lines: int
+
+    @classmethod
+    def sum(cls, counts: Iterable[CompositionCounts]) -> Self:
+        """Add counts category by category."""
+
+        categories = [0] * len(COMPOSITION_CATEGORIES)
+        statements = 0
+        continuation_lines = 0
+        for item in counts:
+            for index, value in enumerate(item.categories):
+                categories[index] += value
+            statements += item.statements
+            continuation_lines += item.continuation_lines
+        return cls(
+            categories=tuple(categories),
+            statements=statements,
+            continuation_lines=continuation_lines,
+        )
+
+    def category(self, name: str) -> int:
+        """Return the line count for one category name."""
+
+        return self.categories[COMPOSITION_CATEGORIES.index(name)]
+
+    def as_mapping(self) -> dict[str, int]:
+        """Return every category with its count, in category order."""
+
+        return dict(zip(COMPOSITION_CATEGORIES, self.categories, strict=True))
+
+    @property
+    def physical(self) -> int:
+        """Physical lines: the sum of all categories."""
+
+        return sum(self.categories)
+
+    @property
+    def code(self) -> int:
+        """Physical lines that are not blank, comment, or docstring lines."""
+
+        return self.physical - sum(self.category(name) for name in COMPOSITION_NON_CODE_CATEGORIES)
+
+    @property
+    def code_per_statement(self) -> float | None:
+        """Code lines per statement, or ``None`` without statements."""
+
+        if self.statements == 0:
+            return None
+        return self.code / self.statements
+
+
+@dataclass(frozen=True)
+class CompositionFileRow:
+    """Composition counts for one analyzed Python file."""
+
+    path: str
+    kind: str
+    area: str
+    counts: CompositionCounts
+
+
+@dataclass(frozen=True)
+class CompositionAggregate:
+    """Composition counts summed over a named group of files."""
+
+    name: str
+    files: int
+    counts: CompositionCounts
+
+
+@dataclass(frozen=True)
+class CompositionClassRow:
+    """Size of one class definition, identified by its qualified name."""
+
+    path: str
+    name: str
+    line: int
+    lines: int
+    methods: int
+    kind: str
+
+    @property
+    def qualified_name(self) -> str:
+        """Return ``path:Outer.Inner`` for display."""
+
+        return f"{self.path}:{self.name}"
+
+
+@dataclass(frozen=True)
+class CompositionFunctionRow:
+    """Size of one function or method definition, identified by its qualified name."""
+
+    path: str
+    name: str
+    line: int
+    lines: int
+    kind: str
+
+    @property
+    def qualified_name(self) -> str:
+        """Return ``path:Outer.method`` for display."""
+
+        return f"{self.path}:{self.name}"
+
+
+@dataclass(frozen=True)
+class CompositionFailure:
+    """A discovered Python file that could not be read, decoded, or parsed."""
+
+    path: str
+    error: str
+
+
+@dataclass(frozen=True)
+class CompositionSettings:
+    """Settings that shaped a composition report."""
+
+    limit: int
+    excluded_paths: tuple[str, ...]
+    include_globs: tuple[str, ...]
+    source_dirs: tuple[str, ...]
+    test_dirs: tuple[str, ...]
+    areas: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompositionReport:
+    """Complete Python composition report for one path."""
+
+    path: Path
+    analyzer: str
+    analyzer_version: int
+    schema_version: int
+    python_version: str
+    settings: CompositionSettings
+    total: CompositionAggregate
+    kinds: tuple[CompositionAggregate, ...]
+    areas: tuple[CompositionAggregate, ...]
+    files: tuple[CompositionFileRow, ...]
+    largest_modules: tuple[CompositionFileRow, ...]
+    largest_classes: tuple[CompositionClassRow, ...]
+    largest_functions: tuple[CompositionFunctionRow, ...]
+    failures: tuple[CompositionFailure, ...]
+
+
+@dataclass(frozen=True)
+class CompositionProjectReport:
+    """A named configured project and its composition report."""
+
+    name: str
+    report: CompositionReport
+
+
+@dataclass(frozen=True)
+class MultiProjectCompositionReport:
+    """Composition reports for configured projects."""
+
+    analyzer: str
+    analyzer_version: int
+    schema_version: int
+    python_version: str
+    projects: tuple[CompositionProjectReport, ...]
+    skipped_projects: tuple[SkippedProject, ...]
+
+    @property
+    def failures(self) -> tuple[tuple[str, CompositionFailure], ...]:
+        """Return every failure with its project name."""
+
+        return tuple(
+            (project.name, failure)
+            for project in self.projects
+            for failure in project.report.failures
+        )

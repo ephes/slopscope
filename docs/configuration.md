@@ -189,6 +189,13 @@ exclude_dirs = [
 ]
 ```
 
+## Composition Report
+
+`slopscope --composition` uses the same configuration without a section of its own. `exclude_dirs` and
+`include_globs` shape discovery; `source_dirs`, `test_dirs`, and `areas` shape the source/test and area breakdowns;
+`projects` work with `--project`. `include_languages`, `exclude_languages`, and `profiles` do not apply, because the
+report is Python-only and cannot be combined with `--profile`. See [Composition Report](composition.md).
+
 ## Notes
 
 - Project paths are resolved relative to the configuration file.

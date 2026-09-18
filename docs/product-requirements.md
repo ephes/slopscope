@@ -55,7 +55,9 @@ while allowing repo-specific configuration.
 - A persistent metrics database in the first version.
 - CI trend charts in the first version.
 - A web UI.
-- Deep language parsing in Python.
+- Deep language parsing in Python. The one exception is the opt-in composition report (`--composition`), which
+  parses Python files only, with the standard library `ast` and `tokenize` modules, to classify their lines by
+  structure. There is no general multi-language parsing.
 
 ## Users
 
@@ -94,6 +96,8 @@ Required options:
 - `--exclude-dir PATH`: add an excluded directory or path.
 - `--total-only`: print only the final line count.
 - `--top N`: limit directory or grouped output.
+- `--composition`: print the Python composition report instead of the line-count report.
+- `--limit N`: limit the largest modules, classes, and functions lists in the composition report.
 
 ## Configuration Requirements
 
@@ -169,6 +173,18 @@ Grouped profile:
 - Current grouped output displays a `roles/*` match as `roles/<name>` and totals only files that match the group
   pattern.
 
+Composition report:
+
+- Must be opt-in through `--composition` and leave the default report and existing JSON shapes unchanged.
+- Must assign every physical line of every discovered Python file exactly one structural category, so categories add
+  up to the physical line count.
+- Must report statement counts, continuation lines, and the largest modules, classes, and functions.
+- Must report files that cannot be read, decoded, or parsed on stderr and exit non-zero, without dropping them
+  silently.
+- Must use a distinct JSON shape with `report_type`, `schema_version`, analyzer version, and the parsing Python
+  version.
+- Category definitions and counting rules are documented in [Composition Report](composition.md).
+
 ## Counting Semantics
 
 The tool must make counting semantics explicit:
@@ -227,6 +243,10 @@ JSON output should expose the same data model as the rendered reports:
 For multi-project reports, JSON includes top-level `engine`, `projects`, `snapshot_rows`, and `skipped_projects`
 keys. Each project item contains `name`, `path`, and the normal single-repository `report` object. Existing
 single-repository and profile JSON shapes remain unchanged.
+
+The composition report has its own JSON shape with `report_type: "composition"` (or `"composition_projects"` with
+`--project`), `schema_version`, analyzer name and version, the Python version used to parse, active settings, and
+every category present even when zero.
 
 ## Acceptance Criteria
 
