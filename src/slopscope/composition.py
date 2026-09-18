@@ -93,6 +93,7 @@ class DefinitionSize:
     line: int
     lines: int
     methods: int | None = None
+    overload: bool = False
 
 
 @dataclass(frozen=True)
@@ -280,6 +281,54 @@ def build_composition_report(
             for row in analysis.functions
         )
 
+    duplicates = _apply_duplication(analyses, file_rows, min_duplicate_tokens)
+
+    rows = tuple(file_rows)
+    return CompositionReport(
+        path=root,
+        analyzer=ANALYZER_NAME,
+        analyzer_version=ANALYZER_VERSION,
+        schema_version=SCHEMA_VERSION,
+        python_version=python_version(),
+        detectors=DETECTORS,
+        settings=CompositionSettings(
+            limit=limit,
+            min_duplicate_tokens=min_duplicate_tokens,
+            qt_modules=semantic_settings.qt_modules,
+            logging_patterns=semantic_settings.logging_patterns,
+            compat_markers=semantic_settings.compat_markers,
+            excluded_paths=tuple(excluded_paths),
+            include_globs=tuple(include_globs),
+            source_dirs=tuple(source_dirs),
+            test_dirs=tuple(test_dirs),
+            areas=tuple(named_areas),
+        ),
+        total=_aggregate("total", rows),
+        kinds=tuple(
+            _aggregate(kind, [row for row in rows if row.kind == kind])
+            for kind in SOURCE_TEST_KINDS
+        ),
+        areas=_aggregate_areas(rows),
+        files=rows,
+        largest_modules=tuple(sorted(rows, key=lambda row: (-row.counts.code, row.path))[:limit]),
+        largest_classes=tuple(
+            sorted(classes, key=lambda row: (-row.lines, row.path, row.line, row.name))[:limit]
+        ),
+        largest_functions=tuple(
+            sorted(functions, key=lambda row: (-row.lines, row.path, row.line, row.name))[:limit]
+        ),
+        duplicates=tuple(duplicates[:limit]),
+        failures=tuple(failures),
+    )
+
+
+def _apply_duplication(
+    analyses: Sequence[FileAnalysis],
+    file_rows: list[CompositionFileRow],
+    min_duplicate_tokens: int,
+) -> list[CompositionDuplicateBlock]:
+    """Set each file row's duplicated code lines and return the sorted duplicate blocks."""
+
     duplication = composition_duplication.find_duplicates(
         [analysis.segments for analysis in analyses], min_tokens=min_duplicate_tokens
     )
@@ -319,44 +368,7 @@ def build_composition_report(
             block.occurrences[0].start_line,
         ),
     )
-
-    rows = tuple(file_rows)
-    return CompositionReport(
-        path=root,
-        analyzer=ANALYZER_NAME,
-        analyzer_version=ANALYZER_VERSION,
-        schema_version=SCHEMA_VERSION,
-        python_version=python_version(),
-        detectors=DETECTORS,
-        settings=CompositionSettings(
-            limit=limit,
-            min_duplicate_tokens=min_duplicate_tokens,
-            qt_modules=semantic_settings.qt_modules,
-            logging_patterns=semantic_settings.logging_patterns,
-            compat_markers=semantic_settings.compat_markers,
-            excluded_paths=tuple(excluded_paths),
-            include_globs=tuple(include_globs),
-            source_dirs=tuple(source_dirs),
-            test_dirs=tuple(test_dirs),
-            areas=tuple(named_areas),
-        ),
-        total=_aggregate("total", rows),
-        kinds=tuple(
-            _aggregate(kind, [row for row in rows if row.kind == kind])
-            for kind in SOURCE_TEST_KINDS
-        ),
-        areas=_aggregate_areas(rows),
-        files=rows,
-        largest_modules=tuple(sorted(rows, key=lambda row: (-row.counts.code, row.path))[:limit]),
-        largest_classes=tuple(
-            sorted(classes, key=lambda row: (-row.lines, row.path, row.line, row.name))[:limit]
-        ),
-        largest_functions=tuple(
-            sorted(functions, key=lambda row: (-row.lines, row.path, row.line, row.name))[:limit]
-        ),
-        duplicates=tuple(duplicates[:limit]),
-        failures=tuple(failures),
-    )
+    return duplicates
 
 
 def _aggregate(name: str, rows: Sequence[CompositionFileRow]) -> CompositionAggregate:
@@ -417,6 +429,15 @@ def _is_multiline_literal(node: ast.expr | None) -> bool:
     if isinstance(node, _LITERAL_TYPES):
         return True
     return isinstance(node, ast.Constant) and isinstance(node.value, str | bytes)
+
+
+def _is_overload(decorator: ast.expr) -> bool:
+    """Return whether a decorator is ``overload`` or an attribute named ``overload``."""
+
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    if isinstance(target, ast.Name):
+        return target.id == "overload"
+    return isinstance(target, ast.Attribute) and target.attr == "overload"
 
 
 def _header_nodes(stmt: ast.stmt) -> tuple[ast.AST, ...]:
@@ -627,7 +648,12 @@ class _LineClassifier:
             )
         else:
             self.functions.append(
-                DefinitionSize(name=qualified_name, line=first, lines=end - first + 1)
+                DefinitionSize(
+                    name=qualified_name,
+                    line=first,
+                    lines=end - first + 1,
+                    overload=any(_is_overload(decorator) for decorator in stmt.decorator_list),
+                )
             )
 
         self.scope.append(stmt.name)

@@ -586,3 +586,87 @@ class MultiProjectCompositionReport:
             for project in self.projects
             for failure in project.report.failures
         )
+
+
+SIZE_LIMIT_KINDS = ("functions", "classes", "test_files")
+
+
+@dataclass(frozen=True)
+class SizeLimitSettings:
+    """Maximum sizes: span lines for functions and classes, code lines for test files."""
+
+    max_function_lines: int = 150
+    max_class_lines: int = 1500
+    max_test_file_code_lines: int = 3000
+
+    def limit(self, kind: str) -> int:
+        """Return the limit for one unit kind."""
+
+        return {
+            "functions": self.max_function_lines,
+            "classes": self.max_class_lines,
+            "test_files": self.max_test_file_code_lines,
+        }[kind]
+
+
+@dataclass(frozen=True)
+class SizeLimitEntry:
+    """One unit in a size-limits report group."""
+
+    kind: str
+    key: str
+    size: int | None
+    limit: int
+    recorded: int | None = None
+    reason: str | None = None
+
+    @property
+    def delta(self) -> int | None:
+        """Current size minus recorded size, when both are known."""
+
+        if self.size is None or self.recorded is None:
+            return None
+        return self.size - self.recorded
+
+
+@dataclass(frozen=True)
+class SizeLimitsReport:
+    """Size-limits check result for one project root."""
+
+    path: Path
+    action: str
+    settings: SizeLimitSettings
+    allowlist_path: Path
+    allowlist_existed: bool
+    allowlist_entries: tuple[int, ...]
+    units: tuple[int, ...]
+    over_limit: tuple[SizeLimitEntry, ...]
+    grown: tuple[SizeLimitEntry, ...]
+    shrunk: tuple[SizeLimitEntry, ...]
+    stale: tuple[SizeLimitEntry, ...]
+    lowered: tuple[SizeLimitEntry, ...]
+    dropped: tuple[SizeLimitEntry, ...]
+    seeded: tuple[SizeLimitEntry, ...]
+    failures: tuple[CompositionFailure, ...]
+
+    @property
+    def check_failed(self) -> bool:
+        """Whether a unit is new over its limit or grew past its recorded size."""
+
+        return bool(self.over_limit or self.grown)
+
+
+@dataclass(frozen=True)
+class SizeLimitsProjectReport:
+    """A named configured project and its size-limits report."""
+
+    name: str
+    report: SizeLimitsReport
+
+
+@dataclass(frozen=True)
+class MultiProjectSizeLimitsReport:
+    """Size-limits reports for configured projects, each with its own allowlist."""
+
+    projects: tuple[SizeLimitsProjectReport, ...]
+    skipped_projects: tuple[SkippedProject, ...]
