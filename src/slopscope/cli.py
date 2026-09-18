@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from slopscope import (
     classify,
     cloc,
     composition,
+    composition_baseline,
     composition_render,
-    composition_semantics,
     fallback,
     paths,
     profile,
@@ -109,6 +110,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Rows in the composition report's largest modules, classes, and functions lists "
             f"(default: {composition.DEFAULT_LIMIT})."
         ),
+    )
+    parser.add_argument(
+        "--snapshot",
+        metavar="PATH",
+        help="Also write the composition report as JSON to PATH.",
+    )
+    parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        help="Compare the composition report with an earlier JSON snapshot at PATH.",
     )
     return parser
 
@@ -206,8 +217,13 @@ def _validate_composition_options(
     args: argparse.Namespace,
 ) -> None:
     if not args.composition:
-        if args.limit is not None:
-            parser.error("--limit requires --composition")
+        for value, flag in (
+            (args.limit, "--limit"),
+            (args.snapshot, "--snapshot"),
+            (args.baseline, "--baseline"),
+        ):
+            if value is not None:
+                parser.error(f"{flag} requires --composition")
         return
     for attribute, flag in _COMPOSITION_CONFLICTS:
         value = getattr(args, attribute)
@@ -224,9 +240,26 @@ def _run_composition(
     err: TextIO,
 ) -> int:
     limit = args.limit if args.limit is not None else composition.DEFAULT_LIMIT
+    baseline_path = None if args.baseline is None else Path(args.baseline)
+    baseline: dict[str, Any] | None = None
+    if baseline_path is not None:
+        try:
+            baseline = composition_baseline.load_baseline(
+                baseline_path,
+                expected_report_type=composition_baseline.SINGLE_REPORT_TYPE
+                if args.project is None
+                else composition_baseline.PROJECTS_REPORT_TYPE,
+                schema_version=composition.SCHEMA_VERSION,
+            )
+        except composition_baseline.BaselineError as exc:
+            print(f"slopscope: {exc}", file=err)
+            return 2
+
     rendered_report: CompositionReport | MultiProjectCompositionReport
     if args.project is None:
         report = _build_composition_report(path, slopscope_config, limit)
+        if baseline is not None and baseline_path is not None:
+            report = _with_baseline(report, baseline, baseline_path, err, label=None)
         for failure in report.failures:
             print(
                 f"slopscope: could not analyze {path / failure.path}: {failure.error}",
@@ -253,8 +286,30 @@ def _run_composition(
 
         project_reports: list[CompositionProjectReport] = []
         failed = False
+        baseline_projects = (
+            {} if baseline is None else composition_baseline.project_baselines(baseline)
+        )
         for configured_project in existing_projects:
             report = _build_composition_report(configured_project.path, slopscope_config, limit)
+            if baseline_path is not None:
+                project_baseline = baseline_projects.get(configured_project.name)
+                if project_baseline is None:
+                    reason = f"project {configured_project.name} is not in the baseline"
+                    print(f"slopscope: warning: {reason}", file=err)
+                    report = dataclasses.replace(
+                        report,
+                        baseline=composition_baseline.missing_baseline(
+                            report, path=baseline_path, reason=reason
+                        ),
+                    )
+                else:
+                    report = _with_baseline(
+                        report,
+                        project_baseline,
+                        baseline_path,
+                        err,
+                        label=configured_project.name,
+                    )
             for failure in report.failures:
                 print(
                     f"slopscope: project {configured_project.name}: could not analyze "
@@ -270,10 +325,20 @@ def _run_composition(
             analyzer_version=composition.ANALYZER_VERSION,
             schema_version=composition.SCHEMA_VERSION,
             python_version=composition.python_version(),
-            detectors=composition_semantics.DETECTORS,
+            detectors=composition.DETECTORS,
             projects=tuple(project_reports),
             skipped_projects=skipped_projects,
         )
+
+    if args.snapshot is not None:
+        snapshot_path = Path(args.snapshot)
+        try:
+            snapshot_path.write_text(
+                composition_render.render_composition_json(rendered_report), encoding="utf-8"
+            )
+        except OSError as exc:
+            print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
+            return 2
 
     out.write(
         composition_render.render_composition_report(
@@ -283,6 +348,21 @@ def _run_composition(
         )
     )
     return 1 if failed else 0
+
+
+def _with_baseline(
+    report: CompositionReport,
+    baseline: dict[str, Any],
+    baseline_path: Path,
+    err: TextIO,
+    *,
+    label: str | None,
+) -> CompositionReport:
+    comparison = composition_baseline.compare(report, baseline, path=baseline_path)
+    prefix = "slopscope: warning: " if label is None else f"slopscope: warning: project {label}: "
+    for warning in comparison.warnings:
+        print(f"{prefix}{warning}", file=err)
+    return dataclasses.replace(report, baseline=comparison)
 
 
 def _build_composition_report(

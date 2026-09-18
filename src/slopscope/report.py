@@ -238,6 +238,7 @@ class CompositionCounts:
     markers: tuple[int, ...] = _zeros(COMPOSITION_MARKERS)
     placements: tuple[int, ...] = _zeros(COMPOSITION_TEST_PLACEMENTS)
     constructs: tuple[int, ...] = _zeros(COMPOSITION_CONSTRUCTS)
+    duplicated_lines: int = 0
 
     @classmethod
     def sum(cls, counts: Iterable[CompositionCounts]) -> Self:
@@ -253,6 +254,7 @@ class CompositionCounts:
                 markers=_add(total.markers, item.markers),
                 placements=_add(total.placements, item.placements),
                 constructs=_add(total.constructs, item.constructs),
+                duplicated_lines=total.duplicated_lines + item.duplicated_lines,
             )
         return total
 
@@ -382,6 +384,36 @@ class CompositionFunctionRow:
 
 
 @dataclass(frozen=True)
+class CompositionDuplicateOccurrence:
+    """One copy of a duplicated block."""
+
+    path: str
+    start_line: int
+    end_line: int
+    kind: str
+
+    @property
+    def lines(self) -> int:
+        """Physical lines spanned by this copy."""
+
+        return self.end_line - self.start_line + 1
+
+
+@dataclass(frozen=True)
+class CompositionDuplicateBlock:
+    """A duplicated token sequence and every place it occurs."""
+
+    tokens: int
+    occurrences: tuple[CompositionDuplicateOccurrence, ...]
+
+    @property
+    def lines(self) -> int:
+        """Physical lines spanned by the longest copy."""
+
+        return max(occurrence.lines for occurrence in self.occurrences)
+
+
+@dataclass(frozen=True)
 class CompositionFailure:
     """A discovered Python file that could not be read, decoded, or parsed."""
 
@@ -403,11 +435,55 @@ class CompositionSettings:
     """Settings that shaped a composition report."""
 
     limit: int
+    min_duplicate_tokens: int
     excluded_paths: tuple[str, ...]
     include_globs: tuple[str, ...]
     source_dirs: tuple[str, ...]
     test_dirs: tuple[str, ...]
     areas: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompositionMetricDelta:
+    """One metric compared with its baseline value."""
+
+    metric: str
+    baseline: int | None
+    current: int
+
+    @property
+    def delta(self) -> int | None:
+        """Current minus baseline, or ``None`` without a baseline value."""
+
+        return None if self.baseline is None else self.current - self.baseline
+
+
+@dataclass(frozen=True)
+class CompositionScopeDelta:
+    """Metric deltas for the total or one source/test kind."""
+
+    name: str
+    metrics: tuple[CompositionMetricDelta, ...]
+
+    def get(self, metric: str) -> CompositionMetricDelta:
+        """Return the delta for one metric name."""
+
+        for item in self.metrics:
+            if item.metric == metric:
+                return item
+        raise KeyError(metric)
+
+
+@dataclass(frozen=True)
+class CompositionComparison:
+    """A composition report compared with an earlier snapshot."""
+
+    path: Path
+    analyzer_version: int | None
+    python_version: str | None
+    comparable: bool
+    warnings: tuple[str, ...]
+    scopes: tuple[CompositionScopeDelta, ...]
 
 
 @dataclass(frozen=True)
@@ -428,7 +504,9 @@ class CompositionReport:
     largest_modules: tuple[CompositionFileRow, ...]
     largest_classes: tuple[CompositionClassRow, ...]
     largest_functions: tuple[CompositionFunctionRow, ...]
+    duplicates: tuple[CompositionDuplicateBlock, ...]
     failures: tuple[CompositionFailure, ...]
+    baseline: CompositionComparison | None = None
 
 
 @dataclass(frozen=True)

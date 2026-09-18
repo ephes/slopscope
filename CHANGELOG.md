@@ -28,6 +28,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   classes, all resolved through imports. Add a `compat` wording marker, construct counts, and test-file placement into
   `test`, `fixture`, `setup`, `module_level`, and `helper_or_unknown` with conservative pytest and unittest rules. JSON
   output lists every detector with its version.
+- Add token-based duplicate detection to the composition report: exact token windows anchored at line starts are
+  verified token by token, extended while every copy agrees, and merged into per-file duplicated code lines and a list
+  of the largest duplicate blocks with all their copies.
+- Add `--snapshot PATH` to write the composition JSON to a file and `--baseline PATH` to compare with an earlier
+  snapshot. Baselines with a different report type or schema version are rejected; analyzer or detector version
+  differences are reported as warnings. The composition JSON schema version is now 3.
 - Amend the "deep language parsing" non-goal to allow the opt-in, Python-only composition report.
 
 ## 0.1.0a1 - 2026-05-10

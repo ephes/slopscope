@@ -97,7 +97,9 @@ Required options:
 - `--total-only`: print only the final line count.
 - `--top N`: limit directory or grouped output.
 - `--composition`: print the Python composition report instead of the line-count report.
-- `--limit N`: limit the largest modules, classes, and functions lists in the composition report.
+- `--limit N`: limit the largest modules, classes, functions, and duplicate blocks lists in the composition report.
+- `--snapshot PATH`: also write the composition JSON report to a file.
+- `--baseline PATH`: compare the composition report with an earlier snapshot.
 
 ## Configuration Requirements
 
@@ -182,6 +184,8 @@ Composition report:
 - Semantic labels such as framework, logging, or data-shape code must be overlapping tags, separate from the structural
   categories, resolved through imports rather than naming conventions, and versioned per detector in JSON.
 - Test-file placement must use conservative pytest and unittest rules with an explicit helper-or-unknown bucket.
+- Duplicate detection must be token-based, verify every match, and merge matched intervals instead of scoring pairs.
+- Snapshots and baselines must reject a baseline with a different schema version.
 - Must report files that cannot be read, decoded, or parsed on stderr and exit non-zero, without dropping them
   silently.
 - Must use a distinct JSON shape with `report_type`, `schema_version`, analyzer version, and the parsing Python

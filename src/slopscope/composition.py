@@ -8,6 +8,7 @@ path classification, parses each discovered Python file with the standard librar
 from __future__ import annotations
 
 import ast
+import dataclasses
 import io
 import platform
 import re
@@ -17,7 +18,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from slopscope import classify, composition_semantics, fallback
+from slopscope import classify, composition_duplication, composition_semantics, fallback
 from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
@@ -25,6 +26,9 @@ from slopscope.report import (
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
+    CompositionDetector,
+    CompositionDuplicateBlock,
+    CompositionDuplicateOccurrence,
     CompositionFailure,
     CompositionFileRow,
     CompositionFunctionRow,
@@ -34,7 +38,7 @@ from slopscope.report import (
 
 ANALYZER_NAME = "slopscope.composition"
 ANALYZER_VERSION = 1
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"
 SOURCE_TEST_KINDS = ("source", "tests", "other")
@@ -69,6 +73,14 @@ _STRING_END_TYPES = frozenset(
 )
 
 
+DETECTORS: tuple[CompositionDetector, ...] = (
+    *composition_semantics.DETECTORS,
+    CompositionDetector(
+        name="duplication", kind="duplication", version=composition_duplication.DUPLICATION_VERSION
+    ),
+)
+
+
 class CompositionAnalysisError(Exception):
     """A file could not be read, decoded, tokenized, or parsed."""
 
@@ -91,6 +103,7 @@ class FileAnalysis:
     line_categories: tuple[str, ...]
     classes: tuple[DefinitionSize, ...]
     functions: tuple[DefinitionSize, ...]
+    segments: tuple[composition_duplication.Segment, ...] = ()
 
 
 def python_version() -> str:
@@ -104,11 +117,13 @@ def analyze_source(
     *,
     path: str = "<source>",
     test_file: bool = False,
+    interner: dict[str, int] | None = None,
 ) -> FileAnalysis:
     """Classify every physical line of Python source text and run the semantic detectors.
 
     ``source`` must already use ``\\n`` line endings, as produced by ``tokenize.open()``.
-    Test placement is computed only when ``test_file`` is true.
+    Test placement is computed only when ``test_file`` is true. Token segments for duplicate
+    detection are built only when an ``interner`` is passed.
     Raises :class:`CompositionAnalysisError` when the source cannot be parsed or tokenized.
     """
 
@@ -131,10 +146,20 @@ def analyze_source(
     classifier = _LineClassifier(lines)
     classifier.mark_blank_and_comment_lines(tokens)
     classifier.visit_body(tree.body, allow_docstring=True)
-    return classifier.result(tree, tokens, test_file=test_file)
+    analysis = classifier.result(tree, tokens, test_file=test_file)
+    if interner is None:
+        return analysis
+    segments = composition_duplication.token_segments(tokens, analysis.line_categories, interner)
+    return dataclasses.replace(analysis, segments=segments)
 
 
-def analyze_file(root: Path, relative_path: str, *, test_file: bool = False) -> FileAnalysis:
+def analyze_file(
+    root: Path,
+    relative_path: str,
+    *,
+    test_file: bool = False,
+    interner: dict[str, int] | None = None,
+) -> FileAnalysis:
     """Read one file with PEP 263 encoding detection and classify its lines."""
 
     file_path = root / relative_path
@@ -148,7 +173,7 @@ def analyze_file(root: Path, relative_path: str, *, test_file: bool = False) -> 
         raise CompositionAnalysisError(f"decode error: {exc.msg}") from exc
     except OSError as exc:
         raise CompositionAnalysisError(f"I/O error: {exc.strerror or exc}") from exc
-    return analyze_source(source, path=relative_path, test_file=test_file)
+    return analyze_source(source, path=relative_path, test_file=test_file, interner=interner)
 
 
 def discover_python_files(
@@ -184,10 +209,13 @@ def build_composition_report(
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
     named_areas: Sequence[str] = classify.DEFAULT_NAMED_AREAS,
     limit: int = DEFAULT_LIMIT,
+    min_duplicate_tokens: int = composition_duplication.DEFAULT_MIN_TOKENS,
 ) -> CompositionReport:
     """Discover, analyze, classify, and aggregate Python files below a path."""
 
     root = Path(path)
+    interner: dict[str, int] = {}
+    analyses: list[FileAnalysis] = []
     file_rows: list[CompositionFileRow] = []
     classes: list[CompositionClassRow] = []
     functions: list[CompositionFunctionRow] = []
@@ -202,7 +230,9 @@ def build_composition_report(
             relative_path, source_dirs=source_dirs, test_dirs=test_dirs
         )
         try:
-            analysis = analyze_file(root, relative_path, test_file=kind == "tests")
+            analysis = analyze_file(
+                root, relative_path, test_file=kind == "tests", interner=interner
+            )
         except CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
             continue
@@ -213,6 +243,7 @@ def build_composition_report(
             test_dirs=test_dirs,
             named_areas=named_areas,
         )
+        analyses.append(analysis)
         file_rows.append(
             CompositionFileRow(path=relative_path, kind=kind, area=area, counts=analysis.counts)
         )
@@ -238,6 +269,46 @@ def build_composition_report(
             for row in analysis.functions
         )
 
+    duplication = composition_duplication.find_duplicates(
+        [analysis.segments for analysis in analyses], min_tokens=min_duplicate_tokens
+    )
+    for index, spans in duplication.intervals.items():
+        categories = analyses[index].line_categories
+        duplicated = sum(
+            1
+            for start, end in spans
+            for line in range(start, end + 1)
+            if categories[line - 1] not in (BLANK, COMMENT, DOCSTRING)
+        )
+        row = file_rows[index]
+        file_rows[index] = dataclasses.replace(
+            row, counts=dataclasses.replace(row.counts, duplicated_lines=duplicated)
+        )
+    duplicates = sorted(
+        (
+            CompositionDuplicateBlock(
+                tokens=block.tokens,
+                occurrences=tuple(
+                    CompositionDuplicateOccurrence(
+                        path=file_rows[occurrence.file].path,
+                        start_line=occurrence.start_line,
+                        end_line=occurrence.end_line,
+                        kind=file_rows[occurrence.file].kind,
+                    )
+                    for occurrence in block.occurrences
+                ),
+            )
+            for block in duplication.blocks
+        ),
+        key=lambda block: (
+            -block.lines,
+            -len(block.occurrences),
+            -block.tokens,
+            block.occurrences[0].path,
+            block.occurrences[0].start_line,
+        ),
+    )
+
     rows = tuple(file_rows)
     return CompositionReport(
         path=root,
@@ -245,9 +316,10 @@ def build_composition_report(
         analyzer_version=ANALYZER_VERSION,
         schema_version=SCHEMA_VERSION,
         python_version=python_version(),
-        detectors=composition_semantics.DETECTORS,
+        detectors=DETECTORS,
         settings=CompositionSettings(
             limit=limit,
+            min_duplicate_tokens=min_duplicate_tokens,
             excluded_paths=tuple(excluded_paths),
             include_globs=tuple(include_globs),
             source_dirs=tuple(source_dirs),
@@ -268,6 +340,7 @@ def build_composition_report(
         largest_functions=tuple(
             sorted(functions, key=lambda row: (-row.lines, row.path, row.line, row.name))[:limit]
         ),
+        duplicates=tuple(duplicates[:limit]),
         failures=tuple(failures),
     )
 

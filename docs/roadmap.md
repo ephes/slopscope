@@ -133,9 +133,9 @@ Slice 2: semantic tags and test placement.
 
 Slice 3: duplication, snapshots, and baselines.
 
-- [ ] Detect repeated code token-based: keep adjacency, verify matches instead of trusting hashes, and merge matched
+- [x] Detect repeated code token-based: keep adjacency, verify matches instead of trusting hashes, and merge matched
   intervals rather than counting overlapping windows or growing file pairs quadratically.
-- [ ] Add `--snapshot PATH` and `--baseline PATH`, rejecting baselines with a different schema version.
+- [x] Add `--snapshot PATH` and `--baseline PATH`, rejecting baselines with a different schema version.
 
 Later:
 

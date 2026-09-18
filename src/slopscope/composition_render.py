@@ -6,6 +6,7 @@ import io
 import json
 from typing import Any
 
+from slopscope.composition_baseline import changed_metrics
 from slopscope.render import OutputFormat, _load_rich, _percent
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
@@ -15,8 +16,10 @@ from slopscope.report import (
     COMPOSITION_TEST_PLACEMENTS,
     CompositionAggregate,
     CompositionClassRow,
+    CompositionComparison,
     CompositionCounts,
     CompositionDetector,
+    CompositionDuplicateBlock,
     CompositionFailure,
     CompositionFileRow,
     CompositionFunctionRow,
@@ -86,6 +89,9 @@ def render_composition_plain(report: RenderableCompositionReport) -> str:
         f"Files: {report.total.files} analyzed, {len(report.failures)} failed",
         "",
     ]
+    if report.baseline is not None:
+        lines.extend(_plain_comparison(report.baseline))
+        lines.append("")
     lines.extend(_plain_categories(report))
     lines.append("")
     lines.extend(_plain_tags(report))
@@ -103,6 +109,8 @@ def render_composition_plain(report: RenderableCompositionReport) -> str:
     lines.extend(_plain_classes(report.largest_classes))
     lines.append("")
     lines.extend(_plain_functions(report.largest_functions))
+    lines.append("")
+    lines.extend(_plain_duplication(report))
     if report.failures:
         lines.append("")
         lines.extend(_plain_failures(report.failures))
@@ -169,6 +177,7 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
         "settings": {
             "language": "Python",
             "limit": settings.limit,
+            "min_duplicate_tokens": settings.min_duplicate_tokens,
             "excluded_paths": list(settings.excluded_paths),
             "include_globs": list(settings.include_globs),
             "source_dirs": list(settings.source_dirs),
@@ -186,6 +195,8 @@ def _composition_report_to_dict(report: CompositionReport) -> dict[str, Any]:
         "largest_modules": [_module_to_dict(row) for row in report.largest_modules],
         "largest_classes": [_class_to_dict(row) for row in report.largest_classes],
         "largest_functions": [_function_to_dict(row) for row in report.largest_functions],
+        "duplicates": [_duplicate_to_dict(block) for block in report.duplicates],
+        "baseline": None if report.baseline is None else _comparison_to_dict(report.baseline),
         "files": [_file_to_dict(row) for row in report.files],
         "failures": [_failure_to_dict(failure) for failure in report.failures],
     }
@@ -198,6 +209,7 @@ def _counts_to_dict(counts: CompositionCounts) -> dict[str, Any]:
         "code": counts.code,
         "statements": counts.statements,
         "continuation_lines": counts.continuation_lines,
+        "duplicated_lines": counts.duplicated_lines,
         "code_per_statement": None if ratio is None else round(ratio, 2),
         "categories": counts.as_mapping(),
         "tags": counts.tag_mapping(),
@@ -245,6 +257,77 @@ def _function_to_dict(row: CompositionFunctionRow) -> dict[str, Any]:
         "line": row.line,
         "lines": row.lines,
         "kind": row.kind,
+    }
+
+
+def _comparison_to_dict(comparison: CompositionComparison) -> dict[str, Any]:
+    return {
+        "path": str(comparison.path),
+        "analyzer_version": comparison.analyzer_version,
+        "python_version": comparison.python_version,
+        "comparable": comparison.comparable,
+        "warnings": list(comparison.warnings),
+        "deltas": {
+            scope.name: {
+                metric.metric: {
+                    "baseline": metric.baseline,
+                    "current": metric.current,
+                    "delta": metric.delta,
+                }
+                for metric in scope.metrics
+            }
+            for scope in comparison.scopes
+        },
+    }
+
+
+def _signed(value: int | None) -> str:
+    return "-" if value is None else f"{value:+d}"
+
+
+def _comparison_rows(comparison: CompositionComparison) -> list[tuple[str, str, list[str]]]:
+    total = comparison.scopes[0]
+    return [
+        (
+            metric,
+            str(total.get(metric).current),
+            [_signed(scope.get(metric).delta) for scope in comparison.scopes],
+        )
+        for metric in changed_metrics(comparison)
+    ]
+
+
+def _comparison_header(comparison: CompositionComparison) -> list[str]:
+    lines = [f"Baseline: {comparison.path}"]
+    if not comparison.comparable:
+        lines.append("Warning: not directly comparable with this baseline; see the warnings below.")
+    lines.extend(f"Warning: {warning}" for warning in comparison.warnings)
+    return lines
+
+
+def _plain_comparison(comparison: CompositionComparison) -> list[str]:
+    header = f"{'Metric':<30} {'Current':>9}" + "".join(
+        f" {'Δ ' + scope.name.capitalize():>10}" for scope in comparison.scopes
+    )
+    lines = ["Changes Since Baseline", *_comparison_header(comparison), header, "-" * len(header)]
+    for metric, current, deltas in _comparison_rows(comparison):
+        lines.append(f"{metric:<30} {current:>9}" + "".join(f" {delta:>10}" for delta in deltas))
+    return lines
+
+
+def _duplicate_to_dict(block: CompositionDuplicateBlock) -> dict[str, Any]:
+    return {
+        "lines": block.lines,
+        "tokens": block.tokens,
+        "occurrences": [
+            {
+                "path": occurrence.path,
+                "start_line": occurrence.start_line,
+                "end_line": occurrence.end_line,
+                "kind": occurrence.kind,
+            }
+            for occurrence in block.occurrences
+        ],
     }
 
 
@@ -420,6 +503,50 @@ def _plain_functions(rows: tuple[CompositionFunctionRow, ...]) -> list[str]:
     return lines
 
 
+_MAX_LISTED_OCCURRENCES = 5
+
+
+def _occurrence_labels(block: CompositionDuplicateBlock) -> list[str]:
+    labels = [
+        f"{occurrence.path}:{occurrence.start_line}-{occurrence.end_line}"
+        for occurrence in block.occurrences[:_MAX_LISTED_OCCURRENCES]
+    ]
+    hidden = len(block.occurrences) - _MAX_LISTED_OCCURRENCES
+    if hidden > 0:
+        labels.append(f"... and {hidden} more")
+    return labels
+
+
+def _duplication_rows(report: CompositionReport) -> tuple[CompositionAggregate, ...]:
+    return (*report.kinds, report.total)
+
+
+def _plain_duplication(report: CompositionReport) -> list[str]:
+    header = f"{'Kind':<16} {'Code':>9} {'Duplicated':>10} {'Share':>7}"
+    lines = [
+        f"Duplication (blocks of {report.settings.min_duplicate_tokens}+ identical tokens)",
+        header,
+        "-" * len(header),
+    ]
+    for row in _duplication_rows(report):
+        counts = row.counts
+        lines.append(
+            f"{row.name:<16} {counts.code:>9} {counts.duplicated_lines:>10} "
+            f"{_percent(counts.duplicated_lines, counts.code):>7}"
+        )
+    lines.append("")
+    lines.append("Largest Duplicate Blocks")
+    lines.append(f"{'Lines':>8} {'Tokens':>7} {'Copies':>6} Locations")
+    lines.append("-" * 60)
+    if not report.duplicates:
+        lines.append("(no duplicate blocks)")
+    for block in report.duplicates:
+        labels = _occurrence_labels(block)
+        lines.append(f"{block.lines:>8} {block.tokens:>7} {len(block.occurrences):>6} {labels[0]}")
+        lines.extend(f"{'':>24}{label}" for label in labels[1:])
+    return lines
+
+
 def _plain_failures(failures: tuple[CompositionFailure, ...]) -> list[str]:
     lines = ["Failures", "-" * 60]
     for failure in failures:
@@ -492,6 +619,9 @@ def _print_rich_report(
         )
     )
     console.print()
+    if report.baseline is not None:
+        _print_rich_comparison(console, table_class, text_class, report.baseline)
+        console.print()
     _print_rich_categories(console, table_class, report)
     console.print()
     _print_rich_tags(console, table_class, report)
@@ -511,6 +641,8 @@ def _print_rich_report(
     _print_rich_classes(console, table_class, report.largest_classes)
     console.print()
     _print_rich_functions(console, table_class, report.largest_functions)
+    console.print()
+    _print_rich_duplication(console, table_class, report)
     if report.failures:
         console.print()
         table = table_class(title="Failures", title_style="bold red")
@@ -547,6 +679,24 @@ def _print_rich_categories(console: Any, table_class: Any, report: CompositionRe
             *(str(getattr(column.counts, label)) for column in columns[1:]),
             style="bold",
         )
+    console.print(table)
+
+
+def _print_rich_comparison(
+    console: Any,
+    table_class: Any,
+    text_class: Any,
+    comparison: CompositionComparison,
+) -> None:
+    for line in _comparison_header(comparison):
+        console.print(text_class(line, style="yellow" if line.startswith("Warning") else "dim"))
+    table = table_class(title="Changes Since Baseline", title_style="bold blue")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Current", justify="right", style="green")
+    for scope in comparison.scopes:
+        table.add_column(f"Δ {scope.name.capitalize()}", justify="right")
+    for metric, current, deltas in _comparison_rows(comparison):
+        table.add_row(metric, current, *deltas)
     console.print(table)
 
 
@@ -688,6 +838,42 @@ def _print_rich_functions(
     for row in rows:
         table.add_row(row.qualified_name, str(row.line), row.kind, str(row.lines))
     console.print(table)
+
+
+def _print_rich_duplication(console: Any, table_class: Any, report: CompositionReport) -> None:
+    table = table_class(
+        title=f"Duplication (blocks of {report.settings.min_duplicate_tokens}+ identical tokens)",
+        title_style="bold blue",
+    )
+    table.add_column("Kind", style="cyan")
+    table.add_column("Code", justify="right", style="green")
+    table.add_column("Duplicated", justify="right", style="green")
+    table.add_column("Share", justify="right")
+    for row in _duplication_rows(report):
+        counts = row.counts
+        table.add_row(
+            row.name,
+            str(counts.code),
+            str(counts.duplicated_lines),
+            _percent(counts.duplicated_lines, counts.code),
+        )
+    console.print(table)
+    console.print()
+    blocks = table_class(title="Largest Duplicate Blocks", title_style="bold blue")
+    blocks.add_column("Lines", justify="right", style="green")
+    blocks.add_column("Tokens", justify="right")
+    blocks.add_column("Copies", justify="right", style="magenta")
+    blocks.add_column("Locations", style="cyan")
+    if not report.duplicates:
+        blocks.add_row("", "", "", "(no duplicate blocks)")
+    for block in report.duplicates:
+        blocks.add_row(
+            str(block.lines),
+            str(block.tokens),
+            str(len(block.occurrences)),
+            "\n".join(_occurrence_labels(block)),
+        )
+    console.print(blocks)
 
 
 def _print_rich_project_snapshot(

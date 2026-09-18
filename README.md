@@ -34,12 +34,13 @@ reusable Python CLI that can be added as a development dependency.
 - Python composition report (`--composition`): every physical line of every Python file in one structural category
   (blank, comment, docstring, import, definition, assertion, error handling, literal data, other code), statement
   counts, continuation lines, overlapping semantic tags (Qt, logging, data shapes) resolved through imports, a
-  compatibility-wording marker, test-file placement (tests, fixtures, setup, module level, helpers), and the largest
-  modules, classes, and functions. Standard library `ast` and `tokenize` only.
+  compatibility-wording marker, test-file placement (tests, fixtures, setup, module level, helpers), token-based
+  duplicate detection, the largest modules, classes, and functions, and JSON snapshots with baseline comparison.
+  Standard library `ast` and `tokenize` only.
 
 ## Planned Features
 
-- Persistent metrics and trend storage.
+- Persistent metrics and trend storage beyond single JSON snapshots.
 
 ## Installation
 
@@ -101,6 +102,8 @@ uv run slopscope --profile roles --top 20
 uv run slopscope --composition
 uv run slopscope --composition --format json > composition.json
 uv run slopscope --composition --project all --limit 20
+uv run slopscope --composition --snapshot composition.json
+uv run slopscope --composition --baseline composition.json
 ```
 
 For migration compatibility, the package also exposes:
@@ -178,12 +181,15 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - semantic tags that overlap the categories: `qt`, `logging`, and `data_shape`, each resolved through the file's own
   imports, plus a `compat` marker for identifiers that name themselves legacy, fallback, or compat code
 - construct counts, and where test-file code lines sit: tests, fixtures, setup, module level, or helpers
+- duplicated code lines and the largest duplicate blocks, found on exact token sequences so formatting and comments
+  do not matter
 - per-area totals
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`
 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
-`--limit N` sets the size of the largest-item lists (default 10). `--engine`, `--profile`, `--total-only`, and `--top`
+`--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
+file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version. `--engine`, `--profile`, `--total-only`, and `--top`
 cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr and in
 the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"` shape. See
 [Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and known limits.

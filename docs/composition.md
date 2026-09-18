@@ -2,8 +2,8 @@
 
 The default report answers "how many lines". The composition report answers "lines of what": it puts every physical
 line of every discovered Python file into exactly one structural category, reports statement counts that do not depend
-on formatting, adds overlapping semantic tags, places test-file lines, and lists the largest modules, classes, and
-functions.
+on formatting, adds overlapping semantic tags, places test-file lines, finds duplicated code, lists the largest modules,
+classes, and functions, and compares with earlier snapshots.
 
 ```bash
 slopscope --composition
@@ -13,6 +13,8 @@ slopscope --composition --format json > composition.json
 slopscope --composition --limit 25
 slopscope --composition --project all
 slopscope --composition --config path/to/pyproject.toml
+slopscope --composition --snapshot composition.json
+slopscope --composition --baseline composition.json
 ```
 
 The mode is opt-in, Python-only, and uses only the standard library `ast` and `tokenize` modules. It does not change
@@ -21,8 +23,11 @@ the default report, profiles, or any existing JSON shape. `count-lines-of-code -
 ## Options
 
 - `--composition` selects the composition report.
-- `--limit N` sets the number of rows in the largest modules, classes, and functions lists. The default is 10. `--limit`
-  is a usage error without `--composition`.
+- `--limit N` sets the number of rows in the largest modules, classes, functions, and duplicate block lists. The
+  default is 10.
+- `--snapshot PATH` also writes the JSON report to `PATH`, whatever `--format` is.
+- `--baseline PATH` compares the report with an earlier snapshot. See [Snapshots And Baselines](#snapshots-and-baselines).
+- `--limit`, `--snapshot`, and `--baseline` are usage errors without `--composition`.
 - `PATH`, `--config PATH`, `--project NAME` (repeatable, or `all`), `--format rich|plain|json`, and `--no-color` work
   as they do for the default report.
 - `--engine`, `--profile`, `--total-only`, and `--top` cannot be combined with `--composition`; the command fails with
@@ -173,6 +178,32 @@ Test functions and methods are recognized conservatively:
   in the same file. Its methods starting with `test` are tests, as unittest's loader collects them.
 - Only top-level classes and their direct methods are placed; nested classes belong to their enclosing bucket.
 
+## Duplication
+
+Duplicate detection works on tokens, so layout, comments, and blank lines do not hide or create duplicates:
+
+1. Each file becomes a stream of code tokens. Comments, newlines, indentation tokens, and docstrings are removed, and
+   every docstring ends the stream, so a match never spans a docstring. Tokens are compared exactly: renamed variables
+   or changed literals are different code.
+2. Every token that starts a physical line is an anchor. The 50 tokens from each anchor form a window. Windows are
+   grouped by hash and each group is verified token by token, so a hash collision never reports a false duplicate.
+3. A verified group with two or more windows is a duplicated block. Within one file, a window that overlaps an earlier
+   window of the same group is dropped, so copies never overlap. The block is extended to the right while every copy
+   still agrees, without letting copies in the same file run into each other. Where copies stop agreeing, the copies
+   that still share their next token continue as their own, longer block: when two copies share 100 tokens and a
+   third shares only the first 50, both the three-copy block and the longer two-copy block are reported. A group that
+   only continues an already extended block, with each member inside a different copy of that block, is not reported
+   again.
+4. Every copy counts, and no pairwise scores are computed, so a block repeated in many files is one block with many
+   copies rather than a quadratic number of pairs.
+
+`duplicated_lines` counts code lines covered by any copy of any duplicated window or block, merging overlapping
+intervals so each line counts once. Blank, comment, and docstring lines inside a copy are not counted. The first copy
+counts too: when two files share a block, both files report its lines.
+
+Largest duplicate blocks are ranked by the physical lines spanned by their longest copy, then by number of copies and
+tokens, and list up to five locations each.
+
 ## Largest Items
 
 - Largest modules are ranked by code lines.
@@ -201,6 +232,9 @@ Plain and Rich output contain these sections:
   code lines per test.
 - Areas: the same columns as Statements, per repository area.
 - Largest Modules, Largest Classes, and Largest Functions.
+- Duplication: code lines, duplicated lines, and share for source, tests, other, and total, followed by the largest
+  duplicate blocks.
+- Changes Since Baseline, first, when `--baseline` is used.
 - Failures, when any file failed.
 
 Rich is optional. Without Rich, or with `--no-color`, the plain renderer is used.
@@ -213,19 +247,21 @@ file to keep a snapshot.
 ```json
 {
   "report_type": "composition",
-  "schema_version": 2,
+  "schema_version": 3,
   "analyzer": {"name": "slopscope.composition", "version": 1, "python_version": "3.13.1"},
   "detectors": [
     {"name": "qt", "kind": "tag", "version": 1},
     {"name": "logging", "kind": "tag", "version": 1},
     {"name": "data_shape", "kind": "tag", "version": 1},
     {"name": "compat", "kind": "marker", "version": 1},
-    {"name": "test_placement", "kind": "placement", "version": 1}
+    {"name": "test_placement", "kind": "placement", "version": 1},
+    {"name": "duplication", "kind": "duplication", "version": 1}
   ],
   "path": ".",
   "settings": {
     "language": "Python",
     "limit": 10,
+    "min_duplicate_tokens": 50,
     "excluded_paths": [".git", ".venv", "build", "dist"],
     "include_globs": [],
     "source_dirs": ["src"],
@@ -245,6 +281,7 @@ file to keep a snapshot.
     "code": 31,
     "statements": 17,
     "continuation_lines": 12,
+    "duplicated_lines": 6,
     "code_per_statement": 1.82,
     "categories": {"blank": 6, "comment": 1, "docstring": 2, "import": 3, "definition": 5, "assertion": 0,
                    "error_handling": 1, "literal_data": 4, "other_code": 18},
@@ -260,6 +297,10 @@ file to keep a snapshot.
                        "lines": 20, "methods": 3, "kind": "source"}],
   "largest_functions": [{"path": "src/pkg/app.py", "name": "App.run", "qualified_name": "src/pkg/app.py:App.run",
                          "line": 12, "lines": 9, "kind": "source"}],
+  "duplicates": [{"lines": 6, "tokens": 57, "occurrences": [
+    {"path": "src/pkg/app.py", "start_line": 20, "end_line": 25, "kind": "source"},
+    {"path": "tests/test_app.py", "start_line": 4, "end_line": 9, "kind": "tests"}]}],
+  "baseline": null,
   "files": [{"path": "src/pkg/app.py", "kind": "source", "area": "src", "...": "same count fields as total"}],
   "failures": [{"path": "src/pkg/broken.py", "error": "syntax error: invalid syntax (line 3)"}]
 }
@@ -280,6 +321,30 @@ With `--project`, the top level has `report_type: "composition_projects"`, `sche
 array whose items contain `name`, `path`, and a full `report` object as above, and `skipped_projects` for missing
 optional projects.
 
+## Snapshots And Baselines
+
+`--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
+a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
+
+`--baseline PATH` loads an earlier snapshot and adds a comparison:
+
+- A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
+  different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
+- A different analyzer version or detector version prints a `slopscope: warning:` line on stderr and marks the
+  comparison as not comparable, because the numbers may differ from changed rules alone. A different Python version is
+  reported as a warning but stays comparable.
+- Deltas are computed for `total`, `source`, `tests`, and `other`, for files, physical, code, statements, continuation
+  lines, duplicated lines, and every category, tag, marker, construct, and test placement.
+- Plain and Rich output show a Changes Since Baseline table first. It always lists the headline metrics and lists
+  every other metric that changed in any scope.
+- In JSON, `baseline` is `null` without `--baseline`. Otherwise it holds `path`, `analyzer_version`,
+  `python_version`, `comparable`, `warnings`, and `deltas`: for each scope, every metric as
+  `{"baseline": 10, "current": 12, "delta": 2}`, with dotted names such as `categories.import` or `tags.logging`. A
+  metric that the baseline lacks has `null` as baseline and delta.
+- With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
+  baseline lacks gets a warning and a comparison without baseline values.
+- `--baseline` and `--snapshot` may name the same file: the baseline is read before the new snapshot is written.
+
 ## Known Limits
 
 - Tags only see names bound through imports. They cannot follow objects through attributes, parameters, or return
@@ -291,4 +356,5 @@ optional projects.
 - Files are analyzed sequentially.
 - There is no configuration section for the composition report yet; defaults are used for everything not listed under
   [Discovered Files](#discovered-files).
-- Snapshots are plain JSON redirects; there is no baseline comparison yet.
+- Duplicate detection finds exact token copies that start at a line start in every copy. Copies with renamed names or
+  changed literals, and copies that start mid-line in one file, are not found.
