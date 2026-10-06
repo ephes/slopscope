@@ -228,6 +228,9 @@ The same commands are available through the `justfile` as `just test`, `just lin
 `just typecheck`, and `just check`. Use `just loc` to dogfood the local `slopscope` package with the Python engine
 and Rich output from the development environment.
 
+GitHub Actions runs the same four checks (`.github/workflows/ci.yml`) on every push and pull request, against the
+locked dependencies on Python 3.11 and 3.13. The workflow has read-only repository permissions and uses no secrets.
+
 Build the local package without publishing:
 
 ```bash
