@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Add a GitHub Actions CI workflow that runs the `just check` steps (pytest, ruff check, ruff format check, mypy) on
+  Python 3.11 and 3.13 with the locked dependencies. Actions are pinned by commit SHA, the uv cache is enabled, the
+  workflow token is read-only, and no secrets are used.
+
 ## 0.3.0a1 - 2026-09-18
 
 Compatibility notes: the default report, profiles, multi-project reports, the composition report, and their JSON shapes

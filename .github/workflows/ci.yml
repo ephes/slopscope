@@ -1,0 +1,56 @@
+name: CI
+
+# Same checks as `just check` (tests, lint, format check, typecheck) on the
+# oldest and newest supported Python. Tests stub `cloc`, so it is not
+# installed here; no services and no secrets are needed.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'supersedable' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PYTHONUNBUFFERED: "1"
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  check:
+    name: just check (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # requires-python is >=3.11; 3.13 is the newest classified version.
+        python-version: ["3.11", "3.13"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: py${{ matrix.python-version }}
+      - name: Sync locked dependencies
+        run: uv sync --locked
+      - name: Tests (just test)
+        run: uv run --locked pytest
+      - name: Lint (just lint)
+        run: uv run --locked ruff check .
+      - name: Format check (just format-check)
+        run: uv run --locked ruff format --check .
+      - name: Typecheck (just typecheck)
+        run: uv run --locked mypy
