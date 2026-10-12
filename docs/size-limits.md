@@ -4,6 +4,11 @@
 limit must be recorded in an allowlist, where they may shrink but not grow; everything else must stay within its limit.
 The check reuses the [composition report](composition.md) analyzer, so it needs no setup beyond a local checkout.
 
+Git file discovery has a 30-second execution timeout plus bounded cleanup (up to 6 extra seconds on POSIX,
+11 on Windows). A discovery timeout returns exit code 2 with the root path and no report, snapshot, or allowlist
+write; partial output is discarded without filesystem fallback. Missing/nonzero Git retains filesystem fallback.
+Windows process-tree termination is best-effort and untested. See [README](../README.md) for discovery details.
+
 ```bash
 slopscope --size-limits                    # report, exit 0
 slopscope --size-limits --strict           # exit 1 when a unit is new over its limit or grew

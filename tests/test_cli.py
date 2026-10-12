@@ -1855,3 +1855,103 @@ def test_cloc_include_globs_match_python_selection(
             "test_code": 0,
         }
     assert reports[0]["language_rows"] == reports[1]["language_rows"]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--engine", "python"],
+        ["--composition", "--snapshot", "snapshot.json"],
+        ["--size-limits", "--seed-allowlist"],
+        ["--profile", "physical", "--total-only"],
+    ],
+)
+def test_git_discovery_timeout_fails_without_output_or_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, options: list[str]
+) -> None:
+    import subprocess
+
+    calls = []
+
+    class Process:
+        pid = 12345
+
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            calls.append(command)
+
+        def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
+            assert timeout in (30.0, 1)
+            raise subprocess.TimeoutExpired("git", timeout, output=b"partial.py\0")
+
+        def kill(self) -> None:
+            pass
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == 5
+            return -9
+
+    def no_walk(*args: object, **kwargs: object) -> list[Path]:
+        raise AssertionError("timeout must not trigger filesystem fallback")
+
+    monkeypatch.setattr("slopscope.fallback.subprocess.Popen", Process)
+    monkeypatch.setattr("slopscope.fallback.subprocess.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("slopscope.fallback.os.killpg", lambda *args: None, raising=False)
+    monkeypatch.setattr(fallback, "discover_filesystem_files", no_walk)
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.profiles]]\nname = "physical"\nphysical_lines = true\n', encoding="utf-8"
+    )
+    snapshot = tmp_path / "snapshot.json"
+    if "--snapshot" in options:
+        options = [*options[:-1], str(snapshot)]
+    stdout, stderr = io.StringIO(), io.StringIO()
+    allowlist = tmp_path / "allowlist.json"
+    if "--size-limits" in options:
+        options = [*options, "--allowlist", str(allowlist)]
+    result = cli.run([str(tmp_path), *options], stdout=stdout, stderr=stderr)
+    assert len(calls) == 1
+    assert result == 2
+    assert stdout.getvalue() == ""
+    assert "Git file discovery timed out after 30 seconds" in stderr.getvalue()
+    assert not allowlist.exists()
+    assert not snapshot.exists()
+    assert str(tmp_path) in stderr.getvalue()
+
+
+@pytest.mark.parametrize("mode", ["report", "composition", "size-limits"])
+def test_later_project_discovery_timeout_preserves_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.projects]]\nname = "first"\npath = "first"\n'
+        '[[tool.slopscope.projects]]\nname = "second"\npath = "second"\n',
+        encoding="utf-8",
+    )
+    calls: list[Path] = []
+
+    def discover(path: Path | str) -> fallback.GitLsFilesResult:
+        calls.append(Path(path))
+        if Path(path).name == "second":
+            raise fallback.GitDiscoveryError(f"Git file discovery timed out: {path}")
+        return fallback.GitLsFilesResult(0, b"")
+
+    monkeypatch.setattr(fallback, "run_git_ls_files", discover)
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text("previous snapshot", encoding="utf-8")
+    allowlist = tmp_path / "first" / "size-limits.json"
+    options = [str(tmp_path), "--project", "all"]
+    if mode == "report":
+        options += ["--engine", "python"]
+    elif mode == "composition":
+        options += ["--composition", "--snapshot", str(snapshot)]
+    else:
+        options += ["--size-limits", "--seed-allowlist"]
+    out, err = io.StringIO(), io.StringIO()
+    assert cli.run(options, stdout=out, stderr=err) == 2
+    assert [path.name for path in calls] == ["first", "second"]
+    assert out.getvalue() == ""
+    assert "second" in err.getvalue()
+    assert snapshot.read_text(encoding="utf-8") == "previous snapshot"
+    assert not allowlist.exists()
+    assert not (tmp_path / "second" / "size-limits.json").exists()

@@ -193,6 +193,19 @@ def run(
 ) -> int:
     """Run the CLI with injectable streams for tests."""
 
+    try:
+        return _run(argv, stdout=stdout, stderr=stderr)
+    except fallback.GitDiscoveryError as exc:
+        print(f"slopscope: {exc}", file=stderr if stderr is not None else sys.stderr)
+        return 2
+
+
+def _run(
+    argv: Sequence[str] | None,
+    *,
+    stdout: TextIO | None,
+    stderr: TextIO | None,
+) -> int:
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     parser = build_parser()

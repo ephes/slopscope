@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound Git file discovery to a 30-second timeout plus bounded process-tree cleanup
+  (up to 6 extra seconds on POSIX, 11 on Windows; Windows tree termination is best-effort and untested). On timeout, return exit code 2 with a diagnostic
+  and no report, snapshot, allowlist write, or filesystem fallback; discard partial output. Git startup failures
+  and nonzero exits continue to use filesystem discovery.
+
 - Report invalid UTF-8 configuration files with a filename diagnostic and exit code 2 instead of a traceback.
 - Bound each cloc invocation to 30 seconds; timeout and startup failures return a diagnostic and exit code 2
   without producing a report or falling back from auto mode. Terminate the process group on POSIX and
