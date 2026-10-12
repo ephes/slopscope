@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import signal
 import subprocess
 from collections.abc import Sequence
 from datetime import date, timedelta
@@ -13,6 +16,7 @@ from slopscope.report import CompositionChurn, CompositionChurnMonth
 DEFAULT_REF = "HEAD"
 DEFAULT_MONTHS = 12
 MAX_MONTHS = 1200
+GIT_TIMEOUT_SECONDS = 30.0
 # Commits are bucketed by their own time zone, which can be up to about a day away from the
 # caller's; the Git-side cutoff keeps a margin and months are filtered exactly afterwards.
 _CUTOFF_MARGIN = timedelta(days=2)
@@ -51,38 +55,42 @@ def collect_churn(
             rows=(),
         )
 
-    inside = _git(executable, path, ["rev-parse", "--is-inside-work-tree"])
-    if inside is None:
-        return skipped("git was not found")
-    if inside.returncode != 0 or inside.stdout.strip() != b"true":
-        return skipped("not a Git repository")
-    verified = _git(executable, path, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
-    if verified is None or verified.returncode != 0:
-        return skipped(f"unknown branch or ref {ref!r}")
+    try:
+        inside = _git(executable, path, ["rev-parse", "--is-inside-work-tree"])
+        if inside is None:
+            return skipped("git was not found")
+        if inside.returncode != 0 or inside.stdout.strip() != b"true":
+            return skipped("not a Git repository")
+        verified = _git(executable, path, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
+        if verified is None or verified.returncode != 0:
+            return skipped(f"unknown branch or ref {ref!r}")
 
-    log_arguments = [
-        "log",
-        ref,
-        "--first-parent",
-        "--diff-merges=first-parent",
-        "--numstat",
-        "-M",
-        "--relative",
-        "-z",
-        "--date=format:%Y-%m",
-        "--format=@%cd",
-    ]
-    # --since-as-filter (Git 2.37+) checks every commit instead of stopping at the first older
-    # one; without it, read the whole first-parent history and filter by month here.
-    cutoff = since - _CUTOFF_MARGIN if since - date.min > _CUTOFF_MARGIN else since
-    result = _git(
-        executable, path, [*log_arguments, f"--since-as-filter={cutoff.isoformat()}", "--"]
-    )
-    if result is not None and result.returncode != 0:
-        result = _git(executable, path, [*log_arguments, "--"])
-    if result is None or result.returncode != 0:
-        message = "" if result is None else result.stderr.decode(errors="replace").strip()
-        return skipped(f"git log failed: {message or 'no error output'}")
+        log_arguments = [
+            "log",
+            ref,
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--numstat",
+            "-M",
+            "--relative",
+            "-z",
+            "--date=format:%Y-%m",
+            "--format=@%cd",
+        ]
+        # --since-as-filter (Git 2.37+) checks every commit instead of stopping at the first older
+        # one; without it, read the whole first-parent history and filter by month here.
+        cutoff = since - _CUTOFF_MARGIN if since - date.min > _CUTOFF_MARGIN else since
+        result = _git(
+            executable, path, [*log_arguments, f"--since-as-filter={cutoff.isoformat()}", "--"]
+        )
+        if result is not None and result.returncode != 0:
+            result = _git(executable, path, [*log_arguments, "--"])
+        if result is None or result.returncode != 0:
+            message = "" if result is None else result.stderr.decode(errors="replace").strip()
+            return skipped(f"git log failed: {message or 'no error output'}")
+
+    except subprocess.TimeoutExpired:
+        return skipped(f"git timed out after {GIT_TIMEOUT_SECONDS:g} seconds")
 
     first_month = since.strftime("%Y-%m")
     totals: dict[str, tuple[list[int], list[int]]] = {
@@ -161,13 +169,40 @@ def _git(
     arguments: list[str],
 ) -> subprocess.CompletedProcess[bytes] | None:
     try:
-        return subprocess.run(
+        process = subprocess.Popen(
             [executable, "-C", str(path), *arguments],
-            capture_output=True,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=os.name == "posix",
         )
     except OSError:
         return None
+    try:
+        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+    except BaseException:
+        if os.name == "posix":
+            # Kill the group even if the wrapper has exited but a child still owns its pipes.
+            with contextlib.suppress(OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+        else:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                )
+        with contextlib.suppress(OSError):
+            process.kill()
+        # Do not drain pipes: an escaped descendant could keep them open indefinitely.
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+        raise
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
 
 
 def _month_start(current: date, months_back: int) -> date:

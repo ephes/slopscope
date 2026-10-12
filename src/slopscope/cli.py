@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
+import errno
+import os
+import stat
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO
@@ -580,8 +585,8 @@ def _run_composition(
     if args.snapshot is not None:
         snapshot_path = Path(args.snapshot)
         try:
-            snapshot_path.write_text(
-                composition_render.render_composition_json(rendered_report), encoding="utf-8"
+            _write_snapshot(
+                snapshot_path, composition_render.render_composition_json(rendered_report)
             )
         except OSError as exc:
             print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
@@ -595,6 +600,39 @@ def _run_composition(
         )
     )
     return 1 if failed else 0
+
+
+def _write_snapshot(path: Path, text: str) -> None:
+    """Publish serialized JSON without truncating a previous snapshot."""
+    try:
+        target = path.resolve()
+    except RuntimeError as exc:
+        raise OSError(errno.ELOOP, "snapshot path contains a symlink loop", str(path)) from exc
+    temporary: Path | None = None
+    try:
+        try:
+            metadata = target.stat()
+        except FileNotFoundError:
+            mode = None
+        else:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise OSError("snapshot destination must be a regular file")
+            mode = stat.S_IMODE(metadata.st_mode)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent, prefix=f".{target.name}.", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if mode is not None:
+                os.chmod(temporary, mode)
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
 
 def _with_churn(

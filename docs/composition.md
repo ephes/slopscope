@@ -362,6 +362,13 @@ optional projects.
 
 `--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
 a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
+The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
+Write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
+Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
+A symlinked snapshot updates its target. Destinations must be regular files or absent; devices, FIFOs,
+and directories are rejected. Atomic replacement requires a writable parent directory and a replaceable
+destination (single-file bind mounts are unsuitable). Ownership, ACLs, extended attributes, and hard-link
+identity are not preserved. A read-only file can be replaced when its parent directory is writable.
 
 `--baseline PATH` loads an earlier snapshot and adds a comparison:
 
@@ -401,6 +408,9 @@ analyzed path.
   tests, and other split. Binary changes are ignored.
 - Months use the committer date in the commit's own time zone. The window covers `churn_months` months including the
   current one, and months without commits are listed with zeros.
+- Each churn Git command has a 30-second timeout. On expiry its process group (Windows: process tree) is
+  terminated and churn is skipped with a concise notice; report analysis and its exit code are preserved.
+  A timed-out log is never retried; the fallback for unsupported Git options still applies.
 - Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
   `slopscope: skipping churn:` notice, and the exit code does not change.
 
