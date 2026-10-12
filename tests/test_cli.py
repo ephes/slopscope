@@ -1729,3 +1729,55 @@ def test_compatibility_entry_point_targets_same_callable() -> None:
     scripts = pyproject["project"]["scripts"]
     assert scripts["slopscope"] == "slopscope.cli:main"
     assert scripts["count-lines-of-code"] == scripts["slopscope"]
+
+
+@pytest.mark.parametrize("root_kind", ["missing", "file"])
+@pytest.mark.parametrize("mode", ["report", "profile", "composition", "size", "seed", "update"])
+def test_invalid_repository_root_fails_closed(tmp_path: Path, root_kind: str, mode: str) -> None:
+    root = tmp_path / "root"
+    if root_kind == "file":
+        root.write_text("not a directory")
+    options = {
+        "report": ["--engine", "python"],
+        "profile": ["--profile", "yaml"],
+        "composition": ["--composition"],
+        "size": ["--size-limits", "--strict"],
+        "seed": ["--size-limits", "--seed-allowlist"],
+        "update": ["--size-limits", "--update-allowlist"],
+    }
+    out, err = io.StringIO(), io.StringIO()
+    assert cli.run([str(root), *options[mode]], stdout=out, stderr=err) == 2
+    assert out.getvalue() == ""
+    assert str(root) in err.getvalue()
+    assert "directory" in err.getvalue()
+    assert not (root / "size-limits.json").exists()
+    if root_kind == "missing":
+        assert not root.exists()
+
+
+def test_existing_empty_repository_is_allowed(tmp_path: Path) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    assert cli.run([str(tmp_path), "--engine", "python"], stdout=out, stderr=err) == 0
+    assert err.getvalue() == ""
+
+
+@pytest.mark.parametrize("optional", [False, True])
+@pytest.mark.parametrize("mode", [[], ["--composition"], ["--size-limits"]])
+def test_configured_file_root_is_rejected(tmp_path: Path, optional: bool, mode: list[str]) -> None:
+    (tmp_path / "file").write_text("not a directory")
+    configuration = tmp_path / "pyproject.toml"
+    configuration.write_text(
+        '[[tool.slopscope.projects]]\nname = "bad"\npath = "file"\n'
+        f"optional = {str(optional).lower()}\n"
+    )
+    out, err = io.StringIO(), io.StringIO()
+    assert (
+        cli.run(
+            ["--config", str(configuration), "--project", "all", *mode],
+            stdout=out,
+            stderr=err,
+        )
+        == 2
+    )
+    assert out.getvalue() == ""
+    assert "not a directory" in err.getvalue()

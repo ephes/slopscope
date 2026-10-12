@@ -125,6 +125,10 @@ The current implementation supports `--engine auto|cloc|python`. `auto` uses `cl
 back to the Python engine when `cloc` is not on `PATH`. `--engine cloc` keeps failing clearly when `cloc` is
 unavailable.
 
+Missing repository roots and regular files used as roots fail with exit code 2 before any report or
+allowlist write. Existing empty directories are allowed. Missing optional configured projects remain
+skippable; configured paths that exist must be directories.
+
 The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
 default excludes for common caches, virtual environments, dependency directories, and build output, then counts
 physical lines in mapped text-like files using UTF-8 with ignored decode errors. Python fallback reports are marked
