@@ -196,7 +196,7 @@ def _git(
             process.kill()
         # Bound draining too: descendants may retain pipes after Git dies. On Windows,
         # closing those pipes can block on a reader thread, so leave them alone on failure.
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired, KeyboardInterrupt):
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
             process.communicate(timeout=1)
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5)

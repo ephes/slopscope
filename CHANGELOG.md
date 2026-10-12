@@ -10,6 +10,7 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 - Bound each churn Git command to 30 seconds and terminate its process tree on expiry.
   Bound post-termination pipe draining to one second and abandon busy pipes without blocking cleanup.
+  Preserve KeyboardInterrupt and SystemExit raised during post-timeout pipe draining.
   Windows process-tree termination is best-effort and untested on Windows.
   Skip optional churn without failing the composition report or retrying a timed-out log.
 - Write composition snapshots atomically, preserving existing bytes and permissions on failure.

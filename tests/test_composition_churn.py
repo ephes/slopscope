@@ -336,7 +336,7 @@ def test_interrupted_git_kills_group_and_reaps(
     process.pid = 12345
     process.stdout = io.BytesIO()
     process.stderr = io.BytesIO()
-    process.communicate.side_effect = KeyboardInterrupt
+    process.communicate.side_effect = [KeyboardInterrupt, (b"", b"")]
     group_kill = Mock()
     monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="posix", killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
@@ -413,3 +413,38 @@ def test_long_running_git_cleanup_never_closes_busy_pipes(
     process.stderr.read.assert_not_called()
     process.stdout.close.assert_not_called()
     process.stderr.close.assert_not_called()
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+def test_git_timeout_drain_propagates_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: type[BaseException],
+    platform: str,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock()
+    process.pid = 12345
+    interrupted = interruption("interrupted drain")
+    process.communicate.side_effect = [subprocess.TimeoutExpired("git", 30), interrupted]
+    group_kill = Mock()
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=group_kill))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    tree_kill = Mock()
+    monkeypatch.setattr(subprocess, "run", tree_kill)
+
+    with pytest.raises(interruption) as caught:
+        composition_churn.collect_churn(tmp_path, excluded_paths=EXCLUDES)
+
+    assert caught.value is interrupted
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    if platform == "posix":
+        group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
+    else:
+        tree_kill.assert_called_once_with(
+            ["taskkill", "/PID", "12345", "/T", "/F"], capture_output=True, check=False, timeout=5
+        )

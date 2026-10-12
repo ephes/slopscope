@@ -413,6 +413,7 @@ analyzed path.
   Pipe draining after termination has a one-second timeout; if it expires, reading is abandoned without
   closing potentially busy pipes. Windows process-tree termination is best-effort and has not been tested
   on Windows; a descendant may survive if tree termination fails.
+  KeyboardInterrupt and SystemExit during pipe draining propagate after process termination.
   A timed-out log is never retried; the fallback for unsupported Git options still applies.
 - Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
   `slopscope: skipping churn:` notice, and the exit code does not change.
