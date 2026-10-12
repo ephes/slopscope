@@ -410,6 +410,9 @@ analyzed path.
   current one, and months without commits are listed with zeros.
 - Each churn Git command has a 30-second timeout. On expiry its process group (Windows: process tree) is
   terminated and churn is skipped with a concise notice; report analysis and its exit code are preserved.
+  Pipe draining after termination has a one-second timeout; if it expires, reading is abandoned without
+  closing potentially busy pipes. Windows process-tree termination is best-effort and has not been tested
+  on Windows; a descendant may survive if tree termination fails.
   A timed-out log is never retried; the fallback for unsupported Git options still applies.
 - Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
   `slopscope: skipping churn:` notice, and the exit code does not change.

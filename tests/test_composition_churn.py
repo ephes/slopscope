@@ -326,7 +326,7 @@ def test_unsupported_since_filter_retries_successfully(
     assert len(logs) == 2
 
 
-def test_interrupted_git_kills_group_closes_pipes_and_reaps(
+def test_interrupted_git_kills_group_and_reaps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from types import SimpleNamespace
@@ -347,8 +347,9 @@ def test_interrupted_git_kills_group_closes_pipes_and_reaps(
     group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
     process.kill.assert_called_once_with()
     process.wait.assert_called_once_with(timeout=5)
-    assert process.stdout.closed and process.stderr.closed
-    assert process.communicate.call_count == 1
+    assert not process.stdout.closed and not process.stderr.closed
+    assert process.communicate.call_count == 2
+    assert process.communicate.call_args.kwargs == {"timeout": 1}
 
 
 @pytest.mark.parametrize("failure", ["missing", "timeout"])
@@ -381,5 +382,34 @@ def test_windows_tree_kill_failure_still_reaps_and_skips_churn(
     )
     process.kill.assert_called_once_with()
     process.wait.assert_called_once_with(timeout=5)
-    assert process.stdout.closed and process.stderr.closed
-    assert process.communicate.call_count == 1
+    assert not process.stdout.closed and not process.stderr.closed
+    assert process.communicate.call_count == 2
+    assert process.communicate.call_args.kwargs == {"timeout": 1}
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+def test_long_running_git_cleanup_never_closes_busy_pipes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock()
+    process.pid = 12345
+    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
+    # Windows reader threads can hold the pipe lock even after killing Git.
+    process.stdout.close.side_effect = AssertionError("blocking pipe close")
+    process.stderr.close.side_effect = AssertionError("blocking pipe close")
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=Mock()))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(subprocess, "run", Mock())
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        composition_churn._git("git", tmp_path, ["log"])
+
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    process.stdout.read.assert_not_called()
+    process.stderr.read.assert_not_called()
+    process.stdout.close.assert_not_called()
+    process.stderr.close.assert_not_called()

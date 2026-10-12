@@ -194,11 +194,10 @@ def _git(
                 )
         with contextlib.suppress(OSError):
             process.kill()
-        # Do not drain pipes: an escaped descendant could keep them open indefinitely.
-        if process.stdout is not None:
-            process.stdout.close()
-        if process.stderr is not None:
-            process.stderr.close()
+        # Bound draining too: descendants may retain pipes after Git dies. On Windows,
+        # closing those pipes can block on a reader thread, so leave them alone on failure.
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired, KeyboardInterrupt):
+            process.communicate(timeout=1)
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=5)
         raise
