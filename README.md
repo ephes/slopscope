@@ -147,7 +147,7 @@ structured output, or `--no-color` to force colorless human-readable output.
 
 By default, `slopscope` looks for `[tool.slopscope]` in `pyproject.toml` under the inspected path. Missing
 configuration keeps the built-in defaults. Use `--config PATH` to load a specific TOML file; missing files, invalid
-TOML, and invalid field types fail with a clear `slopscope:` error and exit code 2.
+TOML, invalid UTF-8 encoding, and invalid field types fail with a clear `slopscope:` error and exit code 2.
 
 Current single-repository configuration supports:
 

@@ -142,6 +142,8 @@ def load_config_from_pyproject(path: Path | str) -> SlopscopeConfig:
         raise ConfigError(f"configuration file not found: {config_path}") from exc
     except OSError as exc:
         raise ConfigError(f"could not read configuration file {config_path}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"configuration file {config_path} must be UTF-8") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {config_path}: {exc}") from exc
 
