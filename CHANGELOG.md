@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound each cloc invocation to 30 seconds; timeout and startup failures return a diagnostic and exit code 2
+  without producing a report or falling back from auto mode. Terminate the process group on POSIX and
+  bound post-timeout cleanup; Windows process-tree termination is best-effort and untested.
+
 - Report excessively nested allowlist JSON as a concise domain error without modifying the allowlist.
 - Skip source symlink files and linked directories in Git and filesystem discovery, including contained links.
   Python reports, physical-line profiles, composition, and size-limits exclude these links from their totals.

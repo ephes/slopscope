@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
+import os
 import shutil
+import signal
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope.report import FileRow, LanguageRow
+
+CLOC_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -41,14 +46,45 @@ def build_file_summary_command(path: Path | str, executable: str = "cloc") -> li
 
 
 def run_command(command: Sequence[str]) -> ClocResult:
-    """Run a command and capture text output."""
+    """Run cloc with a finite deadline and normalize execution failures."""
 
-    completed = subprocess.run(command, capture_output=True, check=False, text=True)
-    return ClocResult(
-        returncode=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=os.name == "posix",
+        )
+    except OSError as exc:
+        return ClocResult(2, "", f"slopscope: could not run cloc: {exc}")
+    try:
+        stdout, stderr = process.communicate(timeout=CLOC_TIMEOUT_SECONDS)
+    except BaseException as exc:
+        # Match churn's cleanup policy, including children holding captured pipes open.
+        if os.name == "posix":
+            with contextlib.suppress(OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+        else:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                )
+        with contextlib.suppress(OSError):
+            process.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            process.communicate(timeout=1)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return ClocResult(
+                2, "", f"slopscope: cloc timed out after {CLOC_TIMEOUT_SECONDS} seconds"
+            )
+        raise
+    return ClocResult(process.returncode, stdout, stderr)
 
 
 def run_language_summary(path: Path | str, executable: str = "cloc") -> ClocResult:
