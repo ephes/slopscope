@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -426,3 +428,103 @@ def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:
     assert code == 2
     assert out == ""
     assert "duplicate projects[1].name" in err
+
+
+@pytest.mark.parametrize("failure", ["partial-write", "flush", "replace"])
+def test_snapshot_failure_preserves_baseline_and_removes_temporary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from typing import Any
+
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "before.json"
+    assert run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])[0] == 0
+    previous = snapshot.read_bytes()
+    injected = False
+    original_temporary = tempfile.NamedTemporaryFile
+
+    def temporary(*args: Any, **kwargs: Any) -> Any:
+        handle = original_temporary(*args, **kwargs)
+        original_write = handle.write
+
+        def partial_write(text: str) -> int:
+            nonlocal injected
+            injected = True
+            original_write(text[:20])
+            raise OSError("injected partial write")
+
+        monkeypatch.setattr(handle, "write", partial_write)
+        return handle
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        nonlocal injected
+        injected = True
+        raise OSError(f"injected {failure}")
+
+    if failure == "partial-write":
+        monkeypatch.setattr(tempfile, "NamedTemporaryFile", temporary)
+    elif failure == "flush":
+        monkeypatch.setattr(os, "fsync", fail)
+    else:
+        monkeypatch.setattr(os, "replace", fail)
+    code, out, err = run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+
+    assert injected
+    assert code == 2
+    assert out == ""
+    assert "could not write snapshot" in err
+    assert snapshot.read_bytes() == previous
+    assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
+    assert list(tmp_path.glob(".before.json.*")) == []
+
+
+def test_snapshot_atomic_replace_preserves_symlink_and_permissions(tmp_path: Path) -> None:
+    import stat
+
+    repository = make_repository(tmp_path)
+    target = tmp_path / "target.json"
+    snapshot = tmp_path / "link.json"
+    target.write_text("old")
+    target.chmod(0o640)
+    snapshot.symlink_to(target.name)
+    code, _, _ = run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    assert code == 0
+    assert snapshot.is_symlink()
+    assert json.loads(target.read_text())["report_type"] == "composition"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert list(tmp_path.glob(".target.json.*")) == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO fixture")
+def test_snapshot_refuses_fifo_without_replacing_it(tmp_path: Path) -> None:
+    import stat
+
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.fifo"
+    os.mkfifo(snapshot)
+    code, out, err = run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert "snapshot destination must be a regular file" in err
+    assert stat.S_ISFIFO(snapshot.stat().st_mode)
+    assert list(tmp_path.glob(".snapshot.fifo.*")) == []
+
+
+def test_snapshot_symlink_loop_exits_2(tmp_path: Path) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "loop.json"
+    snapshot.symlink_to(snapshot.name)
+    code, out, err = run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert "could not write snapshot" in err
+    assert snapshot.is_symlink()
+
+
+def test_new_snapshot_is_private(tmp_path: Path) -> None:
+    import stat
+
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "private.json"
+    assert run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])[0] == 0
+    assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600

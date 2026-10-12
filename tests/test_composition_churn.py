@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -236,3 +237,214 @@ def test_huge_month_windows_do_not_crash(tmp_path: Path) -> None:
 
     assert churn.status == "ok"
     assert churn.months == composition_churn.MAX_MONTHS
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group fixture")
+@pytest.mark.parametrize("stage", ["inside", "verify", "log"])
+def test_cli_churn_timeout_kills_children_without_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    import sys
+    import time
+
+    wrapper = tmp_path / "slow-git"
+    child_pid = tmp_path / "child.pid"
+    calls = tmp_path / "calls"
+    survived = tmp_path / "survived"
+    child_code = (
+        f"import time; from pathlib import Path; time.sleep(1.8); Path({str(survived)!r}).touch()"
+    )
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import subprocess, sys, time\n"
+        f"stage = {stage!r}\n"
+        f"with open({str(calls)!r}, 'a') as out: out.write(' '.join(sys.argv[3:]) + '\\n')\n"
+        "command = sys.argv[3:]\n"
+        "hang = (stage == 'inside' or (stage == 'verify' and '--verify' in command) "
+        "or (stage == 'log' and command[0] == 'log'))\n"
+        "if not hang:\n"
+        "    print('true')\n"
+        "    sys.exit(0)\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        f"with open({str(child_pid)!r}, 'w') as out: out.write(str(child.pid))\n"
+        "time.sleep(2.5)\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+    original_git = composition_churn._git
+
+    def slow_git(
+        executable: str, path: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[bytes] | None:
+        return original_git(str(wrapper), path, arguments)
+
+    monkeypatch.setattr(composition_churn, "_git", slow_git)
+    monkeypatch.setattr(composition_churn, "GIT_TIMEOUT_SECONDS", 1.0, raising=False)
+    write(tmp_path, "a.py", "x = 1\n")
+    stdout, stderr = io.StringIO(), io.StringIO()
+    started = time.monotonic()
+    result = cli.run(
+        ["--composition", "--churn", "--format", "json", str(tmp_path)],
+        stdout=stdout,
+        stderr=stderr,
+    )
+    elapsed = time.monotonic() - started
+
+    assert result == 0
+    assert elapsed < 2.4
+    report = json.loads(stdout.getvalue())
+    assert report["churn"]["status"] == "skipped"
+    assert report["churn"]["reason"] == "git timed out after 1 seconds"
+    assert "skipping churn: git timed out" in stderr.getvalue()
+    assert child_pid.exists()
+    time.sleep(2)
+    assert not survived.exists()
+    assert sum(line.startswith("log ") for line in calls.read_text().splitlines()) == (
+        1 if stage == "log" else 0
+    )
+
+
+def test_unsupported_since_filter_retries_successfully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_git = composition_churn._git
+    logs: list[list[str]] = []
+
+    def old_git(
+        executable: str, path: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[bytes] | None:
+        if arguments[0] == "log":
+            logs.append(arguments)
+            if any(arg.startswith("--since-as-filter=") for arg in arguments):
+                return subprocess.CompletedProcess(arguments, 129, b"", b"unsupported option")
+        return original_git(executable, path, arguments)
+
+    app = make_history(tmp_path)
+    monkeypatch.setattr(composition_churn, "_git", old_git)
+    result = composition_churn.collect_churn(app, excluded_paths=EXCLUDES, today=TODAY)
+    assert result.status == "ok"
+    assert len(logs) == 2
+
+
+def test_interrupted_git_kills_group_and_reaps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    process = Mock()
+    process.pid = 12345
+    process.stdout = io.BytesIO()
+    process.stderr = io.BytesIO()
+    process.communicate.side_effect = [KeyboardInterrupt, (b"", b"")]
+    group_kill = Mock()
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+
+    with pytest.raises(KeyboardInterrupt):
+        composition_churn._git("git", tmp_path, ["log"])
+
+    group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
+    assert not process.stdout.closed and not process.stderr.closed
+    assert process.communicate.call_count == 2
+    assert process.communicate.call_args.kwargs == {"timeout": 1}
+
+
+@pytest.mark.parametrize("failure", ["missing", "timeout"])
+def test_windows_tree_kill_failure_still_reaps_and_skips_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    process = Mock()
+    process.pid = 12345
+    process.stdout = io.BytesIO()
+    process.stderr = io.BytesIO()
+    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
+    tree_kill = Mock(
+        side_effect=FileNotFoundError("taskkill")
+        if failure == "missing"
+        else subprocess.TimeoutExpired("taskkill", 5)
+    )
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(subprocess, "run", tree_kill)
+
+    result = composition_churn.collect_churn(tmp_path, excluded_paths=EXCLUDES)
+
+    assert result.status == "skipped"
+    assert result.reason == "git timed out after 30 seconds"
+    tree_kill.assert_called_once_with(
+        ["taskkill", "/PID", "12345", "/T", "/F"], capture_output=True, check=False, timeout=5
+    )
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
+    assert not process.stdout.closed and not process.stderr.closed
+    assert process.communicate.call_count == 2
+    assert process.communicate.call_args.kwargs == {"timeout": 1}
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+def test_long_running_git_cleanup_never_closes_busy_pipes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock()
+    process.pid = 12345
+    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
+    # Windows reader threads can hold the pipe lock even after killing Git.
+    process.stdout.close.side_effect = AssertionError("blocking pipe close")
+    process.stderr.close.side_effect = AssertionError("blocking pipe close")
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=Mock()))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(subprocess, "run", Mock())
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        composition_churn._git("git", tmp_path, ["log"])
+
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    process.stdout.read.assert_not_called()
+    process.stderr.read.assert_not_called()
+    process.stdout.close.assert_not_called()
+    process.stderr.close.assert_not_called()
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+def test_git_timeout_drain_propagates_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: type[BaseException],
+    platform: str,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock()
+    process.pid = 12345
+    interrupted = interruption("interrupted drain")
+    process.communicate.side_effect = [subprocess.TimeoutExpired("git", 30), interrupted]
+    group_kill = Mock()
+    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=group_kill))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    tree_kill = Mock()
+    monkeypatch.setattr(subprocess, "run", tree_kill)
+
+    with pytest.raises(interruption) as caught:
+        composition_churn.collect_churn(tmp_path, excluded_paths=EXCLUDES)
+
+    assert caught.value is interrupted
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    if platform == "posix":
+        group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
+    else:
+        tree_kill.assert_called_once_with(
+            ["taskkill", "/PID", "12345", "/T", "/F"], capture_output=True, check=False, timeout=5
+        )

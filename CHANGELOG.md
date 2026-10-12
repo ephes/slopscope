@@ -8,6 +8,15 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound each churn Git command to 30 seconds and terminate its process tree on expiry.
+  Bound post-termination pipe draining to one second and abandon busy pipes without blocking cleanup.
+  Preserve KeyboardInterrupt and SystemExit raised during post-timeout pipe draining.
+  Windows process-tree termination is best-effort and untested on Windows.
+  Skip optional churn without failing the composition report or retrying a timed-out log.
+- Write composition snapshots atomically, preserving existing bytes and permissions on failure.
+  Symlinked snapshots update their target; new snapshots use mode 0600.
+  Reject special-file destinations; atomic publication requires a replaceable file in a writable directory.
+
 - Preserve embedded newlines, commas, tabs, and boundary whitespace when parsing cloc CSV filenames.
   Subprocess text decoding still normalizes carriage returns.
 - Apply configured `include_globs` to default cloc reports, rebuilding language totals from selected files
