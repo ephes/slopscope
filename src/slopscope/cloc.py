@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import shutil
 import subprocess
 from collections.abc import Sequence
@@ -65,7 +66,7 @@ def run_file_summary(path: Path | str, executable: str = "cloc") -> ClocResult:
 def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     """Parse cloc CSV language summary output, skipping malformed rows."""
 
-    reader = csv.DictReader(output.splitlines())
+    reader = csv.DictReader(io.StringIO(output, newline=""))
     rows: list[LanguageRow] = []
     for row in reader:
         parsed = _parse_language_row(row)
@@ -77,7 +78,7 @@ def parse_language_summary_csv(output: str) -> list[LanguageRow]:
 def parse_file_summary_csv(output: str) -> list[FileRow]:
     """Parse cloc CSV file-level output, skipping malformed and non-file rows."""
 
-    reader = csv.DictReader(output.splitlines())
+    reader = csv.DictReader(io.StringIO(output, newline=""))
     rows: list[FileRow] = []
     for row in reader:
         parsed = _parse_file_row(row)
@@ -106,7 +107,7 @@ def _parse_language_row(row: dict[str, str | None]) -> LanguageRow | None:
 
 def _parse_file_row(row: dict[str, str | None]) -> FileRow | None:
     language = _clean(row.get("language"))
-    path = _clean(row.get("filename"))
+    path = row.get("filename")
     if not language or language == "SUM" or not path:
         return None
 

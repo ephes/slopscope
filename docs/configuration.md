@@ -54,7 +54,7 @@ Supported top-level fields in this phase:
 - `include_languages`: array of language names to keep
 - `exclude_languages`: array of language names to remove
 - `exclude_dirs`: array of directory names or relative path prefixes to exclude
-- `include_globs`: array of relative path globs for Python fallback file discovery
+- `include_globs`: array of relative path globs for file selection in both engines
 - `source_dirs`: array of source directory paths
 - `test_dirs`: array of test directory paths
 - `areas`: array of named area directory paths
@@ -240,6 +240,8 @@ use `0.3.0a1` or later.
 - `exclude_dirs` augments fallback default excludes. For `cloc`, configured `exclude_dirs` are applied to parsed
   file rows and language totals are recomputed from the filtered file rows. Top-level `exclude_dirs` always apply to
   profiles.
-- For the default report, `include_globs` applies to Python fallback discovery by relative path and does not change
-  `cloc` command input. For profiles, non-empty profile `include_globs` replace top-level include globs, and profile
-  include globs also filter parsed `cloc` file rows by relative path.
+- For the default report, `include_globs` selects relative paths in both engines. Cloc paths are normalized
+  relative to the repository root before matching; language totals are rebuilt from selected file rows.
+  Cloc keeps code-line counts while Python keeps physical-line counts. For profiles, non-empty profile
+  `include_globs` replace top-level include globs, and profile include globs also filter parsed `cloc` file rows
+  by relative path.

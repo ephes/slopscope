@@ -843,7 +843,7 @@ def _build_cloc_report(
     err: TextIO,
     slopscope_config: config_module.SlopscopeConfig,
 ) -> RepositoryReport | int:
-    language_result = cloc.run_language_summary(path)
+    language_result = cloc.run_language_summary(path.resolve())
     if language_result.returncode != 0:
         message = language_result.stderr.strip() or "cloc failed without stderr output"
         print(message, file=err)
@@ -854,7 +854,7 @@ def _build_cloc_report(
         print("slopscope: cloc returned no usable language rows", file=err)
         return 1
 
-    file_result = cloc.run_file_summary(path)
+    file_result = cloc.run_file_summary(path.resolve())
     if file_result.returncode != 0:
         message = file_result.stderr.strip() or "cloc file summary failed without stderr output"
         print(message, file=err)
@@ -865,7 +865,7 @@ def _build_cloc_report(
         path=path,
         slopscope_config=slopscope_config,
     )
-    if slopscope_config.exclude_dirs:
+    if slopscope_config.exclude_dirs or slopscope_config.include_globs:
         language_rows = _language_rows_from_file_rows(file_rows)
     else:
         language_rows = _filter_language_rows(raw_language_rows, slopscope_config)
@@ -906,6 +906,12 @@ def _filter_file_rows(
         for row in file_rows
         if _language_is_included(row.language, slopscope_config)
         and not _row_is_excluded(row, path=path, slopscope_config=slopscope_config)
+        and (
+            not slopscope_config.include_globs
+            or fallback.matches_include_globs(
+                paths.row_filter_path(row.path, root=path), slopscope_config.include_globs
+            )
+        )
     )
 
 

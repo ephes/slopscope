@@ -3,12 +3,13 @@ from __future__ import annotations
 import io
 import json
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from slopscope import cli, cloc, fallback
-from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
+from slopscope import cli, cloc, config, fallback
+from slopscope.report import FileAggregateReport, FileRow, LanguageRow, LanguageSummaryReport
 
 
 def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1781,3 +1782,76 @@ def test_configured_file_root_is_rejected(tmp_path: Path, optional: bool, mode: 
     )
     assert out.getvalue() == ""
     assert "not a directory" in err.getvalue()
+
+
+@pytest.mark.parametrize("relative_root", [False, True])
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize("include_glob", ["src/**", "missing/**"])
+def test_cloc_include_globs_match_python_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    absolute: bool,
+    include_glob: str,
+    relative_root: bool,
+) -> None:
+    filenames = ["src/app.py", "src/nested/helper.py", "tests/test_app.py", "vendor/lib.py"]
+    for filename in filenames:
+        target = tmp_path / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x = 1\n", encoding="utf-8")
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        f'[tool.slopscope]\ninclude_globs = ["{include_glob}"]\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(cloc, "is_cloc_available", lambda: True)
+    monkeypatch.setattr(
+        cloc,
+        "run_language_summary",
+        lambda _path: cloc.ClocResult(
+            0, "language,filename,blank,comment,code\nPython,4,0,0,4\nSUM,4,0,0,4\n", ""
+        ),
+    )
+    csv_rows = "language,filename,blank,comment,code\n" + "".join(
+        f"Python,{tmp_path / name if absolute else name},0,0,1\n" for name in filenames
+    )
+
+    def file_summary(root: Path | str) -> cloc.ClocResult:
+        assert Path(root).is_absolute()
+        return cloc.ClocResult(0, csv_rows, "")
+
+    monkeypatch.setattr(cloc, "run_file_summary", file_summary)
+    monkeypatch.chdir(tmp_path.parent)
+    selected_root = tmp_path.name if relative_root else str(tmp_path)
+    selected_paths: list[list[str]] = []
+    build_aggregate = cli._build_aggregate_report
+
+    def capture_aggregate(
+        rows: Sequence[FileRow], settings: config.SlopscopeConfig
+    ) -> FileAggregateReport:
+        selected_paths.append([row.path for row in rows])
+        return build_aggregate(rows, settings)
+
+    monkeypatch.setattr(cli, "_build_aggregate_report", capture_aggregate)
+    reports = []
+    for engine in ("cloc", "python"):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        assert (
+            cli.run(
+                ["--engine", engine, "--format", "json", selected_root],
+                stdout=stdout,
+                stderr=stderr,
+            )
+            == 0
+        )
+        assert stderr.getvalue() == ""
+        reports.append(json.loads(stdout.getvalue()))
+    expected_paths = ["src/app.py", "src/nested/helper.py"] if include_glob == "src/**" else []
+    assert selected_paths == [expected_paths, expected_paths]
+    for report in reports:
+        assert report["source_test_summary"] == {
+            "source_files": len(expected_paths),
+            "source_code": len(expected_paths),
+            "test_files": 0,
+            "test_code": 0,
+        }
+    assert reports[0]["language_rows"] == reports[1]["language_rows"]
