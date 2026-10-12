@@ -326,3 +326,76 @@ def test_missing_sections_default_to_empty(tmp_path: Path) -> None:
         "classes": {},
         "test_files": {},
     }
+
+
+@pytest.mark.parametrize("operation", ["write", "fsync", "replace"])
+def test_allowlist_failed_write_preserves_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    import os
+    import tempfile
+
+    path = tmp_path / "size-limits.json"
+    original = b'{"functions": {"old": 200}}\n'
+    path.write_bytes(original)
+    path.chmod(0o640)
+    called = False
+
+    def fail(*args: object, **kwargs: object) -> None:
+        nonlocal called
+        called = True
+        raise OSError("injected failure")
+
+    if operation == "write":
+        from unittest.mock import MagicMock
+
+        real_temporary = tempfile.NamedTemporaryFile
+
+        def broken_temporary(*args: object, **kwargs: object) -> object:
+            handle = real_temporary(*args, **kwargs)  # type: ignore[call-overload]
+            wrapped = MagicMock(wraps=handle)
+            wrapped.name = handle.name
+            wrapped.__enter__.return_value = wrapped
+            wrapped.__exit__.side_effect = handle.__exit__
+
+            def partial_write(text: str) -> None:
+                handle.write(text[:10])
+                fail()
+
+            wrapped.write.side_effect = partial_write
+            return wrapped
+
+        monkeypatch.setattr(tempfile, "NamedTemporaryFile", broken_temporary)
+    else:
+        monkeypatch.setattr(os, operation, fail)
+    with pytest.raises(size_limits.SizeLimitsError, match="injected failure"):
+        size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    assert called
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_allowlist_replacement_preserves_permissions(tmp_path: Path) -> None:
+    path = tmp_path / "size-limits.json"
+    path.write_text("{}")
+    path.chmod(0o640)
+    size_limits.write_allowlist(path, {"functions": {"z": 200, "a": 180}})
+    assert path.stat().st_mode & 0o777 == 0o640
+    assert list(json.loads(path.read_text())["functions"]) == ["a", "z"]
+
+
+def test_allowlist_write_follows_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "shared" / "baseline.json"
+    target.parent.mkdir()
+    target.write_text("{}")
+    link = tmp_path / "size-limits.json"
+    link.symlink_to(target)
+    size_limits.write_allowlist(link, {"functions": {"new": 180}})
+    assert link.is_symlink()
+    assert json.loads(target.read_text())["functions"] == {"new": 180}
+
+
+def test_new_allowlist_is_private(tmp_path: Path) -> None:
+    path = tmp_path / "size-limits.json"
+    size_limits.write_allowlist(path, {})
+    assert path.stat().st_mode & 0o777 == 0o600

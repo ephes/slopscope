@@ -149,3 +149,9 @@ and earlier reject this section as an unknown field; use `0.3.0a1` or later.
 - `reason` is `missing` or `within limit` for stale and dropped entries.
 - With `--project`, the top level has `report_type: "size_limits_projects"`, `schema_version`, a `projects` array
   whose items contain `name`, `path`, and a full `report` object, and `skipped_projects`.
+
+Allowlist writes use a flushed and fsynced sibling temporary file before atomic replacement.
+Failed writes leave the previous baseline intact and remove the temporary file. Existing file
+permissions are preserved, and symlinks continue to point at the updated target. New allowlists use
+mode 0600 to keep temporary and final contents private by default; use chmod if other local users
+need access. Cleanup is best effort if the filesystem also refuses temporary-file deletion.

@@ -7,8 +7,12 @@ recorded in an allowlist, where they may shrink but not grow.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
+import os
+import stat
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -124,11 +128,28 @@ def write_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> N
 
     data = {kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS}
     text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    temporary: Path | None = None
+    target = path.resolve()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=target.parent, prefix=f".{target.name}.", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            if mode is not None:
+                os.chmod(temporary, mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        temporary = None
     except OSError as exc:
         raise SizeLimitsError(f"could not write allowlist {path}: {exc}") from exc
+    finally:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
 
 
 def check(
