@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject malformed composition baseline identities, duplicate names, and invalid comparison counts
+  with field-specific diagnostics and exit code 2 instead of crashing or silently collapsing entries.
+
 - Reject missing or non-directory repository roots with exit code 2 in every CLI report mode.
   Configured project paths that point at files also fail, including optional projects.
 

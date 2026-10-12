@@ -378,7 +378,11 @@ a release. slopscope adds no timestamp or commit to it, so name the file accordi
 - In JSON, `baseline` is `null` without `--baseline`. Otherwise it holds `path`, `analyzer_version`,
   `python_version`, `comparable`, `warnings`, and `deltas`: for each scope, every metric as
   `{"baseline": 10, "current": 12, "delta": 2}`, with dotted names such as `categories.import` or `tags.logging`. A
-  metric that the baseline lacks has `null` as baseline and delta.
+  metric that the baseline lacks has `null` as baseline and delta. Present comparison counts must be
+  nonnegative integers (booleans, null, strings, and containers are rejected), and present metric groups
+  must be objects. Detector entries require string `name` and `kind` fields and a nonnegative integer
+  `version`. Kind and project entries require string names. Detector, kind, and project names must be
+  unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
 - `--baseline` and `--snapshot` may name the same file: the baseline is read before the new snapshot is written.

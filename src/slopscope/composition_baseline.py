@@ -84,9 +84,16 @@ def load_baseline(
         projects = data.get("projects")
         if not isinstance(projects, list):
             raise BaselineError(f"baseline file {path} has no valid projects list")
+        seen_projects: set[str] = set()
         for index, project in enumerate(projects):
             if not isinstance(project, dict) or not isinstance(project.get("name"), str):
                 raise BaselineError(f"baseline file {path} has an invalid projects[{index}]")
+            name = project["name"]
+            if name in seen_projects:
+                raise BaselineError(
+                    f"baseline file {path} has a duplicate projects[{index}].name: {name!r}"
+                )
+            seen_projects.add(name)
             _validate_report(project.get("report"), path=path, where=f"projects[{index}].report")
     else:
         _validate_report(data, path=path, where="report")
@@ -106,11 +113,52 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
     detectors = data.get("detectors")
     if not isinstance(detectors, list) or not all(isinstance(item, dict) for item in detectors):
         raise fail("detectors")
+    seen_detectors: set[str] = set()
+    for index, detector in enumerate(detectors):
+        for field in ("name", "kind"):
+            if not isinstance(detector.get(field), str):
+                raise fail(f"detectors[{index}].{field}")
+        name = detector["name"]
+        if name in seen_detectors:
+            raise fail(f"detectors[{index}].name (duplicate {name!r})")
+        seen_detectors.add(name)
+        version = detector.get("version")
+        if isinstance(version, bool) or not isinstance(version, int) or version < 0:
+            raise fail(f"detectors[{index}].version")
     if not isinstance(data.get("total"), dict):
         raise fail("total")
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
+    _validate_metrics(data["total"], path=path, where=f"{where} total")
+    seen_kinds: set[str] = set()
+    for index, kind in enumerate(kinds):
+        name = kind.get("name")
+        if not isinstance(name, str):
+            raise fail(f"kinds[{index}].name")
+        if name in seen_kinds:
+            raise fail(f"kinds[{index}].name (duplicate {name!r})")
+        seen_kinds.add(name)
+        _validate_metrics(kind, path=path, where=f"{where} kinds[{index}]")
+
+
+def _validate_metrics(data: dict[str, Any], *, path: Path, where: str) -> None:
+    """Absent metrics remain unknown; present comparison counts must be nonnegative integers."""
+
+    for metric in METRICS:
+        value = data
+        parts = metric.split(".")
+        for index, part in enumerate(parts):
+            if part not in value:
+                break
+            item = value[part]
+            field = f"{where}.{'.'.join(parts[: index + 1])}"
+            if index < len(parts) - 1:
+                if not isinstance(item, dict):
+                    raise BaselineError(f"baseline file {path} has an invalid {field}")
+                value = item
+            elif isinstance(item, bool) or not isinstance(item, int) or item < 0:
+                raise BaselineError(f"baseline file {path} has an invalid {field}")
 
 
 def project_baselines(data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
