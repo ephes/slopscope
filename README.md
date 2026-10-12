@@ -23,7 +23,7 @@ reusable Python CLI that can be added as a development dependency.
 - Directory buckets sorted by line count.
 - Repository area summaries for source, tests, docs, scripts, examples, specs, and tooling.
 - Configuration from `[tool.slopscope]` in `pyproject.toml`, or from `--config PATH`.
-- Configured excludes, included fallback globs, language filters, source/test dirs, named areas, and nested buckets
+- Configured excludes, include globs, language filters, source/test dirs, named areas, and nested buckets
   for the default single-repository report.
 - Named profile execution from `[tool.slopscope.profiles]`.
 - YAML-only total profiles with `--total-only` integer output.
@@ -82,6 +82,10 @@ uv run slopscope
 
 `cloc` is optional. With `--engine auto`, `slopscope` uses `cloc` when the binary is available on `PATH` and falls
 back to the pure-Python engine otherwise. Install `cloc` separately if you want `cloc` code-line semantics.
+
+Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
+The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
+are not preserved end to end.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
 falls back to plain text. Install the `rich` extra (`slopscope[rich]`, available since `0.2.0a1`) for colored
@@ -146,7 +150,7 @@ Current single-repository configuration supports:
 
 - `exclude_languages` and `include_languages`
 - `exclude_dirs`
-- `include_globs` for the Python fallback
+- `include_globs` for relative-path selection in both engines
 - `source_dirs` and `test_dirs`
 - `areas`
 - `nested_bucket_dirs`

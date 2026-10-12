@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -196,3 +198,17 @@ Markdown,README.md,4,0,20
 )
 def test_parse_file_summary_csv_without_rows(output: str) -> None:
     assert cloc.parse_file_summary_csv(output) == []
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["hello\nworld.py", "hello\r\nworld.py", "a,b.py", "a\tb.py", " leading.py", "trailing.py "],
+)
+def test_parse_file_summary_csv_preserves_filename(filename: str) -> None:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["language", "filename", "blank", "comment", "code", "cloc metadata"])
+    writer.writerow([" Python ", filename, " 1 ", " 2 ", " 3 ", ""])
+    assert cloc.parse_file_summary_csv(output.getvalue()) == [
+        FileRow(language="Python", path=filename, blank=1, comment=2, code=3)
+    ]

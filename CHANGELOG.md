@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve embedded newlines, commas, tabs, and boundary whitespace when parsing cloc CSV filenames.
+  Subprocess text decoding still normalizes carriage returns.
+- Apply configured `include_globs` to default cloc reports, rebuilding language totals from selected files
+  consistently with source/test, area, and directory summaries.
+
 - Reject malformed composition baseline identities, duplicate names, and invalid comparison counts
   with field-specific diagnostics and exit code 2 instead of crashing or silently collapsing entries.
 
