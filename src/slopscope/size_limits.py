@@ -102,6 +102,8 @@ def load_allowlist(path: Path) -> Units | None:
         raise SizeLimitsError(f"could not read allowlist {path}: {exc}") from exc
     try:
         data = json.loads(text)
+    except RecursionError as exc:
+        raise SizeLimitsError(f"allowlist {path}: JSON nesting is too deep") from exc
     except json.JSONDecodeError as exc:
         raise SizeLimitsError(f"allowlist {path} is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):

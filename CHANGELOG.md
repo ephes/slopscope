@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Report excessively nested allowlist JSON as a concise domain error without modifying the allowlist.
+- Skip source symlink files and linked directories in Git and filesystem discovery, including contained links.
+  Python reports, physical-line profiles, composition, and size-limits exclude these links from their totals.
+  The cloc engine and allowlist-output symlink handling are unchanged.
+
 - Bound each churn Git command to 30 seconds and terminate its process tree on expiry.
   Bound post-termination pipe draining to one second and abandon busy pipes without blocking cleanup.
   Preserve KeyboardInterrupt and SystemExit raised during post-timeout pipe draining.

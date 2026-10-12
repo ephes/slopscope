@@ -135,8 +135,11 @@ skippable; configured paths that exist must be directories.
 
 The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
 default excludes for common caches, virtual environments, dependency directories, and build output, then counts
-physical lines in mapped text-like files using UTF-8 with ignored decode errors. Python fallback reports are marked
-with `Engine: python (physical lines)`.
+physical lines in mapped text-like files using UTF-8 with ignored decode errors. Source symlink files and paths
+through symlink directories below the selected root are skipped by both Git and filesystem discovery, including
+links to contained files. Composition, size-limits, and physical-line profiles use the same policy, so their totals
+exclude these links. The cloc engine's discovery is unchanged. Python fallback reports are marked with
+`Engine: python (physical lines)`.
 
 Human-readable output defaults to `--format rich`. Rich is optional: when it is not importable, `slopscope` falls
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for
