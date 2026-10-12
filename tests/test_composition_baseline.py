@@ -309,3 +309,120 @@ def test_structurally_invalid_project_baseline_exits_2(tmp_path: Path) -> None:
 
     assert exit_code == 2
     assert "invalid projects[0].report detectors" in stderr
+
+
+@pytest.mark.parametrize("section", ["detectors", "kinds"])
+@pytest.mark.parametrize("identity", [None, [], {}, 1])
+def test_baseline_invalid_identity_exits_2(tmp_path: Path, section: str, identity: object) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    if identity is None:
+        del data[section][0]["name"]
+    else:
+        data[section][0]["name"] = identity
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(["--composition", "--baseline", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert f"{section}[0].name" in err
+
+
+@pytest.mark.parametrize("section", ["detectors", "kinds"])
+def test_baseline_duplicate_identity_exits_2(tmp_path: Path, section: str) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    data[section].append(data[section][0])
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(["--composition", "--baseline", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert "duplicate" in err
+    assert section in err
+
+
+@pytest.mark.parametrize("metric", ["code", "categories.blank"])
+@pytest.mark.parametrize("value", [None, [], {}, True, -1, "10"])
+def test_baseline_invalid_metric_exits_2(tmp_path: Path, metric: str, value: object) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    parts = metric.split(".")
+    scope = data["total"]
+    for part in parts[:-1]:
+        scope = scope[part]
+    scope[parts[-1]] = value
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(["--composition", "--baseline", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert f"total.{metric}" in err
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("kind", []), ("kind", None), ("version", True), ("version", -1), ("version", {})],
+)
+def test_baseline_invalid_detector_metadata_exits_2(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    data["detectors"][0][field] = value
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(["--composition", "--baseline", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert f"detectors[0].{field}" in err
+
+
+@pytest.mark.parametrize("value", [None, [], 1])
+def test_baseline_invalid_metric_group_exits_2(tmp_path: Path, value: object) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    data["kinds"][0]["categories"] = value
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(["--composition", "--baseline", str(snapshot), str(repository)])
+    assert code == 2
+    assert out == ""
+    assert "kinds[0].categories" in err
+
+
+def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    data = json.loads(snapshot.read_text())
+    del data["total"]["code"]
+    del data["total"]["categories"]
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(
+        ["--composition", "--format", "json", "--baseline", str(snapshot), str(repository)]
+    )
+    assert code == 0
+    assert err == ""
+    assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+
+
+def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:
+    write(tmp_path, "one/src/app.py", "x = 1\n")
+    write(tmp_path, "pyproject.toml", '[[tool.slopscope.projects]]\nname = "one"\npath = "one"\n')
+    snapshot = tmp_path / "snapshot.json"
+    run_cli([str(tmp_path), "--composition", "--project", "all", "--snapshot", str(snapshot)])
+    data = json.loads(snapshot.read_text())
+    data["projects"].append(data["projects"][0])
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(
+        [str(tmp_path), "--composition", "--project", "all", "--baseline", str(snapshot)]
+    )
+    assert code == 2
+    assert out == ""
+    assert "duplicate projects[1].name" in err
