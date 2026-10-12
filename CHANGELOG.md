@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Write size allowlists atomically, preserving the previous baseline and permissions on failure.
+  Symlinked allowlists update their target. Newly seeded files use mode 0600 to keep temporary and final
+  contents private by default; use chmod to share a new baseline with other local users.
+
 - Add a GitHub Actions CI workflow that runs the `just check` steps (pytest, ruff check, ruff format check, mypy) on
   Python 3.11 and 3.13 with the locked dependencies. Actions are pinned by commit SHA, the uv cache is enabled, the
   workflow token is read-only, and no secrets are used.
