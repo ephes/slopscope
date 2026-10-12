@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -64,6 +66,13 @@ LANGUAGES_BY_FILENAME = {
 }
 
 
+GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
+
+
+class GitDiscoveryError(RuntimeError):
+    """Git discovery failed without a safe file list."""
+
+
 @dataclass(frozen=True)
 class GitLsFilesResult:
     """Completed git file-listing process data."""
@@ -79,17 +88,45 @@ def build_git_ls_files_command(path: Path | str, executable: str = "git") -> lis
 
 
 def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesResult:
-    """Run git file discovery for the selected path."""
+    """Run bounded Git discovery; unavailable/nonzero Git permits filesystem fallback."""
 
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             build_git_ls_files_command(path, executable=executable),
-            capture_output=True,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=os.name == "posix",
         )
     except OSError:
         return GitLsFilesResult(returncode=1, stdout=b"")
-    return GitLsFilesResult(returncode=completed.returncode, stdout=completed.stdout)
+    try:
+        stdout, _stderr = process.communicate(timeout=GIT_DISCOVERY_TIMEOUT_SECONDS)
+    except BaseException as exc:
+        # Match cloc/churn cleanup, including descendants holding captured pipes open.
+        if os.name == "posix":
+            with contextlib.suppress(OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+        else:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                )
+        with contextlib.suppress(OSError):
+            process.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            process.communicate(timeout=1)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=5)
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise GitDiscoveryError(
+                f"Git file discovery timed out after {GIT_DISCOVERY_TIMEOUT_SECONDS:g} seconds: "
+                f"{path}"
+            ) from exc
+        raise
+    return GitLsFilesResult(returncode=process.returncode, stdout=stdout)
 
 
 def parse_git_ls_files_output(output: bytes) -> list[Path]:

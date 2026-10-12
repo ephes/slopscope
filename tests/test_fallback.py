@@ -51,7 +51,7 @@ def test_run_git_ls_files_returns_nonzero_result_when_git_cannot_run(
     def fake_run(*_args: object, **_kwargs: object) -> object:
         raise FileNotFoundError
 
-    monkeypatch.setattr("slopscope.fallback.subprocess.run", fake_run)
+    monkeypatch.setattr("slopscope.fallback.subprocess.Popen", fake_run)
 
     assert fallback.run_git_ls_files(Path(".")) == fallback.GitLsFilesResult(
         returncode=1,
@@ -440,3 +440,132 @@ def test_git_discovery_skips_uninspectable_path(
     monkeypatch.setattr(Path, "is_symlink", unreadable)
     assert fallback.discover_files(tmp_path) == []
     assert inspected
+
+
+def test_git_discovery_has_finite_deadline_and_preserves_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = b"space name.py\0line\nname.py\0"
+
+    class Process:
+        returncode = 0
+
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            assert command == fallback.build_git_ls_files_command(".", executable="custom-git")
+            assert kwargs == {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "start_new_session": os.name == "posix",
+            }
+
+        def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
+            assert timeout == 30.0
+            return output, b""
+
+    monkeypatch.setattr("slopscope.fallback.subprocess.Popen", Process)
+    result = fallback.run_git_ls_files(".", executable="custom-git")
+    assert result == fallback.GitLsFilesResult(0, output)
+    assert fallback.parse_git_ls_files_output(result.stdout) == [
+        Path("space name.py"),
+        Path("line\nname.py"),
+    ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group guarantee")
+@pytest.mark.parametrize("wrapper_exited", [False, True])
+def test_git_timeout_cleanup_is_bounded(
+    monkeypatch: pytest.MonkeyPatch, wrapper_exited: bool
+) -> None:
+    import signal
+
+    events: list[str] = []
+
+    class Process:
+        pid = 12345
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            assert kwargs["start_new_session"] is True
+
+        def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
+            if not events:
+                assert timeout == 30.0
+            else:
+                assert events == ["group", "kill"]
+                assert timeout == 1
+                events.append("drain")
+            raise subprocess.TimeoutExpired("git", timeout, output=b"partial.py\0")
+
+        def kill(self) -> None:
+            events.append("kill")
+            if wrapper_exited:
+                raise ProcessLookupError
+
+        def wait(self, *, timeout: float) -> int:
+            assert timeout == 5
+            events.append("wait")
+            raise subprocess.TimeoutExpired("git", timeout)
+
+    def kill_group(pid: int, sig: int) -> None:
+        assert (pid, sig) == (Process.pid, signal.SIGKILL)
+        events.append("group")
+
+    monkeypatch.setattr("slopscope.fallback.subprocess.Popen", Process)
+    monkeypatch.setattr("slopscope.fallback.os.killpg", kill_group)
+    with pytest.raises(fallback.GitDiscoveryError, match="30 seconds: selected-root"):
+        fallback.run_git_ls_files("selected-root")
+    assert events == ["group", "kill", "drain", "wait"]
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_git_interruption_cleans_up_and_propagates(
+    monkeypatch: pytest.MonkeyPatch, platform: str, interruption: type[BaseException]
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock(pid=12345)
+    interrupted = interruption("interrupted")
+    process.communicate.side_effect = [interrupted, (b"", b"")]
+    group_kill, tree_kill = Mock(), Mock()
+    monkeypatch.setattr(fallback, "os", SimpleNamespace(name=platform, killpg=group_kill))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(subprocess, "run", tree_kill)
+    with pytest.raises(interruption) as caught:
+        fallback.run_git_ls_files(".")
+    assert caught.value is interrupted
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
+    if platform == "posix":
+        group_kill.assert_called_once()
+        tree_kill.assert_not_called()
+    else:
+        tree_kill.assert_called_once_with(
+            ["taskkill", "/PID", "12345", "/T", "/F"],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError(), subprocess.TimeoutExpired("taskkill", 5)])
+def test_git_windows_cleanup_failure_remains_bounded(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+
+    process = Mock(pid=12345)
+    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
+    process.wait.side_effect = subprocess.TimeoutExpired("git", 5)
+    monkeypatch.setattr(fallback, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    tree_kill = Mock(side_effect=error)
+    monkeypatch.setattr(subprocess, "run", tree_kill)
+    with pytest.raises(fallback.GitDiscoveryError):
+        fallback.run_git_ls_files(".")
+    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
+    assert tree_kill.call_args.kwargs["timeout"] == 5

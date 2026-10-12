@@ -139,6 +139,15 @@ Missing repository roots and regular files used as roots fail with exit code 2 b
 allowlist write. Existing empty directories are allowed. Missing optional configured projects remain
 skippable; configured paths that exist must be directories.
 
+Git file discovery (`git ls-files`) has a 30-second execution timeout followed by bounded
+process-tree cleanup (up to 6 extra seconds on POSIX, 11 on Windows). Windows tree termination is best-effort and
+untested. A timeout is a hard analysis error:
+the CLI returns exit code 2 with a diagnostic, without a report, snapshot, or allowlist write. Partial Git output
+is discarded and no filesystem fallback runs on timeout. This applies to Python reports, physical-line profiles,
+composition, and size-limits. Git startup failures (including a missing executable) and nonzero exits retain the
+filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
+`subprocess.run`, process creation itself may not be interruptible on every platform.
+
 The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
 default excludes for common caches, virtual environments, dependency directories, and build output, then counts
 physical lines in mapped text-like files using UTF-8 with ignored decode errors. Source symlink files and paths
