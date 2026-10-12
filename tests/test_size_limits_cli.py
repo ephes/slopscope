@@ -362,3 +362,20 @@ def test_non_utf8_allowlist_exits_2(tmp_path: Path) -> None:
 
     assert exit_code == 2
     assert "is not valid UTF-8" in stderr
+
+
+@pytest.mark.parametrize("mode", [[], ["--strict"], ["--seed-allowlist"], ["--update-allowlist"]])
+def test_deep_allowlist_is_domain_error_without_write(tmp_path: Path, mode: list[str]) -> None:
+    project = make_project(tmp_path)
+    allowlist = project / "size-limits.json"
+    original = "[" * 10000 + "0" + "]" * 10000
+    allowlist.write_text(original, encoding="utf-8")
+
+    code, stdout, stderr = run_cli(["--size-limits", *mode, str(project)])
+
+    assert code == 2
+    assert stdout == ""
+    assert "JSON nesting is too deep" in stderr or "must be a JSON object" in stderr
+    assert "Traceback" not in stderr
+    assert len(stderr) < 300
+    assert allowlist.read_text(encoding="utf-8") == original

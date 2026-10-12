@@ -76,6 +76,8 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
 - Untracked files are not analyzed inside a Git repository, as in the default report.
 - Tracked paths that are missing from the working tree, or that are not regular files, are skipped, as in the default
   report.
+- Source symlink files, including links to contained files, and paths through symlink directories below the
+  selected root are skipped. Uninspectable tracked paths are also skipped.
 - `include_languages` and `exclude_languages` do not apply: the report is Python-only by definition.
 - Files are classified as `source`, `tests`, or `other` and into areas with the same `source_dirs`, `test_dirs`, and
   `areas` rules as the default report.

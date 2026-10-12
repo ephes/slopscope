@@ -110,13 +110,14 @@ def discover_files(
     excluded_paths_tuple = tuple(excluded_paths)
     git_result = run_git_ls_files(root)
     if git_result.returncode == 0:
-        return filter_included_paths(
+        selected = filter_included_paths(
             filter_excluded_paths(
                 parse_git_ls_files_output(git_result.stdout),
                 excluded_path_segments=excluded_paths_tuple,
             ),
             include_globs=include_globs,
         )
+        return [path for path in selected if not _has_source_symlink(root, path)]
     return filter_included_paths(
         filter_excluded_paths(
             discover_filesystem_files(
@@ -178,6 +179,20 @@ def matches_include_globs(path: Path | str, include_globs: Iterable[str]) -> boo
     )
 
 
+def _has_source_symlink(root: Path, relative_path: Path) -> bool:
+    """Reject source links, including linked directories below the selected root."""
+
+    try:
+        return any(
+            (root / part).is_symlink()
+            for part in (relative_path, *relative_path.parents)
+            if part != Path(".")
+        )
+    except OSError:
+        # An uninspectable source cannot be admitted safely.
+        return True
+
+
 def discover_filesystem_files(
     path: Path | str,
     *,
@@ -190,12 +205,16 @@ def discover_filesystem_files(
     files: list[Path] = []
 
     for current, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(name for name in dirnames if name not in pruned_names)
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if name not in pruned_names and not (Path(current) / name).is_symlink()
+        )
         current_path = Path(current)
         for filename in sorted(filenames):
             file_path = current_path / filename
-            # Keep only regular files; this also skips broken symlinks from os.walk.
-            if file_path.is_file() and filename not in pruned_names:
+            # Check links before is_file(), which follows their targets.
+            if not file_path.is_symlink() and file_path.is_file() and filename not in pruned_names:
                 relative_path = file_path.relative_to(root)
                 files.append(relative_path)
 

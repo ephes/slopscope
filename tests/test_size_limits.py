@@ -399,3 +399,17 @@ def test_new_allowlist_is_private(tmp_path: Path) -> None:
     path = tmp_path / "size-limits.json"
     size_limits.write_allowlist(path, {})
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_decoder_recursion_is_domain_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "allowlist.json"
+    path.write_text("{}", encoding="utf-8")
+
+    def exhausted(text: str) -> object:
+        raise RecursionError("private decoder detail")
+
+    monkeypatch.setattr("slopscope.size_limits.json.loads", exhausted)
+    with pytest.raises(size_limits.SizeLimitsError, match="JSON nesting is too deep") as caught:
+        size_limits.load_allowlist(path)
+    assert str(path) in str(caught.value)
+    assert "private decoder detail" not in str(caught.value)

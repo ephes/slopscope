@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from slopscope import fallback
+from slopscope import composition, fallback
 from slopscope.report import FileRow, LanguageRow
 
 
@@ -364,3 +367,76 @@ def test_build_file_rows_skips_unknown_and_missing_or_unreadable_files(
     assert fallback.build_file_rows(tmp_path) == [
         FileRow(language="Python", path="known.py", blank=0, comment=0, code=1),
     ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO fixture")
+@pytest.mark.parametrize("use_git", [False, True])
+def test_source_symlinks_are_never_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_git: bool
+) -> None:
+    if use_git and shutil.which("git") is None:
+        pytest.skip("Git fixture requires git")
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "regular.py").write_text("x = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside.py"
+    outside.write_text("external = 1\n", encoding="utf-8")
+    special = tmp_path / "pipe"
+    os.mkfifo(special)
+    (root / "outside.py").symlink_to(outside)
+    (root / "inside.py").symlink_to(root / "regular.py")
+    (root / "broken.py").symlink_to(tmp_path / "missing")
+    (root / "special.py").symlink_to(special)
+    (root / "directory.py").symlink_to(tmp_path, target_is_directory=True)
+    (root / "linked_dir").symlink_to(tmp_path, target_is_directory=True)
+    if use_git:
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    else:
+        monkeypatch.setattr(
+            fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(1, b"")
+        )
+
+    def fail_read(path: Path | str) -> int:
+        assert Path(path) == root / "regular.py"
+        return 1
+
+    monkeypatch.setattr(fallback, "count_physical_lines", fail_read)
+    assert fallback.discover_files(root) == [Path("regular.py")]
+    assert fallback.discover_filesystem_files(root) == [Path("regular.py")]
+    assert composition.discover_python_files(root, excluded_paths=()) == ["regular.py"]
+    assert [row.path for row in fallback.build_file_rows(root)] == ["regular.py"]
+
+
+def test_git_discovery_skips_linked_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "mod.py").write_text("outside = 1\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pkg").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(
+        fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(0, b"pkg/mod.py\0")
+    )
+    assert fallback.discover_files(root) == []
+    assert composition.build_composition_report(root, excluded_paths=()).files == ()
+
+
+def test_git_discovery_skips_uninspectable_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(0, b"blocked/mod.py\0")
+    )
+    inspected: list[Path] = []
+
+    def unreadable(path: Path) -> bool:
+        inspected.append(path)
+        raise PermissionError("unsearchable directory")
+
+    monkeypatch.setattr(Path, "is_symlink", unreadable)
+    assert fallback.discover_files(tmp_path) == []
+    assert inspected
