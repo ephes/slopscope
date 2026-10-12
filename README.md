@@ -83,6 +83,12 @@ uv run slopscope
 `cloc` is optional. With `--engine auto`, `slopscope` uses `cloc` when the binary is available on `PATH` and falls
 back to the pure-Python engine otherwise. Install `cloc` separately if you want `cloc` code-line semantics.
 
+Each cloc invocation has a 30-second execution timeout, followed by bounded process-tree cleanup
+(up to 6 extra seconds on POSIX, 11 on Windows). Windows tree termination is best-effort and untested. A timeout or executable startup failure
+returns exit code 2 with a diagnostic and no report; auto mode does not fall back after such a failure.
+This applies to language summaries, file summaries, and cloc-backed profiles, including slow large repositories.
+Use `--engine python` for physical-line counts if cloc takes too long.
+
 Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
 The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
 are not preserved end to end.
