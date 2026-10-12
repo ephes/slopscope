@@ -33,6 +33,9 @@ Use `--config PATH` to load a specific TOML file:
 slopscope --config path/to/pyproject.toml path/to/repository
 ```
 
+Configuration files must be UTF-8, including automatically discovered `pyproject.toml` files.
+Invalid encoding fails with a filename diagnostic and exit code 2, without a report or file contents.
+
 When `--config` is supplied, the file must exist and must contain valid TOML. Invalid TOML, unknown fields, invalid
 field types, duplicate project or profile names, and conflicting language filters fail with a `slopscope:` error on
 stderr and exit code 2.
