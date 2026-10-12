@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject missing or non-directory repository roots with exit code 2 in every CLI report mode.
+  Configured project paths that point at files also fail, including optional projects.
+
 - Write size allowlists atomically, preserving the previous baseline and permissions on failure.
   Symlinked allowlists update their target. Newly seeded files use mode 0600 to keep temporary and final
   contents private by default; use chmod to share a new baseline with other local users.

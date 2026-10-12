@@ -61,9 +61,14 @@ def partition_existing_projects(
     existing: list[config_module.ProjectConfig] = []
     skipped: list[SkippedProject] = []
     for configured_project in projects:
-        if configured_project.path.exists():
+        if configured_project.path.is_dir():
             existing.append(configured_project)
             continue
+        if configured_project.path.exists():
+            raise ProjectError(
+                f"project {configured_project.name} path is not a directory: "
+                f"{configured_project.path}"
+            )
         if configured_project.optional:
             skipped.append(
                 SkippedProject(

@@ -195,6 +195,9 @@ def run(
     _validate_size_limits_options(parser, args)
     _validate_composition_options(parser, args)
     selected_path = Path(args.path)
+    if args.project is None and not selected_path.is_dir():
+        print(f"slopscope: repository root is not a directory: {selected_path}", file=err)
+        return 2
 
     try:
         slopscope_config = _load_selected_config(
