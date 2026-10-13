@@ -382,6 +382,8 @@ identity are not preserved. A read-only file can be replaced when its parent dir
 
 - A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
   different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
+  Excessively nested JSON also fails with a concise filename diagnostic and exit code 2, without a report or
+  snapshot write; existing baseline and snapshot files remain unchanged.
 - A different analyzer version, detector version, or counting setting (every `settings` entry except `limit`) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
   changed rules or settings alone. A different Python version is

@@ -63,6 +63,8 @@ def load_baseline(
         raise BaselineError(f"baseline file not found: {path}") from exc
     except OSError as exc:
         raise BaselineError(f"could not read baseline file {path}: {exc}") from exc
+    except RecursionError as exc:
+        raise BaselineError(f"baseline file {path}: JSON nesting is too deep") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise BaselineError(f"baseline file {path} is not valid JSON: {exc}") from exc
 

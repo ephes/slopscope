@@ -528,3 +528,53 @@ def test_new_snapshot_is_private(tmp_path: Path) -> None:
     snapshot = tmp_path / "private.json"
     assert run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])[0] == 0
     assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("same_snapshot", [False, True])
+@pytest.mark.parametrize("force_decoder_failure", [False, True])
+def test_excessively_nested_baseline_exits_2_without_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    same_snapshot: bool,
+    force_decoder_failure: bool,
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    contents = b"[" * 10000 + b"0" + b"]" * 10000
+    baseline.write_bytes(contents)
+    snapshot = baseline if same_snapshot else tmp_path / "output.json"
+    if not same_snapshot:
+        snapshot.write_bytes(b"previous snapshot\n")
+    previous_snapshot = snapshot.read_bytes()
+    if force_decoder_failure:
+
+        def fail_decode(_handle: object) -> object:
+            raise RecursionError("decoder detail must not escape")
+
+        monkeypatch.setattr("slopscope.composition_baseline.json.load", fail_decode)
+
+    code, out, err = run_cli(
+        [
+            str(repository),
+            "--composition",
+            "--format",
+            "json",
+            "--baseline",
+            str(baseline),
+            "--snapshot",
+            str(snapshot),
+        ]
+    )
+
+    assert code == 2
+    assert out == ""
+    assert str(baseline) in err
+    if force_decoder_failure:
+        assert "JSON nesting is too deep" in err
+    else:
+        assert "JSON nesting is too deep" in err or "is not a composition report" in err
+    assert "decoder detail" not in err
+    assert "Traceback" not in err
+    assert len(err) < len(str(baseline)) + 100
+    assert baseline.read_bytes() == contents
+    assert snapshot.read_bytes() == previous_snapshot
