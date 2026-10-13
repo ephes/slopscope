@@ -1955,3 +1955,79 @@ def test_later_project_discovery_timeout_preserves_artifacts(
     assert snapshot.read_text(encoding="utf-8") == "previous snapshot"
     assert not allowlist.exists()
     assert not (tmp_path / "second" / "size-limits.json").exists()
+
+
+def _python_profile_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    source = tmp_path / "included.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "kept.py").write_text("value = 2\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.profiles]]\nname = "python"\ninclude_languages = ["Python"]\n'
+        "physical_lines = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        fallback,
+        "run_git_ls_files",
+        lambda _path: fallback.GitLsFilesResult(0, b"included.py\0kept.py\0"),
+    )
+    return source
+
+
+def _fail_open(monkeypatch: pytest.MonkeyPatch, source: Path, error: OSError) -> list[Path]:
+    original_open = Path.open
+    attempts: list[Path] = []
+
+    def fail_source_open(path: Path, *args: object, **kwargs: object) -> object:
+        if path == source:
+            attempts.append(path)
+            if isinstance(error, FileNotFoundError):
+                source.unlink()
+            raise error
+        return original_open(path, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(Path, "open", fail_source_open)
+    return attempts
+
+
+@pytest.mark.parametrize("mode", ["report", "profile"])
+def test_unreadable_included_regular_file_fails_without_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    source = _python_profile_project(tmp_path, monkeypatch)
+    attempts = _fail_open(monkeypatch, source, PermissionError("denied"))
+    stdout, stderr = io.StringIO(), io.StringIO()
+    options = ["--profile", "python", "--total-only"] if mode == "profile" else []
+    code = cli.run(
+        [str(tmp_path), "--engine", "python", "--format", "json", *options],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert attempts == [source]
+    assert code == 2
+    assert stdout.getvalue() == ""
+    assert "incomplete analysis" in stderr.getvalue()
+    assert str(source) in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
+
+
+@pytest.mark.parametrize("mode", ["report", "profile"])
+def test_source_removed_while_counting_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    source = _python_profile_project(tmp_path, monkeypatch)
+    attempts = _fail_open(monkeypatch, source, FileNotFoundError("removed after discovery"))
+    stdout, stderr = io.StringIO(), io.StringIO()
+    options = ["--profile", "python", "--total-only"] if mode == "profile" else []
+    code = cli.run(
+        [str(tmp_path), "--engine", "python", "--format", "json", *options],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert attempts == [source]
+    assert code == 0
+    assert "incomplete analysis" not in stderr.getvalue()
+    assert "included.py" not in stdout.getvalue()
+    assert json.loads(stdout.getvalue())

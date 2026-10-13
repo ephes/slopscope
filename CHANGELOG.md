@@ -11,6 +11,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 - Reject excessively nested composition baseline JSON with a concise filename diagnostic and exit code 2,
   preserving the baseline and any requested snapshot output.
 
+- Fail Python reports and physical-line profiles with exit code 2 and a file diagnostic when an included
+  mapped regular file exists but cannot be read at counting time, rather than silently reporting incomplete
+  totals. Missing tracked paths (deletions, sparse checkouts) and non-regular paths are still skipped.
+
 - Bound Git file discovery to a 30-second timeout plus bounded process-tree cleanup
   (up to 6 extra seconds on POSIX, 11 on Windows; Windows tree termination is best-effort and untested). On timeout, return exit code 2 with a diagnostic
   and no report, snapshot, allowlist write, or filesystem fallback; discard partial output. Git startup failures
