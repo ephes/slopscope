@@ -80,8 +80,9 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
 `.pyi`) are analyzed, each exactly once, in sorted path order.
 
 - Untracked files are not analyzed inside a Git repository, as in the default report.
-- Tracked paths that are missing from the working tree, or that are not regular files, are skipped, as in the default
-  report.
+- Composition skips tracked paths that are missing from the working tree or are not regular files.
+  Default Python reports and physical-line profiles instead fail if an included mapped path cannot be read at
+  counting time, so their totals cannot silently omit that input.
 - Source symlink files, including links to contained files, and paths through symlink directories below the
   selected root are skipped. Uninspectable tracked paths are also skipped.
 - `include_languages` and `exclude_languages` do not apply: the report is Python-only by definition.

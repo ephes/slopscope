@@ -73,6 +73,10 @@ class GitDiscoveryError(RuntimeError):
     """Git discovery failed without a safe file list."""
 
 
+class CountingError(RuntimeError):
+    """An included source file could not be counted."""
+
+
 @dataclass(frozen=True)
 class GitLsFilesResult:
     """Completed git file-listing process data."""
@@ -271,7 +275,7 @@ def map_language(path: Path | str) -> str | None:
 def count_physical_lines(path: Path | str) -> int | None:
     """Count physical lines as UTF-8 text, ignoring decode errors.
 
-    Missing or unreadable files are skipped by returning None.
+    None signals a missing or unreadable file; the caller decides how to handle it.
     """
 
     try:
@@ -359,7 +363,9 @@ def build_file_rows(
 
         physical_lines = count_physical_lines(root / relative_path)
         if physical_lines is None:
-            continue
+            raise CountingError(
+                f"incomplete analysis: could not read included file {root / relative_path}"
+            )
 
         rows.append(
             FileRow(

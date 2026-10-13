@@ -156,6 +156,11 @@ links to contained files. Composition, size-limits, and physical-line profiles u
 exclude these links. The cloc engine's discovery is unchanged. Python fallback reports are marked with
 `Engine: python (physical lines)`.
 
+If an included mapped path is missing or cannot be read at counting time, Python reports and physical-line
+profiles fail with exit code 2 and an incomplete-analysis diagnostic naming the file, without a report or total.
+This includes tracked working-tree deletions and mapped paths that are not regular files. Unknown languages
+and files excluded by configuration remain intentionally skipped.
+
 Human-readable output defaults to `--format rich`. Rich is optional: when it is not importable, `slopscope` falls
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for
 structured output, or `--no-color` to force colorless human-readable output.

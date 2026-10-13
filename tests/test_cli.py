@@ -1955,3 +1955,47 @@ def test_later_project_discovery_timeout_preserves_artifacts(
     assert snapshot.read_text(encoding="utf-8") == "previous snapshot"
     assert not allowlist.exists()
     assert not (tmp_path / "second" / "size-limits.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["permission", "removed"])
+@pytest.mark.parametrize("mode", ["report", "profile"])
+def test_unreadable_included_source_fails_without_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str, mode: str
+) -> None:
+    source = tmp_path / "included.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.profiles]]\nname = "python"\ninclude_languages = ["Python"]\n'
+        "physical_lines = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        fallback, "run_git_ls_files", lambda _path: fallback.GitLsFilesResult(0, b"included.py\0")
+    )
+    original_open = Path.open
+    attempts: list[Path] = []
+
+    def fail_source_open(path: Path, *args: object, **kwargs: object) -> object:
+        if path == source:
+            attempts.append(path)
+            if failure == "permission":
+                raise PermissionError("denied")
+            source.unlink()
+            raise FileNotFoundError("removed after discovery")
+        return original_open(path, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(Path, "open", fail_source_open)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    options = ["--profile", "python", "--total-only"] if mode == "profile" else []
+    code = cli.run(
+        [str(tmp_path), "--engine", "python", "--format", "json", *options],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert attempts == [source]
+    assert code == 2
+    assert stdout.getvalue() == ""
+    assert "incomplete analysis" in stderr.getvalue()
+    assert str(source) in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()

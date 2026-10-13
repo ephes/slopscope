@@ -267,7 +267,7 @@ def test_build_language_summary_order_is_deterministic_for_equal_line_counts(
     assert [row.language for row in report.language_rows] == ["Markdown", "Python", "SUM"]
 
 
-def test_build_language_summary_skips_missing_discovered_files(
+def test_build_language_summary_rejects_missing_discovered_files(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -276,9 +276,8 @@ def test_build_language_summary_skips_missing_discovered_files(
 
     monkeypatch.setattr("slopscope.fallback.discover_files", fake_discover_files)
 
-    report = fallback.build_language_summary(tmp_path)
-
-    assert report.language_rows == ()
+    with pytest.raises(fallback.CountingError, match="incomplete analysis.*missing.py"):
+        fallback.build_language_summary(tmp_path)
 
 
 def test_build_language_summary_from_file_rows_reuses_counted_rows(tmp_path: Path) -> None:
@@ -341,30 +340,17 @@ def test_build_file_rows_applies_configured_filters(
     assert rows == [FileRow(language="Python", path="src/app.py", blank=0, comment=0, code=2)]
 
 
-def test_build_file_rows_skips_unknown_and_missing_or_unreadable_files(
+def test_build_file_rows_skips_unknown_and_excluded_languages(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    original_count_physical_lines = fallback.count_physical_lines
-
     def fake_discover_files(_path: Path | str, **_kwargs: object) -> list[Path]:
-        return [
-            Path("known.py"),
-            Path("unknown.bin"),
-            Path("missing.py"),
-            Path("unreadable.py"),
-        ]
+        return [Path("known.py"), Path("unknown.bin"), Path("excluded.js")]
 
-    def fake_count_physical_lines(path: Path | str) -> int | None:
-        if Path(path).name == "unreadable.py":
-            return None
-        return original_count_physical_lines(path)
-
-    monkeypatch.setattr("slopscope.fallback.discover_files", fake_discover_files)
-    monkeypatch.setattr("slopscope.fallback.count_physical_lines", fake_count_physical_lines)
+    monkeypatch.setattr(fallback, "discover_files", fake_discover_files)
     (tmp_path / "known.py").write_text("one\n", encoding="utf-8")
 
-    assert fallback.build_file_rows(tmp_path) == [
+    assert fallback.build_file_rows(tmp_path, exclude_languages=["JavaScript"]) == [
         FileRow(language="Python", path="known.py", blank=0, comment=0, code=1),
     ]
 
@@ -569,3 +555,18 @@ def test_git_windows_cleanup_failure_remains_bounded(
     process.kill.assert_called_once_with()
     process.wait.assert_called_once_with(timeout=5)
     assert tree_kill.call_args.kwargs["timeout"] == 5
+
+
+@pytest.mark.parametrize("replacement", ["missing", "directory"])
+def test_tracked_unreadable_path_fails_counting(tmp_path: Path, replacement: str) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    source = tmp_path / "tracked.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "tracked.py"], check=True)
+    source.unlink()
+    if replacement == "directory":
+        source.mkdir()
+
+    assert Path("tracked.py") in fallback.discover_files(tmp_path)
+    with pytest.raises(fallback.CountingError, match="incomplete analysis.*tracked.py"):
+        fallback.build_language_summary(tmp_path)

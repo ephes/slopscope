@@ -199,7 +199,7 @@ def discover_python_files(
         relative_path.as_posix()
         for relative_path in discovered
         if fallback.map_language(relative_path) == COMPOSITION_LANGUAGE
-        # Tracked paths missing from the working tree are skipped, as in the default report.
+        # Composition skips tracked paths missing from the working tree.
         and (root / relative_path).is_file()
     }
     return sorted(relative_paths)
