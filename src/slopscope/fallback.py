@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import stat
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -71,6 +72,10 @@ GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
 
 class GitDiscoveryError(RuntimeError):
     """Git discovery failed without a safe file list."""
+
+
+class CountingError(RuntimeError):
+    """An included source file could not be counted."""
 
 
 @dataclass(frozen=True)
@@ -271,7 +276,7 @@ def map_language(path: Path | str) -> str | None:
 def count_physical_lines(path: Path | str) -> int | None:
     """Count physical lines as UTF-8 text, ignoring decode errors.
 
-    Missing or unreadable files are skipped by returning None.
+    None signals a path that could not be opened or read; the caller decides how to handle it.
     """
 
     try:
@@ -357,9 +362,17 @@ def build_file_rows(
         if language in excluded_languages:
             continue
 
-        physical_lines = count_physical_lines(root / relative_path)
-        if physical_lines is None:
+        file_path = root / relative_path
+        # Tracked paths absent from the working tree (deletions, sparse checkouts) and
+        # non-regular paths (directories, submodules, special files) are skipped unopened.
+        if _is_missing_or_not_regular(file_path):
             continue
+        physical_lines = count_physical_lines(file_path)
+        if physical_lines is None:
+            if _is_missing_or_not_regular(file_path):
+                # Removed or replaced while counting: same as absent at discovery.
+                continue
+            raise CountingError(f"incomplete analysis: could not read included file {file_path}")
 
         rows.append(
             FileRow(
@@ -372,6 +385,20 @@ def build_file_rows(
         )
 
     return rows
+
+
+def _is_missing_or_not_regular(path: Path) -> bool:
+    """Return True only for a path known to be absent or not a regular file.
+
+    A path that cannot be inspected is not known to be either, so it is reported.
+    """
+
+    try:
+        return not stat.S_ISREG(path.lstat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
 
 
 def _path_parts(path: Path | str) -> tuple[str, ...]:
