@@ -371,6 +371,11 @@ optional projects.
 
 `--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
 a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
+Snapshots are published only when analysis completes without file failures. A read, decode, tokenization, or parse
+failure leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
+a failure in any selected project prevents publication of the whole snapshot; optional missing projects remain
+skippable. The partial report and diagnostics still appear through the selected output format and stderr, with
+exit code 1. A subsequent complete run can replace the snapshot normally.
 Before analysis, snapshot destinations that alias selected Python files, the loaded configuration, or the baseline
 are rejected with exit code 2 and no report or writes. Resolved symlink paths and hardlinks are checked too, across
 all selected projects. A distinct snapshot inside the repository is allowed.

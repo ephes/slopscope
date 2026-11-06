@@ -614,7 +614,7 @@ def _run_composition(
             skipped_projects=skipped_projects,
         )
 
-    if args.snapshot is not None:
+    if args.snapshot is not None and not failed:
         snapshot_path = Path(args.snapshot)
         try:
             _write_snapshot(

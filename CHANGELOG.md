@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Publish composition snapshots only after complete analysis. Read, decode, tokenization, or parse failures in
+  any selected project preserve the previous snapshot (or leave a new destination absent), while the partial
+  report and diagnostics remain available with exit code 1.
+
 - Refuse composition snapshot destinations that alias selected Python files, the loaded configuration, or the
   baseline, including symlink and hardlink aliases, with exit code 2 before analysis. Distinct snapshots inside
   the repository remain supported; refreshing a baseline now requires a separate snapshot destination.

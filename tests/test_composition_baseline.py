@@ -4,7 +4,9 @@ import io
 import json
 import os
 import tempfile
+import tokenize
 from pathlib import Path
+from typing import TextIO
 
 import pytest
 
@@ -634,3 +636,75 @@ def test_excessively_nested_baseline_exits_2_without_writes(
     assert len(err) < len(str(baseline)) + 100
     assert baseline.read_bytes() == contents
     assert snapshot.read_bytes() == previous_snapshot
+
+
+@pytest.mark.parametrize("failure", ["syntax", "unreadable", "decode"])
+@pytest.mark.parametrize("multi_project", [False, True])
+@pytest.mark.parametrize("existing_snapshot", [False, True])
+def test_incomplete_analysis_preserves_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    multi_project: bool,
+    existing_snapshot: bool,
+) -> None:
+    repository = make_repository(tmp_path)
+    bad_file = repository / "src/app.py"
+    options = ["--composition", "--format", "json", str(repository)]
+    if multi_project:
+        write(tmp_path, "other/src/bad.py", "x = 1\n")
+        write(
+            repository,
+            "pyproject.toml",
+            '[[tool.slopscope.projects]]\nname = "good"\npath = "."\n'
+            '[[tool.slopscope.projects]]\nname = "bad"\npath = "../other"\n',
+        )
+        bad_file = tmp_path / "other/src/bad.py"
+        options += ["--project", "all"]
+    snapshot = tmp_path / "report.json"
+    previous = None
+    if existing_snapshot:
+        assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
+        previous = snapshot.read_bytes()
+    injected = False
+    original_open = tokenize.open
+
+    def open_source(filename: Path) -> TextIO:
+        nonlocal injected
+        if filename == bad_file:
+            injected = True
+            raise PermissionError("injected read failure")
+        return original_open(filename)
+
+    with monkeypatch.context() as patch:
+        if failure == "syntax":
+            bad_file.write_text("def broken(:\n", encoding="utf-8")
+        elif failure == "decode":
+            bad_file.write_bytes(b"\xff\n")
+        else:
+            patch.setattr(tokenize, "open", open_source)
+        code, out, err = run_cli(options + ["--snapshot", str(snapshot)])
+    if failure == "unreadable":
+        assert injected
+    assert code == 1
+    assert "could not analyze" in err
+    assert str(bad_file) in err
+    data = json.loads(out)
+    if multi_project:
+        assert data["projects"][0]["report"]["failures"] == []
+        assert data["projects"][1]["report"]["failures"]
+    else:
+        assert data["failures"]
+    if previous is None:
+        assert not snapshot.exists()
+    else:
+        assert snapshot.read_bytes() == previous
+    assert list(tmp_path.glob(".report.json.*")) == []
+
+    bad_file.write_text("import json\n", encoding="utf-8")
+    code, out, err = run_cli(options + ["--snapshot", str(snapshot)])
+    assert code == 0
+    assert err == ""
+    assert snapshot.read_text(encoding="utf-8") == out
+    if previous is not None:
+        assert snapshot.read_bytes() != previous
