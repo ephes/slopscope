@@ -27,6 +27,7 @@ from slopscope.report import (
 
 DEFAULT_ALLOWLIST = "size-limits.json"
 SCHEMA_VERSION = 1
+MAX_ALLOWLIST_BYTES = 16 * 1024 * 1024
 REPORT = "report"
 UPDATE = "update"
 SEED = "seed"
@@ -93,7 +94,18 @@ def load_allowlist(path: Path) -> Units | None:
     """Load an allowlist, or return ``None`` when the file does not exist."""
 
     try:
-        text = path.read_text(encoding="utf-8")
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise SizeLimitsError(f"allowlist {path} must be a regular file")
+            if info.st_size > MAX_ALLOWLIST_BYTES:
+                raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+            # Bound the read as well: the file may grow after fstat.
+            content = handle.read(MAX_ALLOWLIST_BYTES + 1)
+            if len(content) > MAX_ALLOWLIST_BYTES:
+                raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+        text = content.decode("utf-8")
     except FileNotFoundError:
         return None
     except UnicodeDecodeError as exc:

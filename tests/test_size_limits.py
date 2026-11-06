@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import textwrap
 from pathlib import Path
 
@@ -413,3 +415,68 @@ def test_decoder_recursion_is_domain_error(tmp_path: Path, monkeypatch: pytest.M
         size_limits.load_allowlist(path)
     assert str(path) in str(caught.value)
     assert "private decoder detail" not in str(caught.value)
+
+
+@pytest.mark.parametrize("mode", [stat.S_IFIFO, stat.S_IFCHR, stat.S_IFDIR])
+def test_allowlist_validates_open_descriptor_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int
+) -> None:
+    path = tmp_path / "allowlist.json"
+    path.write_text("{}", encoding="utf-8")
+    real_open = os.open
+    opened: list[int] = []
+
+    def open_file(path: Path, flags: int) -> int:
+        assert flags & getattr(os, "O_NONBLOCK", 0) == getattr(os, "O_NONBLOCK", 0)
+        descriptor = real_open(path, flags)
+        opened.append(descriptor)
+        return descriptor
+
+    def special_file(descriptor: int) -> os.stat_result:
+        assert descriptor == opened[0]
+        return os.stat_result((mode, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(os, "fstat", special_file)
+    with pytest.raises(size_limits.SizeLimitsError, match="must be a regular file"):
+        size_limits.load_allowlist(path)
+    with pytest.raises(OSError):
+        os.read(opened[0], 1)
+
+
+@pytest.mark.parametrize("grew_after_stat", [False, True])
+def test_allowlist_byte_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grew_after_stat: bool
+) -> None:
+    path = tmp_path / "allowlist.json"
+    path.write_bytes(b" " * 64 + b"{}")
+    monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_BYTES", 64, raising=False)
+    if grew_after_stat:
+        monkeypatch.setattr(
+            os, "fstat", lambda fd: os.stat_result((stat.S_IFREG, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        )
+    with pytest.raises(size_limits.SizeLimitsError, match="exceeds 64 bytes"):
+        size_limits.load_allowlist(path)
+    assert path.read_bytes() == b" " * 64 + b"{}"
+
+
+def test_allowlist_ceiling_is_inclusive_and_missing_still_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "allowlist.json"
+    assert size_limits.load_allowlist(path) is None
+    monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_BYTES", 64, raising=False)
+    path.write_bytes(b" " * 62 + b"{}")
+    assert size_limits.load_allowlist(path) == {"functions": {}, "classes": {}, "test_files": {}}
+
+
+def test_allowlist_read_follows_regular_file_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "baseline.json"
+    target.write_text('{"functions": {"a::b": 3}}', encoding="utf-8")
+    link = tmp_path / "allowlist.json"
+    link.symlink_to(target)
+    assert size_limits.load_allowlist(link) == {
+        "functions": {"a::b": 3},
+        "classes": {},
+        "test_files": {},
+    }

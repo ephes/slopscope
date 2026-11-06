@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Limit allowlist input to regular files of at most 16 MiB, validating the opened descriptor before a bounded
+  read. Named pipes are refused without waiting for a writer; regular-file symlinks remain supported.
+
 - Publish composition snapshots only after complete analysis. Read, decode, tokenization, or parse failures in
   any selected project preserve the previous snapshot (or leave a new destination absent), while the partial
   report and diagnostics remain available with exit code 1.

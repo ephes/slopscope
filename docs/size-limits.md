@@ -78,6 +78,9 @@ The default path is `size-limits.json` in the analyzed project root. Configure a
 Without an allowlist file, nothing is allowlisted. An invalid file (not JSON, unknown sections, sizes that are not
 positive integers, or decoder recursion exhaustion from deeply nested JSON) fails with a concise `slopscope:`
 error and exit code 2 before any allowlist write. Existing allowlist bytes are preserved.
+Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
+(16,777,216 bytes). The opened descriptor is checked before a bounded read; special files such as
+named pipes are refused without waiting for a writer.
 
 ## Report
 
