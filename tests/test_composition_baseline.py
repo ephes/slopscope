@@ -105,26 +105,82 @@ def test_baseline_plain_output_lists_changed_metrics(tmp_path: Path) -> None:
     assert "duplicated_lines" in stdout
 
 
-def test_baseline_can_be_overwritten_by_the_snapshot(tmp_path: Path) -> None:
+@pytest.mark.parametrize("input_kind", ["source", "config", "explicit-config", "baseline"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_snapshot_refuses_input_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, input_kind: str, alias: str
+) -> None:
     repository = make_repository(tmp_path)
-    snapshot = tmp_path / "rolling.json"
-    run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
+    options = ["--composition", "--format", "json", str(repository)]
+    if input_kind == "source":
+        protected = repository / "src/app.py"
+    elif input_kind in {"config", "explicit-config"}:
+        protected = (
+            repository / "pyproject.toml" if input_kind == "config" else tmp_path / "cfg.toml"
+        )
+        protected.write_text("[tool.slopscope]\n", encoding="utf-8")
+        if input_kind == "explicit-config":
+            options += ["--config", str(protected)]
+    else:
+        protected = tmp_path / "baseline.json"
+        assert run_cli(options + ["--snapshot", str(protected)])[0] == 0
+        options += ["--baseline", str(protected)]
+    previous = protected.read_bytes()
+    snapshot = protected
+    if alias != "direct":
+        snapshot = tmp_path / "alias.json"
+        if alias == "symlink":
+            snapshot.symlink_to(protected)
+        else:
+            snapshot.hardlink_to(protected)
 
-    exit_code, _stdout, _stderr = run_cli(
-        [
-            "--composition",
-            "--baseline",
-            str(snapshot),
-            "--snapshot",
-            str(snapshot),
-            "--format",
-            "json",
-            str(repository),
-        ]
+    def unexpected_analysis(*args: object, **kwargs: object) -> None:
+        pytest.fail("input collision must be refused before analysis")
+
+    monkeypatch.setattr(composition, "analyze_file", unexpected_analysis)
+    code, out, err = run_cli(options + ["--snapshot", str(snapshot)])
+    assert code == 2
+    assert out == ""
+    assert "aliases input" in err
+    assert str(snapshot) in err
+    assert str(protected) in err
+    assert protected.read_bytes() == previous
+    assert snapshot.read_bytes() == previous
+    if alias == "symlink":
+        assert snapshot.is_symlink()
+    if alias == "hardlink":
+        assert snapshot.samefile(protected)
+
+
+def test_snapshot_inside_repository_is_allowed(tmp_path: Path) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = repository / "report.json"
+    code, out, err = run_cli(
+        ["--composition", "--format", "json", "--snapshot", str(snapshot), str(repository)]
     )
+    assert code == 0
+    assert err == ""
+    assert snapshot.read_text(encoding="utf-8") == out
 
-    assert exit_code == 0
-    assert json.loads(snapshot.read_text(encoding="utf-8"))["baseline"]["comparable"] is True
+
+def test_snapshot_refuses_source_in_later_selected_project(tmp_path: Path) -> None:
+    write(tmp_path, "one/src/app.py", "x = 1\n")
+    write(tmp_path, "two/src/app.py", "y = 2\n")
+    write(
+        tmp_path,
+        "pyproject.toml",
+        '[[tool.slopscope.projects]]\nname = "one"\npath = "one"\n'
+        '[[tool.slopscope.projects]]\nname = "two"\npath = "two"\n',
+    )
+    snapshot = tmp_path / "two/src/app.py"
+    previous = snapshot.read_bytes()
+    code, out, err = run_cli(
+        [str(tmp_path), "--composition", "--project", "all", "--snapshot", str(snapshot)]
+    )
+    assert code == 2
+    assert out == ""
+    assert "aliases input" in err
+    assert snapshot.read_bytes() == previous
 
 
 @pytest.mark.parametrize(

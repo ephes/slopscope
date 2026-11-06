@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Refuse composition snapshot destinations that alias selected Python files, the loaded configuration, or the
+  baseline, including symlink and hardlink aliases, with exit code 2 before analysis. Distinct snapshots inside
+  the repository remain supported; refreshing a baseline now requires a separate snapshot destination.
+
 - Reject excessively nested composition baseline JSON with a concise filename diagnostic and exit code 2,
   preserving the baseline and any requested snapshot output.
 

@@ -233,6 +233,8 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
 file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
+Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
+code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
 patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and

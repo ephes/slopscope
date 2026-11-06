@@ -510,6 +510,34 @@ def _run_composition(
             print(f"slopscope: {exc}", file=err)
             return 2
 
+    roots = [path]
+    if args.project is not None:
+        try:
+            selected_projects = project_module.select_projects(slopscope_config, args.project)
+            existing_projects, skipped_projects = project_module.partition_existing_projects(
+                selected_projects
+            )
+        except project_module.ProjectError as exc:
+            print(f"slopscope: {exc}", file=err)
+            return 2
+
+        roots = [project.path for project in existing_projects]
+
+    if args.snapshot is not None:
+        snapshot_path = Path(args.snapshot)
+        config_path = (
+            Path(args.config)
+            if args.config is not None
+            else config_module.find_default_config_path(path)
+        )
+        try:
+            _validate_snapshot_inputs(
+                snapshot_path, roots, slopscope_config, config_path, baseline_path
+            )
+        except OSError as exc:
+            print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
+            return 2
+
     rendered_report: CompositionReport | MultiProjectCompositionReport
     if args.project is None:
         report = _build_composition_report(path, slopscope_config, limit)
@@ -525,15 +553,6 @@ def _run_composition(
         failed = bool(report.failures)
         rendered_report = report
     else:
-        try:
-            selected_projects = project_module.select_projects(slopscope_config, args.project)
-            existing_projects, skipped_projects = project_module.partition_existing_projects(
-                selected_projects
-            )
-        except project_module.ProjectError as exc:
-            print(f"slopscope: {exc}", file=err)
-            return 2
-
         for skipped_project in skipped_projects:
             print(
                 f"slopscope: skipping optional project {skipped_project.name}: "
@@ -613,6 +632,37 @@ def _run_composition(
         )
     )
     return 1 if failed else 0
+
+
+def _validate_snapshot_inputs(
+    snapshot: Path,
+    roots: Sequence[Path],
+    slopscope_config: config_module.SlopscopeConfig,
+    config_path: Path | None,
+    baseline_path: Path | None,
+) -> None:
+    """Refuse snapshot destinations that resolve to or share an inode with an input."""
+    try:
+        target = snapshot.resolve()
+    except RuntimeError as exc:
+        raise OSError(errno.ELOOP, "snapshot path contains a symlink loop", str(snapshot)) from exc
+    inputs = [path for path in (config_path, baseline_path) if path is not None]
+    for root in roots:
+        inputs.extend(
+            root / relative_path
+            for relative_path in composition.discover_python_files(
+                root,
+                excluded_paths=_effective_fallback_excludes(slopscope_config),
+                include_globs=slopscope_config.include_globs,
+            )
+        )
+    for input_path in inputs:
+        shared = target == input_path.resolve()
+        if not shared:
+            with contextlib.suppress(FileNotFoundError):
+                shared = target.samefile(input_path)
+        if shared:
+            raise OSError(f"snapshot {snapshot} aliases input {input_path}")
 
 
 def _write_snapshot(path: Path, text: str) -> None:
