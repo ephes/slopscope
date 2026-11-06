@@ -233,11 +233,15 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
 file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
+Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
+code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
 patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and
 `--top` cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr
-and in the report, and make the command exit with code 1. JSON output has its own `report_type: "composition"`
+and in the report, and make the command exit with code 1. Snapshots are published only after complete analysis;
+a failure in any selected project preserves the previous snapshot (or leaves a new destination absent).
+JSON output has its own `report_type: "composition"`
 shape. See [Composition Report](docs/composition.md) for the category definitions, counting rules, JSON shape, and
 known limits.
 

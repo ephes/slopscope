@@ -371,6 +371,14 @@ optional projects.
 
 `--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
 a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
+Snapshots are published only when analysis completes without file failures. A read, decode, tokenization, or parse
+failure leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
+a failure in any selected project prevents publication of the whole snapshot; optional missing projects remain
+skippable. The partial report and diagnostics still appear through the selected output format and stderr, with
+exit code 1. A subsequent complete run can replace the snapshot normally.
+Before analysis, snapshot destinations that alias selected Python files, the loaded configuration, or the baseline
+are rejected with exit code 2 and no report or writes. Resolved symlink paths and hardlinks are checked too, across
+all selected projects. A distinct snapshot inside the repository is allowed.
 The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
 Write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
 Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
@@ -403,7 +411,8 @@ identity are not preserved. A read-only file can be replaced when its parent dir
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
-- `--baseline` and `--snapshot` may name the same file: the baseline is read before the new snapshot is written.
+- `--baseline` and `--snapshot` must name distinct files, including through symlink or hardlink aliases.
+  To refresh a baseline, write a separate snapshot and explicitly replace the baseline after reviewing it.
 
 ## Monthly Churn
 
