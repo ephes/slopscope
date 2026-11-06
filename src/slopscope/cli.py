@@ -361,9 +361,10 @@ def _run_size_limits(
                 if args.allowlist is not None
                 else _allowlist_path(path, slopscope_config)
             )
-            report, pending = _plan_size_limits(path, allowlist, action, slopscope_config)
-            if pending is not None:
-                size_limits.write_allowlist(allowlist, pending)
+            with size_limits.allowlist_locks([allowlist], action=action):
+                report, pending = _plan_size_limits(path, allowlist, action, slopscope_config)
+                if pending is not None:
+                    size_limits.write_allowlist(allowlist, pending)
             reports.append(report)
             rendered = report
         else:
@@ -386,22 +387,28 @@ def _run_size_limits(
                 raise size_limits.SizeLimitsError(
                     f"projects {shared[0]} and {shared[1]} share the allowlist {shared[2]}"
                 )
-            # Plan every project first: all refusals happen before any allowlist is written.
-            planned: list[tuple[str, SizeLimitsReport, size_limits.Units | None, Path]] = []
-            for configured_project in existing_projects:
-                report, pending = _plan_size_limits(
-                    configured_project.path,
-                    allowlists[configured_project.name],
-                    action,
-                    slopscope_config,
-                    label=configured_project.name,
-                )
-                planned.append(
-                    (configured_project.name, report, pending, allowlists[configured_project.name])
-                )
-            for _name, _report, pending, allowlist in planned:
-                if pending is not None:
-                    size_limits.write_allowlist(allowlist, pending)
+            with size_limits.allowlist_locks(list(allowlists.values()), action=action):
+                # Plan every project first: all refusals happen before any allowlist is written.
+                planned: list[tuple[str, SizeLimitsReport, size_limits.Units | None, Path]] = []
+                for configured_project in existing_projects:
+                    report, pending = _plan_size_limits(
+                        configured_project.path,
+                        allowlists[configured_project.name],
+                        action,
+                        slopscope_config,
+                        label=configured_project.name,
+                    )
+                    planned.append(
+                        (
+                            configured_project.name,
+                            report,
+                            pending,
+                            allowlists[configured_project.name],
+                        )
+                    )
+                for _name, _report, pending, allowlist in planned:
+                    if pending is not None:
+                        size_limits.write_allowlist(allowlist, pending)
             project_reports = [
                 SizeLimitsProjectReport(name=name, report=report)
                 for name, report, _pending, _allowlist in planned

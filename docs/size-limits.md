@@ -78,6 +78,9 @@ The default path is `size-limits.json` in the analyzed project root. Configure a
 Without an allowlist file, nothing is allowlisted. An invalid file (not JSON, unknown sections, sizes that are not
 positive integers, or decoder recursion exhaustion from deeply nested JSON) fails with a concise `slopscope:`
 error and exit code 2 before any allowlist write. Existing allowlist bytes are preserved.
+Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
+(16,777,216 bytes). The opened descriptor is checked before a bounded read; special files such as
+named pipes are refused without waiting for a writer.
 
 ## Report
 
@@ -104,6 +107,19 @@ exits 1.
 - With `--project`, every selected project is measured and validated before any allowlist is written, so a refusal
   in one project leaves all of them unchanged. Seeding or updating is refused when two projects resolve to the same
   allowlist file.
+
+Seed and update hold an OS lock from the allowlist read through planning and atomic publication.
+Concurrent updates re-read the latest baseline before measuring, so a later update cannot restore a
+larger size; concurrent seeds admit only the first publisher. Multi-project mutations acquire all
+locks in sorted resolved-target order before planning any project. Report mode remains read-only.
+Locks use persistent sibling files named `.<allowlist-name>.lock`, created with mode 0600; do not
+delete these files while mutations may be running. Mutations can create these files and their parent
+directories even if planning later refuses the operation (for example, updating a missing allowlist).
+Add `.size-limits.json.lock` to your project's `.gitignore` when using the default allowlist path. The OS releases a lock when its process exits,
+including interruption. Lock acquisition failures return exit code 2. On Windows, the OS lock call
+retries for about 10 seconds before failing if the target remains busy. These advisory locks
+coordinate slopscope mutations on filesystems supporting OS locks; manual writers must coordinate
+separately. Multi-project publication is still atomic per file, not a multi-file transaction.
 
 ## Projects
 
