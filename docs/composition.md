@@ -290,7 +290,7 @@ file to keep a snapshot.
 {
   "report_type": "composition",
   "schema_version": 4,
-  "analyzer": {"name": "slopscope.composition", "version": 1, "python_version": "3.13.1"},
+  "analyzer": {"name": "slopscope.composition", "version": 2, "python_version": "3.13.1"},
   "detectors": [
     {"name": "qt", "kind": "tag", "version": 1},
     {"name": "logging", "kind": "tag", "version": 1},
@@ -361,6 +361,9 @@ file to keep a snapshot.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
+  Analyzer version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
+  instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit
+  function counts and keys may change for custom or shadowed decorators.
 
 With `--project`, the top level has `report_type: "composition_projects"`, `schema_version`, `analyzer`, `detectors`, a
 `projects`
@@ -372,7 +375,7 @@ optional projects.
 `--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
 a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
 Snapshots are published only when analysis completes without file failures. A read, decode, tokenization, or parse
-failure leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
+failure, including traversal recursion or memory exhaustion after parsing, leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
 a failure in any selected project prevents publication of the whole snapshot; optional missing projects remain
 skippable. The partial report and diagnostics still appear through the selected output format and stderr, with
 exit code 1. A subsequent complete run can replace the snapshot normally.
@@ -387,7 +390,12 @@ and directories are rejected. Atomic replacement requires a writable parent dire
 destination (single-file bind mounts are unsuitable). Ownership, ACLs, extended attributes, and hard-link
 identity are not preserved. A read-only file can be replaced when its parent directory is writable.
 
-`--baseline PATH` loads an earlier snapshot and adds a comparison:
+`--baseline PATH` loads an earlier snapshot and adds a comparison. Inputs must be regular files of at most
+16 MiB (16,777,216 bytes), including multi-project snapshots. The opened descriptor is checked before a bounded
+read; special files such as FIFOs are refused without waiting for a writer. Symlinks to regular files remain
+supported. Type or size refusals return exit code 2 without changing baseline or snapshot bytes.
+
+Comparison rules:
 
 - A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
   different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.

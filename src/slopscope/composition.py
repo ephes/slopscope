@@ -37,7 +37,7 @@ from slopscope.report import (
 )
 
 ANALYZER_NAME = "slopscope.composition"
-ANALYZER_VERSION = 1
+ANALYZER_VERSION = 2
 SCHEMA_VERSION = 4
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"
@@ -126,7 +126,7 @@ def analyze_source(
     ``source`` must already use ``\\n`` line endings, as produced by ``tokenize.open()``.
     Test placement is computed only when ``test_file`` is true. Token segments for duplicate
     detection are built only when an ``interner`` is passed.
-    Raises :class:`CompositionAnalysisError` when the source cannot be parsed or tokenized.
+    Raises :class:`CompositionAnalysisError` when parsing, tokenization, or traversal fails.
     """
 
     lines = _physical_lines(source)
@@ -141,18 +141,23 @@ def analyze_source(
         raise CompositionAnalysisError(f"parse error: {exc}") from exc
 
     try:
-        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
-    except (tokenize.TokenError, SyntaxError) as exc:
-        raise CompositionAnalysisError(f"tokenize error: {exc}") from exc
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+        except (tokenize.TokenError, SyntaxError) as exc:
+            raise CompositionAnalysisError(f"tokenize error: {exc}") from exc
 
-    classifier = _LineClassifier(lines)
-    classifier.mark_blank_and_comment_lines(tokens)
-    classifier.visit_body(tree.body, allow_docstring=True)
-    analysis = classifier.result(tree, tokens, test_file=test_file, settings=settings)
-    if interner is None:
-        return analysis
-    segments = composition_duplication.token_segments(tokens, analysis.line_categories, interner)
-    return dataclasses.replace(analysis, segments=segments)
+        classifier = _LineClassifier(lines, composition_semantics.overload_functions(tree))
+        classifier.mark_blank_and_comment_lines(tokens)
+        classifier.visit_body(tree.body, allow_docstring=True)
+        analysis = classifier.result(tree, tokens, test_file=test_file, settings=settings)
+        if interner is None:
+            return analysis
+        segments = composition_duplication.token_segments(
+            tokens, analysis.line_categories, interner
+        )
+        return dataclasses.replace(analysis, segments=segments)
+    except (RecursionError, MemoryError) as exc:
+        raise CompositionAnalysisError("analysis exceeded traversal or memory limits") from exc
 
 
 def analyze_file(
@@ -431,15 +436,6 @@ def _is_multiline_literal(node: ast.expr | None) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str | bytes)
 
 
-def _is_overload(decorator: ast.expr) -> bool:
-    """Return whether a decorator is ``overload`` or an attribute named ``overload``."""
-
-    target = decorator.func if isinstance(decorator, ast.Call) else decorator
-    if isinstance(target, ast.Name):
-        return target.id == "overload"
-    return isinstance(target, ast.Attribute) and target.attr == "overload"
-
-
 def _header_nodes(stmt: ast.stmt) -> tuple[ast.AST, ...]:
     """Return the expressions in a compound statement's header, excluding its blocks."""
 
@@ -483,7 +479,8 @@ class _LineClassifier:
     statements or clauses belongs to the leftmost one.
     """
 
-    def __init__(self, lines: list[str]) -> None:
+    def __init__(self, lines: list[str], overloads: frozenset[int]) -> None:
+        self.overloads = overloads
         self.lines = lines
         self.categories: list[str | None] = [None] * (len(lines) + 1)
         self.begin_lines: set[int] = set()
@@ -652,7 +649,7 @@ class _LineClassifier:
                     name=qualified_name,
                     line=first,
                     lines=end - first + 1,
-                    overload=any(_is_overload(decorator) for decorator in stmt.decorator_list),
+                    overload=id(stmt) in self.overloads,
                 )
             )
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import stat
 import tempfile
 import tokenize
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import TextIO
 
 import pytest
 
-from slopscope import cli, composition
+from slopscope import cli, composition, composition_baseline
 
 
 def write(root: Path, relative_path: str, text: str) -> None:
@@ -609,7 +610,7 @@ def test_excessively_nested_baseline_exits_2_without_writes(
         def fail_decode(_handle: object) -> object:
             raise RecursionError("decoder detail must not escape")
 
-        monkeypatch.setattr("slopscope.composition_baseline.json.load", fail_decode)
+        monkeypatch.setattr("slopscope.composition_baseline.json.loads", fail_decode)
 
     code, out, err = run_cli(
         [
@@ -708,3 +709,105 @@ def test_incomplete_analysis_preserves_snapshot(
     assert snapshot.read_text(encoding="utf-8") == out
     if previous is not None:
         assert snapshot.read_bytes() != previous
+
+
+def test_semantic_recursion_preserves_snapshot_and_continues(tmp_path: Path) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    previous_baseline = baseline.read_bytes()
+    snapshot.write_bytes(b"previous snapshot")
+    write(repository, "src/deep.py", "import logging\nx = logging" + ".a" * 1300 + "()\n")
+    code, out, err = run_cli(options + ["--baseline", str(baseline), "--snapshot", str(snapshot)])
+    assert code == 1
+    assert "src/deep.py" in err
+    assert "Traceback" not in err
+    data = json.loads(out)
+    assert [row["path"] for row in data["failures"]] == ["src/deep.py"]
+    assert data["total"]["files"] == 2
+    assert baseline.read_bytes() == previous_baseline
+    assert snapshot.read_bytes() == b"previous snapshot"
+
+
+@pytest.mark.parametrize("mode", [stat.S_IFIFO, stat.S_IFCHR, stat.S_IFDIR])
+def test_baseline_open_descriptor_must_be_regular(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: int
+) -> None:
+    path = tmp_path / "baseline.json"
+    path.write_bytes(b"{}")
+    real_open = os.open
+    opened: list[int] = []
+
+    def open_file(path: Path, flags: int) -> int:
+        assert flags & getattr(os, "O_NONBLOCK", 0) == getattr(os, "O_NONBLOCK", 0)
+        descriptor = real_open(path, flags)
+        opened.append(descriptor)
+        return descriptor
+
+    def special_file(descriptor: int) -> os.stat_result:
+        assert descriptor == opened[0]
+        return os.stat_result((mode, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(os, "fstat", special_file)
+    with pytest.raises(composition_baseline.BaselineError, match="must be a regular file"):
+        composition_baseline.load_baseline(
+            path, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(OSError):
+        os.read(opened[0], 1)
+    assert path.read_bytes() == b"{}"
+
+
+@pytest.mark.parametrize("grew_after_stat", [False, True])
+def test_baseline_byte_limit_preserves_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grew_after_stat: bool
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    baseline.write_bytes(b" " * 64 + b"{}")
+    snapshot.write_bytes(b"previous snapshot")
+    monkeypatch.setattr(composition_baseline, "MAX_BASELINE_BYTES", 64, raising=False)
+    if grew_after_stat:
+        monkeypatch.setattr(
+            os, "fstat", lambda fd: os.stat_result((stat.S_IFREG, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        )
+    code, out, err = run_cli(
+        [str(repository), "--composition", "--baseline", str(baseline), "--snapshot", str(snapshot)]
+    )
+    assert code == 2
+    assert out == ""
+    assert "exceeds 64 bytes" in err
+    assert baseline.read_bytes() == b" " * 64 + b"{}"
+    assert snapshot.read_bytes() == b"previous snapshot"
+
+
+def test_baseline_limit_is_inclusive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    assert run_cli([str(repository), "--composition", "--snapshot", str(baseline)])[0] == 0
+    monkeypatch.setattr(composition_baseline, "MAX_BASELINE_BYTES", baseline.stat().st_size)
+    code, out, err = run_cli([str(repository), "--composition", "--baseline", str(baseline)])
+    assert code == 0
+    assert err == ""
+
+
+@pytest.mark.parametrize("action", ["--seed-allowlist", "--update-allowlist"])
+def test_semantic_recursion_prevents_allowlist_mutation(tmp_path: Path, action: str) -> None:
+    repository = make_repository(tmp_path)
+    write(repository, "src/deep.py", "import logging\nx = logging" + ".a" * 1300 + "()\n")
+    allowlist = repository / "size-limits.json"
+    if action == "--update-allowlist":
+        allowlist.write_bytes(b'{"functions": {"old.py::old": 999}}')
+    previous = allowlist.read_bytes() if allowlist.exists() else None
+    code, out, err = run_cli([str(repository), "--size-limits", action])
+    assert code == 2
+    assert "fail to parse" in err
+    assert "Traceback" not in err
+    if previous is None:
+        assert not allowlist.exists()
+    else:
+        assert allowlist.read_bytes() == previous

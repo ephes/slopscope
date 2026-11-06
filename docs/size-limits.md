@@ -45,8 +45,13 @@ Allowlist keys identify units by path, relative to the analyzed project root:
 - Functions and classes: `path::Qualified.name`, for example `src/pkg/views.py::Panel.refresh`. Nested functions and
   classes are dotted (`Outer.method.helper`). A definition inside an `if`, `try`, `with`, or loop block keeps the
   enclosing prefix, as if the block were not there.
-- Functions decorated with `@overload` (by name, such as `overload` or `typing.overload`) are type stubs and are
-  skipped, so the implementation keeps its plain name.
+- Functions whose decorator resolves through imports to `typing.overload` or `typing_extensions.overload`
+  are skipped, so the implementation keeps its plain name. Qualified imports and aliases are supported.
+  Unrelated decorators named `overload`, decorator calls, and shadowed or ambiguous bindings count normally.
+  Resolution is conservative within each scope: any assignment, deletion, parameter, or other rebinding of the
+  imported name invalidates its exemption throughout that scope, regardless of statement order.
+  Side effects from calls and rebinding from other scopes (including `global`/`nonlocal` assignments) are
+  not propagated into the affected scope. Dynamic rebinding cannot be resolved statically.
 - A name that repeats in the same file, such as a property getter and setter or two conditional definitions, gets
   `#2`, `#3`, and so on in source order: `Box.size`, `Box.size#2`.
 - Test files: the path alone, for example `tests/test_views.py`.

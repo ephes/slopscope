@@ -8,6 +8,16 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Resolve size-limit overload exemptions through scoped `typing`/`typing_extensions` imports, including aliases.
+  Custom, shadowed, and ambiguous decorators count normally. Analyzer metadata advances to version 2; the
+  composition JSON schema remains version 4 and structural line counts are unchanged.
+- Report token/semantic traversal recursion and memory exhaustion as per-file analysis failures, preserving
+  snapshots and allowlists while continuing independent files.
+- Limit composition baseline input to regular files of at most 16 MiB, validating the opened descriptor and
+  bounding the read before JSON decoding. Regular-file symlinks remain supported; refusals preserve outputs.
+- Build and smoke both distributions on Python 3.11 and 3.13 in CI, checking both installed commands without
+  Rich or source-tree imports against a synthetic fixture.
+
 - Serialize allowlist seed/update reads, planning, and publication with OS-held per-target locks, including
   multi-project runs. Concurrent updates cannot restore a larger baseline; concurrent seeds publish once.
   Report mode stays read-only. Mutation locks leave persistent private sibling `.lock` files.

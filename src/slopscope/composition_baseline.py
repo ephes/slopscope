@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,8 @@ from slopscope.report import (
     CompositionReport,
     CompositionScopeDelta,
 )
+
+MAX_BASELINE_BYTES = 16 * 1024 * 1024
 
 SINGLE_REPORT_TYPE = "composition"
 PROJECTS_REPORT_TYPE = "composition_projects"
@@ -57,8 +61,18 @@ def load_baseline(
     """Load a snapshot and reject files that cannot be compared with this report shape."""
 
     try:
-        with path.open(encoding="utf-8") as handle:
-            data = json.load(handle)
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise BaselineError(f"baseline file {path} must be a regular file")
+            if info.st_size > MAX_BASELINE_BYTES:
+                raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
+            # The file can grow after fstat; bound the actual read too.
+            content = handle.read(MAX_BASELINE_BYTES + 1)
+            if len(content) > MAX_BASELINE_BYTES:
+                raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
+        data = json.loads(content.decode("utf-8"))
     except FileNotFoundError as exc:
         raise BaselineError(f"baseline file not found: {path}") from exc
     except OSError as exc:

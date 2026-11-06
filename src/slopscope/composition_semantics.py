@@ -230,6 +230,76 @@ class ImportMap:
         return any(in_modules(module, modules) for module in self.modules)
 
 
+def overload_functions(tree: ast.Module) -> frozenset[int]:
+    """Find typing overloads using scoped imports, refusing ambiguous/shadowed bindings.
+
+    This is conservative static resolution: any rebinding in a scope invalidates that
+    name throughout the scope. Imports in child scopes never leak into their parent.
+    """
+
+    overloads: set[int] = set()
+    targets = {"typing.overload", "typing_extensions.overload"}
+
+    def visit_scope(
+        body: Sequence[ast.stmt],
+        inherited: ImportMap,
+        arguments: ast.arguments | None = None,
+        *,
+        class_scope: bool = False,
+    ) -> None:
+        nodes: list[ast.AST] = []
+        pending: list[ast.AST] = list(body)
+        while pending:
+            node = pending.pop()
+            nodes.append(node)
+            if not isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
+                pending.extend(ast.iter_child_nodes(node))
+        imports = ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom))
+        if any(
+            isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names) for n in nodes
+        ):
+            inherited = ImportMap(())
+            imports = ImportMap(())
+        bindings = ImportMap(())
+        bindings.names = {**inherited.names, **imports.names}
+        shadowed: set[str] = set()
+        for node in nodes:
+            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef)):
+                shadowed.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+                shadowed.add(node.id)
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+                name = dotted_name(node)
+                if name is not None:
+                    shadowed.add(name.split(".", 1)[0])
+            elif (
+                isinstance(node, ast.ExceptHandler)
+                and node.name
+                or isinstance(node, ast.MatchAs | ast.MatchStar)
+                and node.name
+            ):
+                shadowed.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                shadowed.add(node.rest)
+        if arguments is not None:
+            shadowed.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
+        for name in shadowed:
+            bindings.names.pop(name, None)
+        for node in nodes:
+            if isinstance(node, _FUNCTION_TYPES):
+                if any(
+                    (resolved := bindings.resolve(decorator)) and resolved <= targets
+                    for decorator in node.decorator_list
+                ):
+                    overloads.add(id(node))
+                visit_scope(node.body, inherited if class_scope else bindings, node.args)
+            elif isinstance(node, ast.ClassDef):
+                visit_scope(node.body, inherited if class_scope else bindings, class_scope=True)
+
+    visit_scope(tree.body, ImportMap(()))
+    return frozenset(overloads)
+
+
 def dotted_name(node: ast.AST) -> str | None:
     """Return ``a.b.c`` for a chain of names and attributes, or ``None``."""
 
