@@ -12,8 +12,9 @@ import dataclasses
 import json
 import os
 import stat
+import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from slopscope import classify, composition
@@ -166,6 +167,48 @@ def write_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> N
                 temporary.unlink(missing_ok=True)
 
 
+@contextlib.contextmanager
+def allowlist_locks(paths: Sequence[Path], *, action: str) -> Iterator[None]:
+    """Hold per-target OS locks across read/plan/publish; reports create no locks."""
+
+    if action == REPORT:
+        yield
+        return
+    targets = sorted({path.resolve() for path in paths})
+    with contextlib.ExitStack() as stack:
+        for target in targets:
+            stack.enter_context(_allowlist_lock(target))
+        yield
+
+
+@contextlib.contextmanager
+def _allowlist_lock(target: Path) -> Iterator[None]:
+    # Keep the sibling file: unlinking it would let waiters lock different inodes.
+    lock = target.with_name(f".{target.name}.lock")
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NONBLOCK", 0), 0o600)
+    except OSError as exc:
+        raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
+    try:
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise SizeLimitsError(f"allowlist lock {lock} must be a regular file")
+            if sys.platform == "win32":
+                import msvcrt
+
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+        except OSError as exc:
+            raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def check(
     root: Path,
     *,
@@ -179,18 +222,19 @@ def check(
 ) -> SizeLimitsReport:
     """Measure a project, apply ``action`` to its allowlist, and report the four groups."""
 
-    report, pending = plan(
-        root,
-        allowlist_path=allowlist_path,
-        settings=settings,
-        action=action,
-        excluded_paths=excluded_paths,
-        include_globs=include_globs,
-        source_dirs=source_dirs,
-        test_dirs=test_dirs,
-    )
-    if pending is not None:
-        write_allowlist(allowlist_path, pending)
+    with allowlist_locks([allowlist_path], action=action):
+        report, pending = plan(
+            root,
+            allowlist_path=allowlist_path,
+            settings=settings,
+            action=action,
+            excluded_paths=excluded_paths,
+            include_globs=include_globs,
+            source_dirs=source_dirs,
+            test_dirs=test_dirs,
+        )
+        if pending is not None:
+            write_allowlist(allowlist_path, pending)
     return report
 
 
@@ -208,7 +252,8 @@ def plan(
     """Measure and validate everything without writing.
 
     Returns the report and, for seed and update, the allowlist to write. Every refusal is raised
-    here, so a caller can plan several projects before writing any of them.
+    here, so a caller can plan several projects before writing any of them. Mutation callers must
+    hold ``allowlist_locks`` across all planning and publication, or use ``check``.
     """
 
     loaded = load_allowlist(allowlist_path)

@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Serialize allowlist seed/update reads, planning, and publication with OS-held per-target locks, including
+  multi-project runs. Concurrent updates cannot restore a larger baseline; concurrent seeds publish once.
+  Report mode stays read-only. Mutation locks leave persistent private sibling `.lock` files.
+
 - Limit allowlist input to regular files of at most 16 MiB, validating the opened descriptor before a bounded
   read. Named pipes are refused without waiting for a writer; regular-file symlinks remain supported.
 

@@ -108,6 +108,19 @@ exits 1.
   in one project leaves all of them unchanged. Seeding or updating is refused when two projects resolve to the same
   allowlist file.
 
+Seed and update hold an OS lock from the allowlist read through planning and atomic publication.
+Concurrent updates re-read the latest baseline before measuring, so a later update cannot restore a
+larger size; concurrent seeds admit only the first publisher. Multi-project mutations acquire all
+locks in sorted resolved-target order before planning any project. Report mode remains read-only.
+Locks use persistent sibling files named `.<allowlist-name>.lock`, created with mode 0600; do not
+delete these files while mutations may be running. Mutations can create these files and their parent
+directories even if planning later refuses the operation (for example, updating a missing allowlist).
+Add `.size-limits.json.lock` to your project's `.gitignore` when using the default allowlist path. The OS releases a lock when its process exits,
+including interruption. Lock acquisition failures return exit code 2. On Windows, the OS lock call
+retries for about 10 seconds before failing if the target remains busy. These advisory locks
+coordinate slopscope mutations on filesystems supporting OS locks; manual writers must coordinate
+separately. Multi-project publication is still atomic per file, not a multi-file transaction.
+
 ## Projects
 
 With `--project NAME` or `--project all`, each configured project is checked on its own, against its own allowlist at
