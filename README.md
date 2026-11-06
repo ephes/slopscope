@@ -267,7 +267,10 @@ The same commands are available through the `justfile` as `just test`, `just lin
 and Rich output from the development environment.
 
 GitHub Actions runs the same four checks (`.github/workflows/ci.yml`) on every push and pull request, against the
-locked dependencies on Python 3.11 and 3.13. The workflow has read-only repository permissions and uses no secrets.
+locked dependencies on Python 3.11 and 3.13. The workflow also builds the wheel and sdist, installs each into a separate environment without Rich, and
+runs both published commands from a temporary directory against a synthetic Python fixture. It checks help
+and Python-engine JSON counts without importing the checkout. The workflow has read-only repository
+permissions and uses no secrets.
 
 Build the local package without publishing:
 
@@ -275,6 +278,7 @@ Build the local package without publishing:
 uv build
 uv run python -m zipfile -l dist/slopscope-*.whl
 uv run python -m tarfile -l dist/slopscope-*.tar.gz
+uv run python scripts/smoke_distributions.py dist/*.whl dist/*.tar.gz
 rm -rf dist
 ```
 

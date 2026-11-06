@@ -54,3 +54,7 @@ jobs:
         run: uv run --locked ruff format --check .
       - name: Typecheck (just typecheck)
         run: uv run --locked mypy
+      - name: Build wheel and sdist
+        run: uv build
+      - name: Smoke isolated installed distributions
+        run: uv run --locked python scripts/smoke_distributions.py dist/*.whl dist/*.tar.gz

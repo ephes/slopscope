@@ -480,3 +480,92 @@ def test_allowlist_read_follows_regular_file_symlink(tmp_path: Path) -> None:
         "classes": {},
         "test_files": {},
     }
+
+
+@pytest.mark.parametrize(
+    ("imports", "decorator"),
+    [
+        ("def overload(fn): return fn", "overload"),
+        ("import custom", "custom.overload"),
+        ("from custom import overload", "overload"),
+        ("from typing import overload\noverload = lambda fn: fn", "overload"),
+        ("import typing\ntyping.overload = lambda fn: fn", "typing.overload"),
+        ("from typing import overload\nfrom custom import overload", "overload"),
+        ("from .typing import overload", "overload"),
+        ("from typing import overload\nfrom custom import *", "overload"),
+        ("from typing import overload", "overload()"),
+    ],
+)
+def test_unresolved_or_shadowed_overload_is_an_offender(
+    tmp_path: Path, imports: str, decorator: str
+) -> None:
+    write(
+        tmp_path, "src/app.py", imports + f"\n@{decorator}\ndef large():\n    x = 1\n    return x\n"
+    )
+    report = run(tmp_path)
+    assert any(row.key == "src/app.py::large" for row in report.over_limit)
+
+
+@pytest.mark.parametrize(
+    "imports,decorator",
+    [
+        ("from typing import overload as stub", "stub"),
+        ("import typing as t", "t.overload"),
+        ("from typing_extensions import overload as stub", "stub"),
+        ("import typing_extensions as t", "t.overload"),
+    ],
+)
+def test_typing_overload_aliases_remain_exempt(
+    tmp_path: Path, imports: str, decorator: str
+) -> None:
+    write(
+        tmp_path, "src/app.py", imports + f"\n@{decorator}\ndef large():\n    x = 1\n    return x\n"
+    )
+    assert measure(tmp_path)["functions"] == {}
+
+
+def test_overload_bindings_are_scoped(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "src/app.py",
+        """
+        from typing import overload
+        @overload
+        def genuine(): ...
+        def shadowed(overload):
+            @overload
+            def large():
+                x = 1
+                return x
+        def imported():
+            from typing_extensions import overload as stub
+            @stub
+            def genuine(): ...
+        """,
+    )
+    functions = measure(tmp_path)["functions"]
+    assert "src/app.py::genuine" not in functions
+    assert "src/app.py::imported.genuine" not in functions
+    assert functions["src/app.py::shadowed.large"] == 4
+
+
+def test_class_imports_are_not_visible_in_method_bodies(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "src/app.py",
+        """
+        import custom as t
+        class Example:
+            import typing as t
+            @t.overload
+            def genuine(self): ...
+            def method(self):
+                @t.overload
+                def large():
+                    x = 1
+                    return x
+        """,
+    )
+    functions = measure(tmp_path)["functions"]
+    assert "src/app.py::Example.genuine" not in functions
+    assert functions["src/app.py::Example.method.large"] == 4
