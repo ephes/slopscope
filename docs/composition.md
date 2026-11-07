@@ -409,6 +409,8 @@ Comparison rules:
   reported as a warning but stays comparable.
 - Deltas are computed for `total`, `source`, `tests`, and `other`, for files, physical, code, statements, continuation
   lines, duplicated lines, and every category, tag, marker, construct, and test placement.
+- Plain and Rich output show unknown deltas as `-`, known zero as `+0`, and signed changes,
+  preserving comparison warnings in both formats.
 - Plain and Rich output show a Changes Since Baseline table first. It always lists the headline metrics and lists
   every other metric that changed in any scope.
 - In JSON, `baseline` is `null` without `--baseline`. Otherwise it holds `path`, `analyzer_version`,
@@ -473,3 +475,15 @@ In JSON, `churn` is `null` without `--churn`. Otherwise it holds `ref`, `months`
   about 5 seconds, so there is no parallel mode.
 - Duplicate detection finds exact token copies that start at a line start in every copy. Copies with renamed names or
   changed literals, and copies that start mid-line in one file, are not found.
+
+## Rendering checks
+
+Plain and Rich reports preserve literal paths and diagnostics, including bracketed filenames.
+Rich retains explicit table styles; it does not interpret labels as markup. The dependency-free
+plain fallback remains available. Human duplicate tables list at most five locations per block,
+then state how many more were omitted; JSON retains every occurrence. Monthly churn shows signed
+net totals and source/test/other nets, including zero months, or the reason it was skipped.
+
+`tests/test_composition_render.py` checks these boundaries and comparable/incomparable baseline
+warnings with synthetic report data. Run `uv run --extra rich pytest tests/test_composition_render.py`
+to include actual Rich rendering alongside plain text and structured-data assertions.

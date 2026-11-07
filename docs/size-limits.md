@@ -184,3 +184,14 @@ Failed writes leave the previous baseline intact and remove the temporary file. 
 permissions are preserved, and symlinks continue to point at the updated target. New allowlists use
 mode 0600 to keep temporary and final contents private by default; use chmod if other local users
 need access. Cleanup is best effort if the filesystem also refuses temporary-file deletion.
+
+## Rendering checks
+
+Plain and Rich reports preserve literal unit paths and diagnostics, including bracketed filenames.
+Rich uses explicit table styles rather than interpreting labels as markup. Without Rich, output
+falls back to plain text.
+
+`tests/test_size_limits_render.py` checks all seven entry groups in JSON and the report/seed/update
+human tables, with distinct recorded/current sizes, signed deltas, missing sizes and reasons, and
+failure-only reports. Run it with `uv run --extra rich pytest tests/test_size_limits_render.py`
+to exercise actual Rich rendering as well as plain text and JSON.

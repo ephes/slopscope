@@ -301,6 +301,9 @@ def render_size_limits_rich(report: RenderableSizeLimitsReport, *, color: bool =
         color_system="standard",
         width=120,
         legacy_windows=False,
+        # Repository labels and diagnostics are literal; styles are supplied explicitly.
+        markup=False,
+        emoji=False,
     )
     if isinstance(report, MultiProjectSizeLimitsReport):
         console.print(text_class("Slopscope Size Limits (projects)", style="bold blue"))
