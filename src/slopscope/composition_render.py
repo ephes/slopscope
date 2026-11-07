@@ -140,6 +140,9 @@ def render_composition_rich(report: RenderableCompositionReport, *, color: bool 
         color_system="standard",
         width=120,
         legacy_windows=False,
+        # Repository labels and diagnostics are literal; styles are supplied explicitly.
+        markup=False,
+        emoji=False,
     )
 
     if isinstance(report, MultiProjectCompositionReport):

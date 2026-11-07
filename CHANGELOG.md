@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Render size-limit and composition labels and diagnostics literally in Rich tables, including
+  bracketed filenames, while retaining program-supplied styles and the dependency-free fallback.
+- Protect size-limit state columns, unknown baseline deltas and warnings, duplicate location
+  truncation, and signed monthly churn with focused synthetic renderer regressions.
+
 - Validate churn history framing, month markers, counters, and rename operands; malformed history
   skips the whole optional churn result instead of silently publishing partial or zero totals.
 - Bound each churn Git command to 16 MiB of combined stdout/stderr, with 64 KiB reads and bounded
