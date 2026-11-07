@@ -162,9 +162,7 @@ def discover_files(
         return [path for path in selected if not _has_source_symlink(root, path)]
     return filter_included_paths(
         filter_excluded_paths(
-            discover_filesystem_files(
-                root, pruned_dir_names=_single_segment_excludes(excluded_paths_tuple)
-            ),
+            discover_filesystem_files(root, pruned_dir_names=excluded_paths_tuple),
             excluded_path_segments=excluded_paths_tuple,
         ),
         include_globs=include_globs,
@@ -246,11 +244,16 @@ def discover_filesystem_files(
     pruned_names = set(pruned_dir_names)
     files: list[Path] = []
 
-    for current, dirnames, filenames in os.walk(root):
+    def traversal_error(error: OSError) -> None:
+        affected = repr(str(error.filename or root))[:240]
+        raise CountingError(f"incomplete analysis: could not traverse {affected}") from error
+
+    for current, dirnames, filenames in os.walk(root, onerror=traversal_error):
         dirnames[:] = sorted(
             name
             for name in dirnames
-            if name not in pruned_names and not (Path(current) / name).is_symlink()
+            if not is_excluded_path((Path(current) / name).relative_to(root), pruned_names)
+            and not (Path(current) / name).is_symlink()
         )
         current_path = Path(current)
         for filename in sorted(filenames):
@@ -413,7 +416,3 @@ def _contains_subpath(parts: tuple[str, ...], subpath: tuple[str, ...]) -> bool:
         parts[index : index + len(subpath)] == subpath
         for index in range(len(parts) - len(subpath) + 1)
     )
-
-
-def _single_segment_excludes(paths: Iterable[str]) -> tuple[str, ...]:
-    return tuple(parts[0] for path in paths if len(parts := _path_parts(path)) == 1)

@@ -195,7 +195,7 @@ def run(
 
     try:
         return _run(argv, stdout=stdout, stderr=stderr)
-    except (fallback.GitDiscoveryError, fallback.CountingError) as exc:
+    except (fallback.GitDiscoveryError, fallback.CountingError, cloc.ClocParseError) as exc:
         print(f"slopscope: {exc}", file=stderr if stderr is not None else sys.stderr)
         return 2
 
