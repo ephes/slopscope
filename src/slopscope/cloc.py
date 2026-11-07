@@ -99,64 +99,78 @@ def run_file_summary(path: Path | str, executable: str = "cloc") -> ClocResult:
     return run_command(build_file_summary_command(path, executable=executable))
 
 
-def parse_language_summary_csv(output: str) -> list[LanguageRow]:
-    """Parse cloc CSV language summary output, skipping malformed rows."""
+class ClocParseError(ValueError):
+    """A successful cloc process returned an unusable CSV report."""
 
-    reader = csv.DictReader(io.StringIO(output, newline=""))
+
+def _csv_rows(output: str) -> list[dict[str, str | None]]:
+    reader = csv.DictReader(io.StringIO(output, newline=""), strict=True)
+    try:
+        if reader.fieldnames is not None and not {"language", "blank", "comment", "code"}.issubset(
+            reader.fieldnames
+        ):
+            raise ClocParseError("invalid cloc CSV: missing required columns")
+        return list(reader)
+    except csv.Error as exc:
+        raise ClocParseError(f"invalid cloc CSV near line {reader.line_num}: parser error") from exc
+
+
+def parse_language_summary_csv(output: str) -> list[LanguageRow]:
+    """Parse a complete cloc language report, refusing invalid records."""
+
     rows: list[LanguageRow] = []
-    for row in reader:
-        parsed = _parse_language_row(row)
-        if parsed is not None:
-            rows.append(parsed)
+    for index, row in enumerate(_csv_rows(output), start=2):
+        try:
+            rows.append(_parse_language_row(row))
+        except ValueError as exc:
+            raise ClocParseError(f"invalid cloc CSV row {index}: language or counters") from exc
     return rows
 
 
 def parse_file_summary_csv(output: str) -> list[FileRow]:
-    """Parse cloc CSV file-level output, skipping malformed and non-file rows."""
+    """Parse a complete cloc file report, excluding only recognized summary rows."""
 
-    reader = csv.DictReader(io.StringIO(output, newline=""))
     rows: list[FileRow] = []
-    for row in reader:
-        parsed = _parse_file_row(row)
+    for index, row in enumerate(_csv_rows(output), start=2):
+        try:
+            parsed = _parse_file_row(row)
+        except ValueError as exc:
+            raise ClocParseError(
+                f"invalid cloc CSV row {index}: file identity or counters"
+            ) from exc
         if parsed is not None:
             rows.append(parsed)
     return rows
 
 
-def _parse_language_row(row: dict[str, str | None]) -> LanguageRow | None:
+def _parse_language_row(row: dict[str, str | None]) -> LanguageRow:
     language = _clean(row.get("language"))
-    if not language:
-        return None
-
-    try:
-        return LanguageRow(
-            language=language,
-            # cloc summary CSV has used both "filename" and "files" for file counts.
-            files=_parse_int(row.get("filename") or row.get("files")),
-            blank=_parse_int(row.get("blank")),
-            comment=_parse_int(row.get("comment")),
-            code=_parse_int(row.get("code")),
-        )
-    except ValueError:
-        return None
+    if not language or None in row:
+        raise ValueError("invalid language record")
+    return LanguageRow(
+        language=language,
+        # cloc summary CSV has used both "filename" and "files" for file counts.
+        files=_parse_int(row.get("filename") or row.get("files")),
+        blank=_parse_int(row.get("blank")),
+        comment=_parse_int(row.get("comment")),
+        code=_parse_int(row.get("code")),
+    )
 
 
 def _parse_file_row(row: dict[str, str | None]) -> FileRow | None:
     language = _clean(row.get("language"))
+    if language == "SUM":
+        return None
     path = row.get("filename")
-    if not language or language == "SUM" or not path:
-        return None
-
-    try:
-        return FileRow(
-            language=language,
-            path=path,
-            blank=_parse_int(row.get("blank")),
-            comment=_parse_int(row.get("comment")),
-            code=_parse_int(row.get("code")),
-        )
-    except ValueError:
-        return None
+    if not language or not path or None in row:
+        raise ValueError("invalid file record")
+    return FileRow(
+        language=language,
+        path=path,
+        blank=_parse_int(row.get("blank")),
+        comment=_parse_int(row.get("comment")),
+        code=_parse_int(row.get("code")),
+    )
 
 
 def _clean(value: str | None) -> str:
@@ -169,4 +183,6 @@ def _parse_int(value: str | None) -> int:
     cleaned = _clean(value)
     if not cleaned:
         raise ValueError("missing integer")
+    if not cleaned.isascii() or not cleaned.isdecimal():
+        raise ValueError("invalid nonnegative integer")
     return int(cleaned)

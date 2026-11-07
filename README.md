@@ -92,6 +92,9 @@ Use `--engine python` for physical-line counts if cloc takes too long.
 Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
 The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
 are not preserved end to end.
+Malformed cloc records, missing or invalid nonnegative counters, and CSV parser failures
+return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
+Empty CSV reports and the file report's `SUM` row remain supported by the parser.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
 falls back to plain text. Install the `rich` extra (`slopscope[rich]`, available since `0.2.0a1`) for colored
@@ -161,8 +164,11 @@ denied), Python reports and physical-line profiles fail with exit code 2 and an 
 naming the file, without a report or total. The check is limited to that case: tracked paths that are missing
 from the working tree (working-tree deletions, sparse checkouts, files removed during the run) and paths that are
 not regular files (directories, submodule entries, special files) are still skipped without a diagnostic, as are
-unknown languages and files excluded by configuration. Files that discovery itself omits are not reported either.
-The cloc engine and composition are unchanged.
+unknown languages and files excluded by configuration. The cloc engine and composition retain their own file-read error handling.
+
+Filesystem traversal errors fail Python reports, profiles, composition, and size-limits with
+exit code 2 and a bounded affected-path diagnostic, preserving snapshots and allowlists.
+Deliberately excluded directories remain pruned.
 
 Human-readable output defaults to `--format rich`. Rich is optional: when it is not importable, `slopscope` falls
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for

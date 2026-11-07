@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Fail filesystem discovery visibly on traversal errors across Python reports, profiles, composition,
+  and size-limits, preserving existing outputs and deliberate directory pruning.
+- Reject malformed cloc CSV records and invalid nonnegative counters with a bounded diagnostic and
+  exit code 2 instead of publishing partial totals or exposing parser exceptions.
+
 - Resolve size-limit overload exemptions through scoped `typing`/`typing_extensions` imports, including aliases.
   Custom, shadowed, and ambiguous decorators count normally. Analyzer metadata advances to version 2; the
   composition JSON schema remains version 4 and structural line counts are unchanged.

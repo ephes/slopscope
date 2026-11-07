@@ -71,7 +71,9 @@ an unknown field; use `0.2.0a1` or later.
 Git file discovery has a 30-second execution timeout plus bounded cleanup (up to 6 extra seconds on POSIX,
 11 on Windows). A discovery timeout returns exit code 2 with the root path and no report, snapshot, or allowlist
 write; partial output is discarded without filesystem fallback. Missing/nonzero Git retains filesystem fallback.
-Windows process-tree termination is best-effort and untested. See [README](../README.md) for discovery details.
+Windows process-tree termination is best-effort and untested. Filesystem traversal errors also return exit code 2 with a bounded path diagnostic,
+preserving snapshots and allowlists. Deliberately excluded directories stay pruned.
+See [README](../README.md) for discovery details.
 
 
 The composition report uses the same discovery as the Python engine: `git ls-files` inside a Git repository, a

@@ -111,21 +111,13 @@ def test_parse_language_summary_csv_accepts_files_column() -> None:
     ]
 
 
-def test_parse_language_summary_csv_skips_malformed_rows() -> None:
-    output = """language,filename,blank,comment,code
-Python,2,10,4,90
-,1,1,1,1
-JSON,not-an-int,0,0,10
-Text,1,,0,10
-SUM,2,10,4,100
-"""
-
-    rows = cloc.parse_language_summary_csv(output)
-
-    assert rows == [
-        LanguageRow(language="Python", files=2, blank=10, comment=4, code=90),
-        LanguageRow(language="SUM", files=2, blank=10, comment=4, code=100),
-    ]
+@pytest.mark.parametrize(
+    "record", [",app.py,1,1,1", "Python,,1,1,1", "Python,1,0,0,bad", "Python,1,0,0"]
+)
+def test_parse_language_summary_csv_rejects_malformed_rows(record: str) -> None:
+    output = "language,filename,blank,comment,code\n" + record + "\n"
+    with pytest.raises(cloc.ClocParseError, match="invalid cloc CSV"):
+        cloc.parse_language_summary_csv(output)
 
 
 @pytest.mark.parametrize(
@@ -170,23 +162,13 @@ def test_parse_file_summary_csv_accepts_cloc_metadata_column() -> None:
     ]
 
 
-def test_parse_file_summary_csv_skips_malformed_rows() -> None:
-    output = """language,filename,blank,comment,code
-Python,src/slopscope/cli.py,2,3,40
-,src/unknown.py,1,1,1
-JSON,,1,1,1
-Text,docs/readme.txt,not-an-int,0,10
-YAML,config.yml,1,,10
-SUM,,3,4,60
-Markdown,README.md,4,0,20
-"""
-
-    rows = cloc.parse_file_summary_csv(output)
-
-    assert rows == [
-        FileRow(language="Python", path="src/slopscope/cli.py", blank=2, comment=3, code=40),
-        FileRow(language="Markdown", path="README.md", blank=4, comment=0, code=20),
-    ]
+@pytest.mark.parametrize(
+    "record", [",app.py,1,1,1", "Python,,1,1,1", "Python,1,0,0,bad", "Python,1,0,0"]
+)
+def test_parse_file_summary_csv_rejects_malformed_rows(record: str) -> None:
+    output = "language,filename,blank,comment,code\n" + record + "\n"
+    with pytest.raises(cloc.ClocParseError, match="invalid cloc CSV"):
+        cloc.parse_file_summary_csv(output)
 
 
 @pytest.mark.parametrize(
