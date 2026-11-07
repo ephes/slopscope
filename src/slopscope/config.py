@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope import classify
+
+MAX_CONFIG_BYTES = 1024 * 1024
 
 
 class ConfigError(Exception):
@@ -136,8 +140,22 @@ def load_config_from_pyproject(path: Path | str) -> SlopscopeConfig:
 
     config_path = Path(path)
     try:
-        with config_path.open("rb") as handle:
-            data = tomllib.load(handle)
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(config_path, flags), "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ConfigError(f"configuration file {config_path} must be a regular file")
+            if info.st_size > MAX_CONFIG_BYTES:
+                raise ConfigError(
+                    f"configuration file {config_path} exceeds {MAX_CONFIG_BYTES} bytes"
+                )
+            # The file may grow after fstat; bound the actual read as well.
+            content = handle.read(MAX_CONFIG_BYTES + 1)
+            if len(content) > MAX_CONFIG_BYTES:
+                raise ConfigError(
+                    f"configuration file {config_path} exceeds {MAX_CONFIG_BYTES} bytes"
+                )
+        data = tomllib.loads(content.decode("utf-8"))
     except FileNotFoundError as exc:
         raise ConfigError(f"configuration file not found: {config_path}") from exc
     except OSError as exc:
@@ -146,6 +164,8 @@ def load_config_from_pyproject(path: Path | str) -> SlopscopeConfig:
         raise ConfigError(f"configuration file {config_path} must be UTF-8") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {config_path}: {exc}") from exc
+    except RecursionError as exc:
+        raise ConfigError(f"configuration file {config_path}: TOML nesting is too deep") from exc
 
     tool = data.get("tool", {})
     if not isinstance(tool, dict):

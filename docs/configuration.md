@@ -36,6 +36,15 @@ slopscope --config path/to/pyproject.toml path/to/repository
 Configuration files must be UTF-8, including automatically discovered `pyproject.toml` files.
 Invalid encoding fails with a filename diagnostic and exit code 2, without a report or file contents.
 
+Loaded configuration must be a regular file of at most 1 MiB (1,048,576 bytes), including unrelated
+`pyproject.toml` sections. The opened descriptor is checked before a bounded read; named pipes are
+opened without waiting for a writer where nonblocking opens are supported, then refused. Symlinks to
+regular files remain supported. Oversized and special-file inputs fail with exit code 2 before
+analysis, without a report, snapshot, or allowlist write.
+TOML nesting that exhausts the decoder's recursion depth is also invalid configuration: it returns
+a concise filename diagnostic and exit code 2 before analysis or output writes, without a traceback
+or changing the process recursion limit. Shallow arrays and inline tables remain supported.
+
 When `--config` is supplied, the file must exist and must contain valid TOML. Invalid TOML, unknown fields, invalid
 field types, duplicate project or profile names, and conflicting language filters fail with a `slopscope:` error on
 stderr and exit code 2.

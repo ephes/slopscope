@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Report TOML decoder depth exhaustion as a concise configuration error with exit code 2,
+  preserving outputs and the process recursion limit.
+- Limit loaded configuration to regular files of at most 1 MiB, checking the opened descriptor
+  and bounding the actual read. Refuse special files and oversized inputs before analysis or output
+  writes; preserve UTF-8 TOML and symlinks to regular files.
+
 - Validate churn history framing, month markers, counters, and rename operands; malformed history
   skips the whole optional churn result instead of silently publishing partial or zero totals.
 - Bound each churn Git command to 16 MiB of combined stdout/stderr, with 64 KiB reads and bounded
