@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Validate churn history framing, month markers, counters, and rename operands; malformed history
+  skips the whole optional churn result instead of silently publishing partial or zero totals.
+- Bound each churn Git command to 16 MiB of combined stdout/stderr, with 64 KiB reads and bounded
+  process-group/tree and reader cleanup on overflow. Source analysis and snapshot policy are unchanged.
+
 - Fail filesystem discovery visibly on traversal errors across Python reports, profiles, composition,
   and size-limits, preserving existing outputs and deliberate directory pruning.
 - Reject malformed cloc CSV records and invalid nonnegative counters with a bounded diagnostic and

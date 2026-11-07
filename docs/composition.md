@@ -440,11 +440,18 @@ analyzed path.
   current one, and months without commits are listed with zeros.
 - Each churn Git command has a 30-second timeout. On expiry its process group (Windows: process tree) is
   terminated and churn is skipped with a concise notice; report analysis and its exit code are preserved.
-  Pipe draining after termination has a one-second timeout; if it expires, reading is abandoned without
-  closing potentially busy pipes. Windows process-tree termination is best-effort and has not been tested
+  Reader cleanup after termination has a one-second total timeout; if it expires, reading is abandoned
+  without closing potentially busy pipes from another thread. Windows process-tree termination is best-effort and has not been tested
   on Windows; a descendant may survive if tree termination fails.
-  KeyboardInterrupt and SystemExit during pipe draining propagate after process termination.
+  KeyboardInterrupt and SystemExit during reader cleanup propagate after process termination and reaping.
   A timed-out log is never retried; the fallback for unsupported Git options still applies.
+- Each churn Git command retains at most 16 MiB (16,777,216 bytes) of combined stdout and stderr,
+  read in 64 KiB chunks. Exceeding the budget terminates the owned process group/tree and skips churn
+  without a retry, through the same bounded cleanup as a timeout. Source analysis, snapshot success
+  policy, and the report exit code are unchanged.
+- Malformed Git history (invalid month markers or counters, missing NUL boundaries, or incomplete
+  rename operands) skips the entire churn result with a bounded category/record diagnostic. No partial
+  or fabricated zero history is published. Empty history and binary-file exclusions remain supported.
 - Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
   `slopscope: skipping churn:` notice, and the exit code does not change.
 
