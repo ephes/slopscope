@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
+import re
 import signal
 import subprocess
+import threading
+import time
 from collections.abc import Sequence
 from datetime import date, timedelta
 from pathlib import Path
+from typing import BinaryIO
 
 from slopscope import classify, fallback
 from slopscope.report import CompositionChurn, CompositionChurnMonth
@@ -17,6 +22,14 @@ DEFAULT_REF = "HEAD"
 DEFAULT_MONTHS = 12
 MAX_MONTHS = 1200
 GIT_TIMEOUT_SECONDS = 30.0
+MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024
+_CAPTURE_CHUNK_BYTES = 64 * 1024
+
+
+class GitCaptureError(RuntimeError):
+    """Git output could not be captured completely within the resource budget."""
+
+
 # Commits are bucketed by their own time zone, which can be up to about a day away from the
 # caller's; the Git-side cutoff keeps a margin and months are filtered exactly afterwards.
 _CUTOFF_MARGIN = timedelta(days=2)
@@ -91,12 +104,18 @@ def collect_churn(
 
     except subprocess.TimeoutExpired:
         return skipped(f"git timed out after {GIT_TIMEOUT_SECONDS:g} seconds")
+    except GitCaptureError as exc:
+        return skipped(str(exc))
 
     first_month = since.strftime("%Y-%m")
     totals: dict[str, tuple[list[int], list[int]]] = {
         month: ([0, 0, 0], [0, 0, 0]) for month in _months(since, current)
     }
-    for month, relative_path, added, removed in parse_numstat(result.stdout):
+    try:
+        records = parse_numstat(result.stdout)
+    except ValueError as exc:
+        return skipped(f"malformed git history: {exc}")
+    for month, relative_path, added, removed in records:
         if month < first_month or month not in totals:
             continue
         if fallback.map_language(relative_path) != "Python":
@@ -132,7 +151,9 @@ def parse_numstat(output: bytes) -> list[tuple[str, str, int, int]]:
     Binary files (``-`` counts) are skipped.
     """
 
-    items = output.decode("utf-8", errors="surrogateescape").split("\0")
+    if output and not output.endswith(b"\0"):
+        raise ValueError("missing final NUL")
+    items = output.decode("utf-8", errors="surrogateescape").split("\0")[:-1]
     rows: list[tuple[str, str, int, int]] = []
     month = ""
     index = 0
@@ -142,24 +163,28 @@ def parse_numstat(output: bytes) -> list[tuple[str, str, int, int]]:
         if not item:
             continue
         if "\t" not in item:
-            if item.startswith("@"):
-                month = item[1:]
+            if not re.fullmatch(r"@[0-9]{4}-(?:0[1-9]|1[0-2])", item) or item[1:5] == "0000":
+                raise ValueError(f"invalid month marker at record {index}")
+            month = item[1:]
             continue
         fields = item.split("\t", 2)
-        if len(fields) != 3:
-            continue
+        if len(fields) != 3 or not month:
+            raise ValueError(f"invalid numeric record at record {index}")
         added, removed, relative_path = fields
         if not relative_path:
-            if index + 1 >= len(items):
-                break
+            if index + 1 >= len(items) or not items[index] or not items[index + 1]:
+                raise ValueError(f"incomplete rename at record {index}")
             relative_path = items[index + 1]
             index += 2
-        if added == "-" or removed == "-":
+        if added == removed == "-":
             continue
+        if not all(value.isascii() and value.isdecimal() for value in (added, removed)):
+            raise ValueError(f"invalid counters at record {index}")
         try:
-            rows.append((month, relative_path, int(added), int(removed)))
-        except ValueError:
-            continue
+            counts = int(added), int(removed)
+        except ValueError as exc:
+            raise ValueError(f"invalid counters at record {index}") from exc
+        rows.append((month, relative_path, *counts))
     return rows
 
 
@@ -177,9 +202,69 @@ def _git(
         )
     except OSError:
         return None
+    # Each reader retains only its share of one combined byte budget. Separate readers
+    # prevent a full stderr pipe from blocking stdout (and work on Windows too).
+    buffers = (bytearray(), bytearray())
+    failures: list[GitCaptureError] = []
+    lock = threading.Lock()
+    changed = threading.Event()
+    stopped = threading.Event()
+
+    def read_pipe(pipe: BinaryIO, target: bytearray) -> None:
+        try:
+            # read1 returns available pipe bytes without waiting to fill the chunk.
+            read = pipe.read1 if isinstance(pipe, io.BufferedReader) else pipe.read
+            while not stopped.is_set():
+                chunk = read(_CAPTURE_CHUNK_BYTES)
+                if not chunk:
+                    break
+                with lock:
+                    if stopped.is_set():
+                        break
+                    if len(buffers[0]) + len(buffers[1]) + len(chunk) > MAX_GIT_OUTPUT_BYTES:
+                        failures.append(
+                            GitCaptureError(f"git output exceeded {MAX_GIT_OUTPUT_BYTES} bytes")
+                        )
+                        stopped.set()
+                        changed.set()
+                        break
+                    target.extend(chunk)
+        except BaseException:
+            # Worker failures must never turn a truncated capture into success.
+            with lock:
+                failures.append(GitCaptureError("could not read git output"))
+                stopped.set()
+        finally:
+            # Only the reader closes its own pipe, after releasing its read lock.
+            with contextlib.suppress(OSError):
+                pipe.close()
+            changed.set()
+
+    assert process.stdout is not None and process.stderr is not None
+    threads = [
+        threading.Thread(target=read_pipe, args=(pipe, buffer), daemon=True)
+        for pipe, buffer in zip((process.stdout, process.stderr), buffers, strict=True)
+    ]
+    started: list[threading.Thread] = []
+    deadline = time.monotonic() + GIT_TIMEOUT_SECONDS
     try:
-        stdout, stderr = process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+        for thread in threads:
+            thread.start()
+            started.append(thread)
+        while any(thread.is_alive() for thread in started):
+            with lock:
+                if failures:
+                    raise failures[0]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, GIT_TIMEOUT_SECONDS)
+            changed.wait(min(remaining, 0.05))
+            changed.clear()
+        if failures:
+            raise failures[0]
+        process.wait(timeout=max(0, deadline - time.monotonic()))
     except BaseException:
+        stopped.set()
         if os.name == "posix":
             # Kill the group even if the wrapper has exited but a child still owns its pipes.
             with contextlib.suppress(OSError):
@@ -194,14 +279,19 @@ def _git(
                 )
         with contextlib.suppress(OSError):
             process.kill()
-        # Bound draining too: descendants may retain pipes after Git dies. On Windows,
-        # closing those pipes can block on a reader thread, so leave them alone on failure.
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            process.communicate(timeout=1)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=5)
+        # Bound reader cleanup too: a surviving descendant can retain a pipe. Never
+        # close a pipe from this thread while its reader might hold the read lock.
+        drain_deadline = time.monotonic() + 1
+        try:
+            for thread in started:
+                thread.join(timeout=max(0, drain_deadline - time.monotonic()))
+        finally:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
         raise
-    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(
+        process.args, process.returncode, bytes(buffers[0]), bytes(buffers[1])
+    )
 
 
 def _month_start(current: date, months_back: int) -> date:

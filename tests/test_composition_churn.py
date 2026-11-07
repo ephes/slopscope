@@ -336,7 +336,7 @@ def test_interrupted_git_kills_group_and_reaps(
     process.pid = 12345
     process.stdout = io.BytesIO()
     process.stderr = io.BytesIO()
-    process.communicate.side_effect = [KeyboardInterrupt, (b"", b"")]
+    process.wait.side_effect = [KeyboardInterrupt, 0]
     group_kill = Mock()
     monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="posix", killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
@@ -346,10 +346,9 @@ def test_interrupted_git_kills_group_and_reaps(
 
     group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
     process.kill.assert_called_once_with()
-    process.wait.assert_called_once_with(timeout=5)
-    assert not process.stdout.closed and not process.stderr.closed
-    assert process.communicate.call_count == 2
-    assert process.communicate.call_args.kwargs == {"timeout": 1}
+    assert process.wait.call_args.kwargs == {"timeout": 5}
+    assert process.stdout.closed and process.stderr.closed
+    process.communicate.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", ["missing", "timeout"])
@@ -363,7 +362,7 @@ def test_windows_tree_kill_failure_still_reaps_and_skips_churn(
     process.pid = 12345
     process.stdout = io.BytesIO()
     process.stderr = io.BytesIO()
-    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
+    process.wait.side_effect = [subprocess.TimeoutExpired("git", 30), 0]
     tree_kill = Mock(
         side_effect=FileNotFoundError("taskkill")
         if failure == "missing"
@@ -381,38 +380,51 @@ def test_windows_tree_kill_failure_still_reaps_and_skips_churn(
         ["taskkill", "/PID", "12345", "/T", "/F"], capture_output=True, check=False, timeout=5
     )
     process.kill.assert_called_once_with()
-    process.wait.assert_called_once_with(timeout=5)
-    assert not process.stdout.closed and not process.stderr.closed
-    assert process.communicate.call_count == 2
-    assert process.communicate.call_args.kwargs == {"timeout": 1}
+    assert process.wait.call_args.kwargs == {"timeout": 5}
+    assert process.stdout.closed and process.stderr.closed
+    process.communicate.assert_not_called()
 
 
 @pytest.mark.parametrize("platform", ["posix", "nt"])
 def test_long_running_git_cleanup_never_closes_busy_pipes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
+    import threading
     from types import SimpleNamespace
-    from unittest.mock import Mock, call
+    from unittest.mock import Mock
 
-    process = Mock()
-    process.pid = 12345
-    process.communicate.side_effect = subprocess.TimeoutExpired("git", 30)
-    # Windows reader threads can hold the pipe lock even after killing Git.
-    process.stdout.close.side_effect = AssertionError("blocking pipe close")
-    process.stderr.close.side_effect = AssertionError("blocking pipe close")
+    release = threading.Event()
+
+    class BusyPipe(io.BytesIO):
+        def __init__(self) -> None:
+            super().__init__()
+            self.finished = threading.Event()
+
+        def read(self, size: int | None = -1) -> bytes:
+            release.wait(5)
+            return b""
+
+        def close(self) -> None:
+            super().close()
+            self.finished.set()
+
+    stdout, stderr = BusyPipe(), BusyPipe()
+    process = Mock(pid=12345, stdout=stdout, stderr=stderr)
+    monkeypatch.setattr(composition_churn, "GIT_TIMEOUT_SECONDS", 0.05)
     monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=Mock()))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
     monkeypatch.setattr(subprocess, "run", Mock())
 
-    with pytest.raises(subprocess.TimeoutExpired):
-        composition_churn._git("git", tmp_path, ["log"])
-
-    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
-    process.kill.assert_called_once_with()
-    process.stdout.read.assert_not_called()
-    process.stderr.read.assert_not_called()
-    process.stdout.close.assert_not_called()
-    process.stderr.close.assert_not_called()
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            composition_churn._git("git", tmp_path, ["log"])
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=5)
+        process.communicate.assert_not_called()
+        assert not stdout.closed and not stderr.closed
+    finally:
+        release.set()
+        assert stdout.finished.wait(2) and stderr.finished.wait(2)
 
 
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
@@ -423,13 +435,18 @@ def test_git_timeout_drain_propagates_interruption(
     interruption: type[BaseException],
     platform: str,
 ) -> None:
+    import threading
     from types import SimpleNamespace
-    from unittest.mock import Mock, call
+    from unittest.mock import Mock
 
-    process = Mock()
-    process.pid = 12345
+    process = Mock(pid=12345, stdout=io.BytesIO(), stderr=io.BytesIO())
     interrupted = interruption("interrupted drain")
-    process.communicate.side_effect = [subprocess.TimeoutExpired("git", 30), interrupted]
+    process.wait.side_effect = [subprocess.TimeoutExpired("git", 30), 0]
+
+    def interrupt_join(self: threading.Thread, timeout: float | None = None) -> None:
+        raise interrupted
+
+    monkeypatch.setattr(threading.Thread, "join", interrupt_join)
     group_kill = Mock()
     monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
@@ -440,7 +457,8 @@ def test_git_timeout_drain_propagates_interruption(
         composition_churn.collect_churn(tmp_path, excluded_paths=EXCLUDES)
 
     assert caught.value is interrupted
-    assert process.communicate.call_args_list == [call(timeout=30), call(timeout=1)]
+    process.communicate.assert_not_called()
+    assert process.wait.call_args.kwargs == {"timeout": 5}
     process.kill.assert_called_once_with()
     if platform == "posix":
         group_kill.assert_called_once_with(process.pid, signal.SIGKILL)

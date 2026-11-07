@@ -242,6 +242,8 @@ file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapsho
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
+Malformed history or more than 16 MiB of combined output from any churn Git command skips optional
+churn with a diagnostic, preserving source analysis and snapshot success policy.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
 patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and
 `--top` cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr
