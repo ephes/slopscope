@@ -45,6 +45,7 @@ adjusts it:
 [tool.slopscope.composition]
 limit = 20
 min_duplicate_tokens = 80
+max_source_bytes = 16777216
 qt_modules = ["app.ui.qt"]
 logging_patterns = ["audit_log"]
 compat_markers = ["legacy", "fallback", "compat", "deprecated"]
@@ -56,6 +57,7 @@ churn_months = 24
 |---|---|---|
 | `limit` | Rows in the largest-item and duplicate lists. `--limit` overrides it. | 10 |
 | `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
+| `max_source_bytes` | Positive per-source byte ceiling, also used by size-limits, checked before decoding or parsing. | 16777216 (16 MiB) |
 | `qt_modules` | Extra modules treated as Qt, added to `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, and `qtpy`. Dotted names match the module and everything inside it, so a project's own Qt wrapper package can count. | none |
 | `logging_patterns` | Opt-in substrings: a call whose dotted function name contains one of them, such as `audit_log.write()` for `audit_log`, gets the `logging` tag. | none |
 | `compat_markers` | Words for the `compat` marker, replacing the defaults. An empty list turns the marker off. | `legacy`, `fallback`, `compat` |
@@ -92,13 +94,23 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
 - Files are classified as `source`, `tests`, or `other` and into areas with the same `source_dirs`, `test_dirs`, and
   `areas` rules as the default report.
 
-Each file is opened with `tokenize.open()`, which honors PEP 263 encoding declarations and a UTF-8 BOM. `\r\n` and
-`\r` line endings are read as `\n`.
+Discovery records each selected source's root, parent-directory, and regular-file identities. Reads
+open components relative to checked directory descriptors without following links below the selected
+root (the root itself may be a symlink). Files changed since admission, including regular-file
+replacements, are refused. Leaf opens are nonblocking and descriptors must be regular files before
+any bytes are read, so a substituted FIFO cannot wait for a writer. Platforms without
+descriptor-relative opening, `O_NOFOLLOW`, `O_DIRECTORY`, or `O_NONBLOCK` refuse source analysis.
+
+The opened file must fit `max_source_bytes` (16 MiB by default); the byte read is also bounded to
+the ceiling plus one byte to detect growth. These checks precede decoding, parsing, and tokenization.
+Encoding detection uses `tokenize.detect_encoding()` to honor PEP 263 declarations and a UTF-8 BOM;
+`\r\n` and `\r` line endings are normalized to `\n`.
 
 ## Failures
 
-A file that cannot be read (I/O error), decoded (bad bytes or an unknown encoding declaration), tokenized, or parsed
-(syntax error) is reported as a failure. Failures:
+A file that changed after discovery, exceeds the source byte ceiling, cannot be safely read (I/O error),
+decoded (bad bytes or an unknown encoding declaration), tokenized, or parsed (syntax error) is
+reported as a failure. Failures:
 
 - are printed to stderr as `slopscope: could not analyze PATH: ERROR`, so stdout stays valid JSON;
 - are listed in the report (a `Failures` section in plain and Rich output, `failures` in JSON);
@@ -306,6 +318,7 @@ file to keep a snapshot.
   "settings": {
     "language": "Python",
     "limit": 10,
+    "max_source_bytes": 16777216,
     "min_duplicate_tokens": 50,
     "qt_modules": ["PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"],
     "logging_patterns": [],
@@ -410,7 +423,8 @@ Comparison rules:
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
   JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
-- A different analyzer version, detector version, or counting setting (every `settings` entry except `limit`) prints a
+- A different analyzer version, detector version, or counting setting (every `settings` entry except
+  `language`, `limit`, and the admission-only `max_source_bytes`) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
   changed rules or settings alone. A different Python version is
   reported as a warning but stays comparable.

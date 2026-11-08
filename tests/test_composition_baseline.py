@@ -5,13 +5,14 @@ import json
 import os
 import stat
 import tempfile
-import tokenize
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO
 
 import pytest
 
-from slopscope import cli, composition, composition_baseline, composition_duplication
+from slopscope import _source, cli, composition, composition_baseline, composition_duplication
 
 
 def write(root: Path, relative_path: str, text: str) -> None:
@@ -668,14 +669,18 @@ def test_incomplete_analysis_preserves_snapshot(
         assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
         previous = snapshot.read_bytes()
     injected = False
-    original_open = tokenize.open
+    original_open = _source.open_source
 
-    def open_source(filename: Path) -> TextIO:
+    @contextmanager
+    def open_source(
+        root: Path, relative_path: str, admission: _source.Admission | None = None
+    ) -> Iterator[BinaryIO]:
         nonlocal injected
-        if filename == bad_file:
+        if root / relative_path == bad_file:
             injected = True
             raise PermissionError("injected read failure")
-        return original_open(filename)
+        with original_open(root, relative_path, admission) as handle:
+            yield handle
 
     with monkeypatch.context() as patch:
         if failure == "syntax":
@@ -683,7 +688,7 @@ def test_incomplete_analysis_preserves_snapshot(
         elif failure == "decode":
             bad_file.write_bytes(b"\xff\n")
         else:
-            patch.setattr(tokenize, "open", open_source)
+            patch.setattr(_source, "open_source", open_source)
         code, out, err = run_cli(options + ["--snapshot", str(snapshot)])
     if failure == "unreadable":
         assert injected

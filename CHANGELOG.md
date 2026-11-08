@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bind composition and size-limit source reads to discovery identities using no-follow directory
+  descriptors and nonblocking regular-file opens; changed sources make analysis incomplete and
+  preserve snapshots and allowlists. Platforms without the required OS APIs refuse source analysis.
+- Limit each Python source to 16 MiB before decoding or parsing, with an opened-file size check
+  and bounded byte read; configure the positive ceiling with `composition.max_source_bytes`.
+  Preserve PEP 263 encodings and newline normalization at the exact limit.
+
 - Pin churn history and older-Git retries to the verified commit; record its SHA as `churn.commit`
   while preserving the requested ref label.
 - Convert cloc stdout/stderr locale decoding failures into bounded exit-code-2 diagnostics

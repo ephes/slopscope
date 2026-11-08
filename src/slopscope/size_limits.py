@@ -17,7 +17,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
-from slopscope import classify, composition
+from slopscope import _source, classify, composition
 from slopscope._json import DuplicateKeyError, unique_object
 from slopscope.report import (
     SIZE_LIMIT_KINDS,
@@ -48,16 +48,23 @@ def measure(
     include_globs: Sequence[str] = (),
     source_dirs: Sequence[str] = classify.DEFAULT_SOURCE_DIRS,
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
+    max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
 ) -> tuple[Units, tuple[CompositionFailure, ...]]:
     """Measure every function, class, and test file below ``root``, keyed as in the allowlist."""
 
     units: Units = {kind: {} for kind in SIZE_LIMIT_KINDS}
     failures: list[CompositionFailure] = []
+    admissions: dict[str, _source.Admission] = {}
     for relative_path in composition.discover_python_files(
-        root, excluded_paths=excluded_paths, include_globs=include_globs
+        root, excluded_paths=excluded_paths, include_globs=include_globs, admissions=admissions
     ):
         try:
-            analysis = composition.analyze_file(root, relative_path)
+            analysis = composition.analyze_file(
+                root,
+                relative_path,
+                admission=admissions[relative_path],
+                max_source_bytes=max_source_bytes,
+            )
         except composition.CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
             continue
@@ -222,6 +229,7 @@ def check(
     include_globs: Sequence[str] = (),
     source_dirs: Sequence[str] = classify.DEFAULT_SOURCE_DIRS,
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
+    max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
 ) -> SizeLimitsReport:
     """Measure a project, apply ``action`` to its allowlist, and report the four groups."""
 
@@ -235,6 +243,7 @@ def check(
             include_globs=include_globs,
             source_dirs=source_dirs,
             test_dirs=test_dirs,
+            max_source_bytes=max_source_bytes,
         )
         if pending is not None:
             write_allowlist(allowlist_path, pending)
@@ -251,6 +260,7 @@ def plan(
     include_globs: Sequence[str] = (),
     source_dirs: Sequence[str] = classify.DEFAULT_SOURCE_DIRS,
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
+    max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
 ) -> tuple[SizeLimitsReport, Units | None]:
     """Measure and validate everything without writing.
 
@@ -274,6 +284,7 @@ def plan(
         include_globs=include_globs,
         source_dirs=source_dirs,
         test_dirs=test_dirs,
+        max_source_bytes=max_source_bytes,
     )
     if failures and action != REPORT:
         raise SizeLimitsError(
