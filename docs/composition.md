@@ -68,8 +68,9 @@ an unknown field; use `0.2.0a1` or later.
 
 ## Discovered Files
 
-Git file discovery has a 30-second execution timeout plus bounded cleanup (up to 6 extra seconds on POSIX,
-11 on Windows). A discovery timeout returns exit code 2 with the root path and no report, snapshot, or allowlist
+Git file discovery captures at most 16 MiB of combined stdout/stderr in 64 KiB reads and has a
+30-second execution timeout plus bounded cleanup (up to 6 extra seconds on POSIX,
+11 on Windows). Discovery overflow or timeout returns exit code 2 with the root path and no report, snapshot, or allowlist
 write; partial output is discarded without filesystem fallback. Missing/nonzero Git retains filesystem fallback.
 Windows process-tree termination is best-effort and untested. Filesystem traversal errors also return exit code 2 with a bounded path diagnostic,
 preserving snapshots and allowlists. Deliberately excluded directories stay pruned.
@@ -376,8 +377,9 @@ optional projects.
 
 `--snapshot PATH` writes the same JSON that `--format json` prints, so a snapshot can be kept in CI artifacts or next to
 a release. slopscope adds no timestamp or commit to it, so name the file accordingly.
-Snapshots are published only when analysis completes without file failures. A read, decode, tokenization, or parse
-failure, including traversal recursion or memory exhaustion after parsing, leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
+Snapshots are published only when analysis completes without failures. A read, decode, tokenization, or parse
+failure, including traversal recursion or memory exhaustion after parsing or during duplicate analysis,
+leaves an existing snapshot byte-identical and does not create a new snapshot. With multiple projects,
 a failure in any selected project prevents publication of the whole snapshot; optional missing projects remain
 skippable. The partial report and diagnostics still appear through the selected output format and stderr, with
 exit code 1. A subsequent complete run can replace the snapshot normally.
@@ -387,7 +389,11 @@ all selected projects. A distinct snapshot inside the repository is allowed.
 The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
 Write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
 Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
-A symlinked snapshot updates its target. Destinations must be regular files or absent; devices, FIFOs,
+A symlinked snapshot updates the resolved target approved during preflight. Publication rechecks
+that resolution and the destination and parent-directory identities before writing and again before
+replacement. A changed target, including a symlink retarget during analysis or writing, returns exit
+code 2 without a report and preserves existing outputs; temporary files are removed.
+Destinations must be regular files or absent; devices, FIFOs,
 and directories are rejected. Atomic replacement requires a writable parent directory and a replaceable
 destination (single-file bind mounts are unsuitable). Ownership, ACLs, extended attributes, and hard-link
 identity are not preserved. A read-only file can be replaced when its parent directory is writable.
@@ -401,7 +407,8 @@ Comparison rules:
 
 - A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
   different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
-  Excessively nested JSON also fails with a concise filename diagnostic and exit code 2, without a report or
+  Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
+  JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
 - A different analyzer version, detector version, or counting setting (every `settings` entry except `limit`) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from

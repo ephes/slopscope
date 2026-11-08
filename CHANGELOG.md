@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject duplicate JSON object keys in allowlists and composition baselines at every nesting level,
+  with bounded positional diagnostics and preservation of refused inputs and requested outputs.
+- Bind snapshot publication to the destination approved during input preflight; recheck destination
+  and parent identity before replacement, refusing changed targets and symlink retargets.
+
 - Bound cloc and Git file discovery to 16 MiB of combined stdout/stderr with 64 KiB reads and
   owned process-tree cleanup, sharing the existing churn capture implementation. Overflow returns
   exit code 2 without partial reports, snapshots, allowlist writes, or discovery fallback.

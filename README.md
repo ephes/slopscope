@@ -245,6 +245,9 @@ incomplete and preserves any snapshot.
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
 file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
+Snapshot publication uses the resolved destination approved during preflight and rechecks its file
+and parent-directory identity before replacement. A changed target is refused, preserving existing
+outputs, including when a snapshot symlink is retargeted during analysis or writing.
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
@@ -265,7 +268,9 @@ definitions. Units over a limit must be recorded in an allowlist (`size-limits.j
 `path::Qualified.name`; they may shrink but not grow. The report lists new offenders, grown and shrunk allowlisted
 units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offenders. `--seed-allowlist` writes the
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
-one. See [Size Limits](docs/size-limits.md).
+one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
+including duplicates with identical values; refused inputs leave existing outputs unchanged.
+See [Size Limits](docs/size-limits.md).
 
 ## Development
 

@@ -530,6 +530,7 @@ def _run_composition(
 
         roots = [project.path for project in existing_projects]
 
+    snapshot_destination: _SnapshotDestination | None = None
     if args.snapshot is not None:
         snapshot_path = Path(args.snapshot)
         config_path = (
@@ -538,7 +539,7 @@ def _run_composition(
             else config_module.find_default_config_path(path)
         )
         try:
-            _validate_snapshot_inputs(
+            snapshot_destination = _validate_snapshot_inputs(
                 snapshot_path, roots, slopscope_config, config_path, baseline_path
             )
         except OSError as exc:
@@ -621,11 +622,13 @@ def _run_composition(
             skipped_projects=skipped_projects,
         )
 
-    if args.snapshot is not None and not failed:
+    if snapshot_destination is not None and not failed:
         snapshot_path = Path(args.snapshot)
         try:
             _write_snapshot(
-                snapshot_path, composition_render.render_composition_json(rendered_report)
+                snapshot_path,
+                composition_render.render_composition_json(rendered_report),
+                destination=snapshot_destination,
             )
         except OSError as exc:
             print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
@@ -641,18 +644,37 @@ def _run_composition(
     return 1 if failed else 0
 
 
+@dataclasses.dataclass(frozen=True)
+class _SnapshotDestination:
+    target: Path
+    identity: tuple[int, int] | None
+    parent_identity: tuple[int, int] | None
+
+
+def _snapshot_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        metadata = path.stat()
+    except FileNotFoundError:
+        return None
+    return metadata.st_dev, metadata.st_ino
+
+
+def _resolved_snapshot(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except RuntimeError as exc:
+        raise OSError(errno.ELOOP, "snapshot path contains a symlink loop", str(path)) from exc
+
+
 def _validate_snapshot_inputs(
     snapshot: Path,
     roots: Sequence[Path],
     slopscope_config: config_module.SlopscopeConfig,
     config_path: Path | None,
     baseline_path: Path | None,
-) -> None:
+) -> _SnapshotDestination:
     """Refuse snapshot destinations that resolve to or share an inode with an input."""
-    try:
-        target = snapshot.resolve()
-    except RuntimeError as exc:
-        raise OSError(errno.ELOOP, "snapshot path contains a symlink loop", str(snapshot)) from exc
+    target = _resolved_snapshot(snapshot)
     inputs = [path for path in (config_path, baseline_path) if path is not None]
     for root in roots:
         inputs.extend(
@@ -671,13 +693,24 @@ def _validate_snapshot_inputs(
         if shared:
             raise OSError(f"snapshot {snapshot} aliases input {input_path}")
 
+    return _SnapshotDestination(
+        target, _snapshot_identity(target), _snapshot_identity(target.parent)
+    )
 
-def _write_snapshot(path: Path, text: str) -> None:
+
+def _verify_snapshot_destination(path: Path, destination: _SnapshotDestination) -> None:
+    if (
+        _resolved_snapshot(path) != destination.target
+        or _snapshot_identity(destination.target) != destination.identity
+        or _snapshot_identity(destination.target.parent) != destination.parent_identity
+    ):
+        raise OSError(f"snapshot target changed after preflight: {path}")
+
+
+def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination) -> None:
     """Publish serialized JSON without truncating a previous snapshot."""
-    try:
-        target = path.resolve()
-    except RuntimeError as exc:
-        raise OSError(errno.ELOOP, "snapshot path contains a symlink loop", str(path)) from exc
+    _verify_snapshot_destination(path, destination)
+    target = destination.target
     temporary: Path | None = None
     try:
         try:
@@ -697,6 +730,7 @@ def _write_snapshot(path: Path, text: str) -> None:
             os.fsync(handle.fileno())
             if mode is not None:
                 os.chmod(temporary, mode)
+        _verify_snapshot_destination(path, destination)
         os.replace(temporary, target)
         temporary = None
     finally:
