@@ -11,7 +11,7 @@ from typing import TextIO
 
 import pytest
 
-from slopscope import cli, composition, composition_baseline
+from slopscope import cli, composition, composition_baseline, composition_duplication
 
 
 def write(root: Path, relative_path: str, text: str) -> None:
@@ -811,3 +811,35 @@ def test_semantic_recursion_prevents_allowlist_mutation(tmp_path: Path, action: 
         assert not allowlist.exists()
     else:
         assert allowlist.read_bytes() == previous
+
+
+@pytest.mark.parametrize("failure", [RecursionError, MemoryError])
+@pytest.mark.parametrize("existing", [False, True])
+def test_duplicate_analysis_failure_preserves_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception], existing: bool
+) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    if existing:
+        snapshot.write_bytes(b"previous snapshot")
+    calls = 0
+
+    def fail(*args: object, **kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        raise failure("synthetic detector exhaustion")
+
+    monkeypatch.setattr(composition_duplication, "find_duplicates", fail)
+    code, out, err = run_cli(
+        [str(repository), "--composition", "--format", "json", "--snapshot", str(snapshot)]
+    )
+    assert calls == 1
+    assert code == 1
+    assert "duplicate analysis exceeded traversal or memory limits" in err
+    data = json.loads(out)
+    assert data["failures"]
+    assert data["total"]["files"] == 2
+    if existing:
+        assert snapshot.read_bytes() == b"previous snapshot"
+    else:
+        assert not snapshot.exists()

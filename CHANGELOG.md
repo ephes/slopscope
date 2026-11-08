@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Limit duplicate-extension overlap work to positions within each segment and expand nested subgroups
+  without Python recursion, preserving block order and intervals. Detector resource exhaustion marks
+  composition analysis incomplete and prevents snapshot publication.
+
 - Render size-limit and composition labels and diagnostics literally in Rich tables, including
   bracketed filenames, while retaining program-supplied styles and the dependency-free fallback.
 - Protect size-limit state columns, unknown baseline deltas and warnings, duplicate location

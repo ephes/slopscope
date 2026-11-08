@@ -286,7 +286,15 @@ def build_composition_report(
             for row in analysis.functions
         )
 
-    duplicates = _apply_duplication(analyses, file_rows, min_duplicate_tokens)
+    try:
+        duplicates = _apply_duplication(analyses, file_rows, min_duplicate_tokens)
+    except (RecursionError, MemoryError):
+        duplicates = []
+        failures.append(
+            CompositionFailure(
+                path=".", error="duplicate analysis exceeded traversal or memory limits"
+            )
+        )
 
     rows = tuple(file_rows)
     return CompositionReport(

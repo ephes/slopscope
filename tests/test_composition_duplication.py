@@ -206,3 +206,77 @@ def test_subgroups_limited_by_overlap_are_not_reported_again() -> None:
     result = composition_duplication.find_duplicates([first, second], min_tokens=5)
 
     assert [(block.tokens, len(block.occurrences)) for block in result.blocks] == [(5, 4)]
+
+
+def test_extension_compares_only_within_segments() -> None:
+    from array import array
+    from typing import cast
+
+    comparisons = 0
+
+    class SegmentId(int):
+        def __eq__(self, other: object) -> bool:
+            nonlocal comparisons
+            comparisons += 1
+            return super().__eq__(other)
+
+        __hash__ = int.__hash__
+
+    count = 4000
+    segment_ids = cast("array[int]", [SegmentId(index) for index in range(count)])
+    token_segments = [
+        (index, composition_duplication.Segment(array("i", [1, 2]), array("i", [1, 2])))
+        for index in range(count)
+    ]
+    result = composition_duplication._extend_blocks(
+        list(range(count)), 1, segment_ids, array("i", [0] * count), token_segments
+    )
+
+    assert result == [(list(range(count)), 2)]
+    assert comparisons < count * 4
+
+
+def test_staircase_subgroups_preserve_exact_output_order() -> None:
+    from array import array
+
+    files = [
+        [composition_duplication.Segment(array("i", ids), array("i", range(1, len(ids) + 1)))]
+        for ids in ([1, 2, 3, 4], [1, 2, 3, 5], [1, 2, 6], [1, 7])
+    ]
+    result = composition_duplication.find_duplicates(files, min_tokens=1)
+    occurrence = composition_duplication.Occurrence
+    block = composition_duplication.Block
+    assert result.blocks == (
+        block(1, tuple(occurrence(index, 1, 1) for index in range(4))),
+        block(2, tuple(occurrence(index, 1, 2) for index in range(3))),
+        block(3, tuple(occurrence(index, 1, 3) for index in range(2))),
+    )
+    assert result.intervals == {0: [(1, 3)], 1: [(1, 3)], 2: [(1, 2)], 3: [(1, 1)]}
+
+
+def test_staircase_subgroups_do_not_use_python_recursion() -> None:
+    import subprocess
+    import sys
+
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from array import array
+from slopscope.composition_duplication import Segment, find_duplicates
+files = [[Segment(array('i', [1] * size + [size + 2]), array('i', [1] * (size + 1)))]
+         for size in range(1, 121)]
+sys.setrecursionlimit(80)
+result = find_duplicates(files, min_tokens=1)
+assert [(b.tokens, len(b.occurrences)) for b in result.blocks] == [
+    (size, 121 - size) for size in range(1, 120)]
+assert result.intervals == {index: [(1, 1)] for index in range(120)}
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert child.returncode == 0, child.stderr
