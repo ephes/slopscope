@@ -255,38 +255,47 @@ def _extend_blocks(
     Copies in the same segment never run into each other.
     """
 
-    start_length = length
-    starts = [
-        (segments[anchor_segment[anchor]][1].ids, anchor_position[anchor], anchor_segment[anchor])
-        for anchor in members
-    ]
-    limit = min(len(ids) - position for ids, position, _segment in starts)
-    for index, (_ids, position, segment) in enumerate(starts):
-        for _other_ids, other_position, other_segment in starts[index + 1 :]:
-            if other_segment == segment:
-                limit = min(limit, abs(other_position - position))
-    reference_ids, reference_position, _segment = starts[0]
-    while length < limit:
-        token = reference_ids[reference_position + length]
-        if any(ids[position + length] != token for ids, position, _segment in starts[1:]):
-            break
-        length += 1
-
-    # A subgroup is only its own block when it is longer than the block it split from.
-    blocks: list[tuple[Sequence[int], int]] = (
-        [(members, length)] if not subgroup or length > start_length else []
-    )
-    next_tokens: dict[int, list[int]] = {}
-    for anchor, (ids, position, _segment) in zip(members, starts, strict=True):
-        if position + length < len(ids):
-            next_tokens.setdefault(ids[position + length], []).append(anchor)
-    for agreeing in next_tokens.values():
-        if 2 <= len(agreeing) < len(members):
-            blocks.extend(
-                _extend_blocks(
-                    agreeing, length, anchor_segment, anchor_position, segments, subgroup=True
-                )
+    blocks: list[tuple[Sequence[int], int]] = []
+    pending = [(members, length, subgroup)]
+    while pending:
+        members, length, subgroup = pending.pop()
+        start_length = length
+        starts = [
+            (
+                segments[anchor_segment[anchor]][1].ids,
+                anchor_position[anchor],
+                anchor_segment[anchor],
             )
+            for anchor in members
+        ]
+        limit = min(len(ids) - position for ids, position, _segment in starts)
+        positions_by_segment: dict[int, list[int]] = {}
+        for _ids, position, segment in starts:
+            positions_by_segment.setdefault(segment, []).append(position)
+        for positions in positions_by_segment.values():
+            ordered = sorted(positions)
+            for first, second in zip(ordered, ordered[1:], strict=False):
+                limit = min(limit, second - first)
+        reference_ids, reference_position, _segment = starts[0]
+        while length < limit:
+            token = reference_ids[reference_position + length]
+            if any(ids[position + length] != token for ids, position, _segment in starts[1:]):
+                break
+            length += 1
+
+        # A subgroup is only its own block when it is longer than the block it split from.
+        if not subgroup or length > start_length:
+            blocks.append((members, length))
+        next_tokens: dict[int, list[int]] = {}
+        for anchor, (ids, position, _segment) in zip(members, starts, strict=True):
+            if position + length < len(ids):
+                next_tokens.setdefault(ids[position + length], []).append(anchor)
+        # Reverse insertion order so the stack preserves the recursive depth-first order.
+        pending.extend(
+            (agreeing, length, True)
+            for agreeing in reversed(next_tokens.values())
+            if 2 <= len(agreeing) < len(members)
+        )
     return blocks
 
 

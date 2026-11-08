@@ -236,6 +236,10 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`
 
+Duplicate extension compares overlap positions only within each token segment and expands nested
+subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
+incomplete and preserves any snapshot.
+
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
 file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
