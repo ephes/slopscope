@@ -90,6 +90,10 @@ returns exit code 2 with a diagnostic and no report; auto mode does not fall bac
 This applies to language summaries, file summaries, and cloc-backed profiles, including slow large repositories.
 Use `--engine python` for physical-line counts if cloc takes too long.
 
+Cloc output and filenames must decode strictly using the process locale encoding. Invalid bytes in
+either stdout or stderr return exit code 2 with a bounded diagnostic and no report; filenames are
+never replacement-decoded. Use a matching UTF-8 locale for UTF-8 filenames.
+
 Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
 The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
 are not preserved end to end.
@@ -251,6 +255,8 @@ outputs, including when a snapshot symlink is retargeted during analysis or writ
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
+The branch is resolved once to a commit SHA; every history command uses that SHA, also recorded
+as `churn.commit` in JSON, while `churn.ref` retains the requested display label.
 Malformed history or more than 16 MiB of combined output from any churn Git command skips optional
 churn with a diagnostic, preserving source analysis and snapshot success policy.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging

@@ -265,6 +265,7 @@ _CHURN_KINDS = ("source", "tests", "other")
 def _churn_to_dict(churn: CompositionChurn) -> dict[str, Any]:
     return {
         "ref": churn.ref,
+        "commit": churn.commit,
         "months": churn.months,
         "since": churn.since,
         "status": churn.status,

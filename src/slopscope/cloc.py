@@ -67,8 +67,11 @@ def run_command(command: Sequence[str]) -> ClocResult:
         return ClocResult(2, "", f"slopscope: {exc}")
     # Match Popen(text=True): use the locale encoding and normalize universal newlines.
     encoding = io.text_encoding(None)
-    stdout = io.TextIOWrapper(io.BytesIO(result.stdout), encoding=encoding).read()
-    stderr = io.TextIOWrapper(io.BytesIO(result.stderr), encoding=encoding).read()
+    try:
+        stdout = io.TextIOWrapper(io.BytesIO(result.stdout), encoding=encoding).read()
+        stderr = io.TextIOWrapper(io.BytesIO(result.stderr), encoding=encoding).read()
+    except UnicodeDecodeError:
+        return ClocResult(2, "", "slopscope: could not decode cloc output with the locale encoding")
     return ClocResult(result.returncode, stdout, stderr)
 
 

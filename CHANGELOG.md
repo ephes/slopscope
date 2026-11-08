@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Pin churn history and older-Git retries to the verified commit; record its SHA as `churn.commit`
+  while preserving the requested ref label.
+- Convert cloc stdout/stderr locale decoding failures into bounded exit-code-2 diagnostics
+  without publishing a report or replacement-decoding filenames.
+
 - Reject duplicate JSON object keys in allowlists and composition baselines at every nesting level,
   with bounded positional diagnostics and preservation of refused inputs and requested outputs.
 - Bind snapshot publication to the destination approved during input preflight; recheck destination

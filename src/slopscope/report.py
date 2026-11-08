@@ -531,6 +531,7 @@ class CompositionChurn:
     status: str
     reason: str | None
     rows: tuple[CompositionChurnMonth, ...]
+    commit: str | None = None
 
 
 @dataclass(frozen=True)

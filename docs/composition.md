@@ -438,6 +438,8 @@ Comparison rules:
 `--churn` adds Python lines added and removed per month from Git history. It is opt-in, because it runs `git log` in the
 analyzed path.
 
+- The requested ref is resolved once to a commit SHA. Every log command, including the fallback
+  for older Git options, uses that commit even if the ref moves during analysis.
 - It reads the first-parent history of `churn_branch` (default `HEAD`), so a merged branch counts once, as the merge's
   diff against the branch it was merged into, in the month of the merge. No branch name such as `main` is assumed.
 - Only paths below the analyzed path count, with paths relative to it, so a subdirectory of a repository or a
@@ -466,7 +468,7 @@ analyzed path.
 
 This is churn, not growth: net lines per month mix new code with rewrites, moves between kinds, and deletions.
 
-In JSON, `churn` is `null` without `--churn`. Otherwise it holds `ref`, `months`, `since` (the first month), `status`
+In JSON, `churn` is `null` without `--churn`. Otherwise it holds `ref` (the requested label), `commit` (the resolved SHA, or null before resolution), `months`, `since` (the first month), `status`
 (`ok` or `skipped`), `reason`, and `rows`, one per month, each with `added`, `removed`, and `net` counts for `total`,
 `source`, `tests`, and `other`.
 
