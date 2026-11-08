@@ -276,6 +276,9 @@ units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offend
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
 one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
 including duplicates with identical values; refused inputs leave existing outputs unchanged.
+Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
+changes. Multi-project publication stages all outputs first and restores earlier writes on handled
+errors; failed restoration retains a named recovery backup. Process death is outside this guarantee.
 See [Size Limits](docs/size-limits.md).
 
 ## Development

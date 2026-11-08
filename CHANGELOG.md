@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bind allowlist mutation reads and publication to the locked resolved target and parent identity;
+  refuse symlink retargets and destination changes, including mismatched opened file descriptors.
+- Stage all project allowlists before publication and compensate earlier replacements on handled
+  errors, preserving prior bytes, modes, or absence. Failed compensation retains named recovery
+  backups; process death and power loss remain outside this guarantee.
+
 - Pin churn history and older-Git retries to the verified commit; record its SHA as `churn.commit`
   while preserving the requested ref label.
 - Convert cloc stdout/stderr locale decoding failures into bounded exit-code-2 diagnostics

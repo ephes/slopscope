@@ -20,9 +20,11 @@ def _mutate(root: Path, size: int, action: str, use_cli: bool | str, pipe: Conne
     original_load = size_limits.load_allowlist
     paused = False
 
-    def paused_load(path: Path) -> size_limits.Units | None:
+    def paused_load(
+        path: Path, *, destination: size_limits.AllowlistDestination | None = None
+    ) -> size_limits.Units | None:
         nonlocal paused
-        loaded = original_load(path)
+        loaded = original_load(path, destination=destination)
         if not paused:
             paused = True
             pipe.send("loaded")
