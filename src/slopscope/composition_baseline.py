@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from slopscope._json import DuplicateKeyError, unique_object
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
     COMPOSITION_CONSTRUCTS,
@@ -72,11 +73,13 @@ def load_baseline(
             content = handle.read(MAX_BASELINE_BYTES + 1)
             if len(content) > MAX_BASELINE_BYTES:
                 raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
-        data = json.loads(content.decode("utf-8"))
+        data = json.loads(content.decode("utf-8"), object_pairs_hook=unique_object)
     except FileNotFoundError as exc:
         raise BaselineError(f"baseline file not found: {path}") from exc
     except OSError as exc:
         raise BaselineError(f"could not read baseline file {path}: {exc}") from exc
+    except DuplicateKeyError as exc:
+        raise BaselineError(f"baseline file {path}: {exc}") from exc
     except RecursionError as exc:
         raise BaselineError(f"baseline file {path}: JSON nesting is too deep") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:

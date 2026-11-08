@@ -607,7 +607,7 @@ def test_excessively_nested_baseline_exits_2_without_writes(
     previous_snapshot = snapshot.read_bytes()
     if force_decoder_failure:
 
-        def fail_decode(_handle: object) -> object:
+        def fail_decode(_handle: object, **kwargs: object) -> object:
             raise RecursionError("decoder detail must not escape")
 
         monkeypatch.setattr("slopscope.composition_baseline.json.loads", fail_decode)

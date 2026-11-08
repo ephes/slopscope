@@ -407,7 +407,7 @@ def test_decoder_recursion_is_domain_error(tmp_path: Path, monkeypatch: pytest.M
     path = tmp_path / "allowlist.json"
     path.write_text("{}", encoding="utf-8")
 
-    def exhausted(text: str) -> object:
+    def exhausted(text: str, **kwargs: object) -> object:
         raise RecursionError("private decoder detail")
 
     monkeypatch.setattr("slopscope.size_limits.json.loads", exhausted)

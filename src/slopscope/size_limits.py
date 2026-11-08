@@ -18,6 +18,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from slopscope import classify, composition
+from slopscope._json import DuplicateKeyError, unique_object
 from slopscope.report import (
     SIZE_LIMIT_KINDS,
     CompositionFailure,
@@ -114,7 +115,9 @@ def load_allowlist(path: Path) -> Units | None:
     except OSError as exc:
         raise SizeLimitsError(f"could not read allowlist {path}: {exc}") from exc
     try:
-        data = json.loads(text)
+        data = json.loads(text, object_pairs_hook=unique_object)
+    except DuplicateKeyError as exc:
+        raise SizeLimitsError(f"allowlist {path}: {exc}") from exc
     except RecursionError as exc:
         raise SizeLimitsError(f"allowlist {path}: JSON nesting is too deep") from exc
     except json.JSONDecodeError as exc:
