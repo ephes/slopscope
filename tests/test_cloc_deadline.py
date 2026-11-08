@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import os
-import signal
 import subprocess
 from pathlib import Path
 
@@ -17,30 +16,13 @@ from slopscope import cli, cloc
 def test_hanging_cloc_returns_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: str, profile: bool, file_only: bool
 ) -> None:
-    class Process:
-        pid = 12345
+    def timeout_capture(*args: object, **kwargs: object) -> None:
+        assert kwargs["timeout"] == 0.1
+        raise subprocess.TimeoutExpired("cloc", 0.1)
 
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            self.calls = 0
-
-        def communicate(self, *, timeout: float) -> tuple[str, str]:
-            self.calls += 1
-            if self.calls == 1:
-                assert timeout == 0.1
-                raise subprocess.TimeoutExpired("cloc", timeout)
-            assert timeout == 1
-            return "", ""
-
-        def kill(self) -> None:
-            pass
-
-        def wait(self, *, timeout: float) -> int:
-            assert timeout == 5
-            return -9
-
-    monkeypatch.setattr("slopscope.cloc.subprocess.Popen", Process)
-    monkeypatch.setattr("slopscope.cloc.os.killpg", lambda pid, sig: None, raising=False)
-    monkeypatch.setattr(cloc, "CLOC_TIMEOUT_SECONDS", 0.1, raising=False)
+    monkeypatch.setattr(cloc, "capture_process", timeout_capture)
+    monkeypatch.setattr("slopscope.cloc.subprocess.Popen", lambda *a, **kw: object())
+    monkeypatch.setattr(cloc, "CLOC_TIMEOUT_SECONDS", 0.1)
     monkeypatch.setattr(cloc, "is_cloc_available", lambda: True)
     monkeypatch.setattr(cloc, "build_language_summary_command", lambda path, **kwargs: ["cloc"])
     monkeypatch.setattr(cloc, "build_file_summary_command", lambda path, **kwargs: ["cloc"])
@@ -83,61 +65,21 @@ def test_cloc_startup_failure_returns_error(
 
 
 def test_cloc_supplies_finite_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Process:
-        returncode = 0
+    from unittest.mock import Mock
 
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            assert kwargs["start_new_session"] == (os.name == "posix")
+    process = Mock()
+    popen = Mock(return_value=process)
 
-        def communicate(self, *, timeout: float) -> tuple[str, str]:
-            assert timeout == 30
-            return "output", ""
+    def capture(child: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert child is process
+        assert kwargs == {"timeout": 30, "max_bytes": 16 * 1024 * 1024, "label": "cloc"}
+        return subprocess.CompletedProcess(["cloc"], 0, b"output\r\nnext\rlast", b"")
 
-    monkeypatch.setattr("slopscope.cloc.subprocess.Popen", Process)
-    assert cloc.run_command(["cloc"]) == cloc.ClocResult(0, "output", "")
-
-
-@pytest.mark.parametrize("wrapper_exits", [False, True])
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group guarantee")
-def test_cloc_timeout_terminates_descendants(
-    monkeypatch: pytest.MonkeyPatch, wrapper_exits: bool
-) -> None:
-    events: list[str] = []
-
-    class Process:
-        pid = 12345
-        returncode = 0 if wrapper_exits else None
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            assert kwargs["start_new_session"] is True
-
-        def communicate(self, *, timeout: float) -> tuple[str, str]:
-            if not events:
-                assert timeout == cloc.CLOC_TIMEOUT_SECONDS
-                raise subprocess.TimeoutExpired("cloc", timeout)
-            assert events == ["kill group", "kill wrapper"]
-            assert timeout == 1
-            events.append("drain pipes")
-            return "partial output", "partial error"
-
-        def kill(self) -> None:
-            events.append("kill wrapper")
-            if wrapper_exits:
-                raise ProcessLookupError
-
-        def wait(self, *, timeout: float) -> int:
-            assert timeout == 5
-            events.append("reap wrapper")
-            return 0 if wrapper_exits else -9
-
-    def kill_group(pid: int, sig: int) -> None:
-        assert pid == Process.pid
-        assert sig == signal.SIGKILL
-        events.append("kill group")
-
-    monkeypatch.setattr("slopscope.cloc.subprocess.Popen", Process)
-    monkeypatch.setattr("slopscope.cloc.os.killpg", kill_group)
-    assert cloc.run_command(["cloc"]) == cloc.ClocResult(
-        2, "", "slopscope: cloc timed out after 30 seconds"
-    )
-    assert events == ["kill group", "kill wrapper", "drain pipes", "reap wrapper"]
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(cloc, "capture_process", capture)
+    assert cloc.run_command(["cloc"]) == cloc.ClocResult(0, "output\nnext\nlast", "")
+    assert popen.call_args.kwargs == {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "start_new_session": os.name == "posix",
+    }

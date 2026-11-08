@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, fallback
+from slopscope import _capture, cli, fallback
 from slopscope import composition_churn as churn
 
 
@@ -146,7 +146,7 @@ def test_capture_budget_is_combined_and_cleanup_reaps_owned_processes(
     if wrapper_exited:
         process.kill.side_effect = ProcessLookupError
     group_kill, tree_kill = Mock(), Mock()
-    monkeypatch.setattr(churn, "os", SimpleNamespace(name=platform, killpg=group_kill))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name=platform, killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
     monkeypatch.setattr(subprocess, "run", tree_kill)
     monkeypatch.setattr(churn, "MAX_GIT_OUTPUT_BYTES", 100)
@@ -214,7 +214,7 @@ def test_reader_exception_never_publishes_partial_output(
         return Mock(args=command, returncode=0, stdout=io.BytesIO(b"true\n"), stderr=io.BytesIO())
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(churn, "os", SimpleNamespace(name="posix", killpg=Mock()))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=Mock()))
     result = churn.collect_churn(tmp_path, excluded_paths=(), today=date(2026, 3, 20))
     assert result.status == "skipped"
     assert result.reason == "could not read git output"

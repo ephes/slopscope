@@ -83,8 +83,9 @@ uv run slopscope
 `cloc` is optional. With `--engine auto`, `slopscope` uses `cloc` when the binary is available on `PATH` and falls
 back to the pure-Python engine otherwise. Install `cloc` separately if you want `cloc` code-line semantics.
 
-Each cloc invocation has a 30-second execution timeout, followed by bounded process-tree cleanup
-(up to 6 extra seconds on POSIX, 11 on Windows). Windows tree termination is best-effort and untested. A timeout or executable startup failure
+Each cloc invocation captures at most 16 MiB of combined stdout/stderr in 64 KiB reads and has a
+30-second execution timeout, followed by bounded process-tree cleanup
+(up to 6 extra seconds on POSIX, 11 on Windows). Windows tree termination is best-effort and untested. Output overflow, a timeout, or executable startup failure
 returns exit code 2 with a diagnostic and no report; auto mode does not fall back after such a failure.
 This applies to language summaries, file summaries, and cloc-backed profiles, including slow large repositories.
 Use `--engine python` for physical-line counts if cloc takes too long.
@@ -142,11 +143,12 @@ Missing repository roots and regular files used as roots fail with exit code 2 b
 allowlist write. Existing empty directories are allowed. Missing optional configured projects remain
 skippable; configured paths that exist must be directories.
 
-Git file discovery (`git ls-files`) has a 30-second execution timeout followed by bounded
+Git file discovery (`git ls-files`) captures at most 16 MiB of combined stdout/stderr in 64 KiB
+reads and has a 30-second execution timeout followed by bounded
 process-tree cleanup (up to 6 extra seconds on POSIX, 11 on Windows). Windows tree termination is best-effort and
-untested. A timeout is a hard analysis error:
+untested. Output overflow or a timeout is a hard analysis error:
 the CLI returns exit code 2 with a diagnostic, without a report, snapshot, or allowlist write. Partial Git output
-is discarded and no filesystem fallback runs on timeout. This applies to Python reports, physical-line profiles,
+is discarded and no filesystem fallback runs on overflow or timeout. This applies to Python reports, physical-line profiles,
 composition, and size-limits. Git startup failures (including a missing executable) and nonzero exits retain the
 filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
 `subprocess.run`, process creation itself may not be interruptible on every platform.

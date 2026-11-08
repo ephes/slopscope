@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound cloc and Git file discovery to 16 MiB of combined stdout/stderr with 64 KiB reads and
+  owned process-tree cleanup, sharing the existing churn capture implementation. Overflow returns
+  exit code 2 without partial reports, snapshots, allowlist writes, or discovery fallback.
+
 - Limit duplicate-extension overlap work to positions within each segment and expand nested subgroups
   without Python recursion, preserving block order and intervals. Detector resource exhaustion marks
   composition analysis incomplete and prevents snapshot publication.
