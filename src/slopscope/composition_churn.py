@@ -49,9 +49,12 @@ def collect_churn(
     months = max(1, min(months, MAX_MONTHS))
     since = _month_start(current, months - 1)
 
+    commit: str | None = None
+
     def skipped(reason: str) -> CompositionChurn:
         return CompositionChurn(
             ref=ref,
+            commit=commit,
             months=months,
             since=since.strftime("%Y-%m"),
             status="skipped",
@@ -69,9 +72,10 @@ def collect_churn(
         if verified is None or verified.returncode != 0:
             return skipped(f"unknown branch or ref {ref!r}")
 
+        commit = verified.stdout.decode("ascii").strip()
         log_arguments = [
             "log",
-            ref,
+            commit,
             "--first-parent",
             "--diff-merges=first-parent",
             "--numstat",
@@ -124,6 +128,7 @@ def collect_churn(
 
     return CompositionChurn(
         ref=ref,
+        commit=commit,
         months=months,
         since=first_month,
         status="ok",

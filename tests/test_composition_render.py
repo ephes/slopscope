@@ -161,6 +161,7 @@ def test_mixed_and_empty_month_churn(
     data = json.loads(render.render_composition_json(report))
     assert data["churn"] == {
         "ref": "topic",
+        "commit": None,
         "months": 2,
         "since": "2026-09",
         "status": "ok",
@@ -197,6 +198,7 @@ def test_skipped_churn(report: CompositionReport, output_format: OutputFormat) -
     data = json.loads(render.render_composition_json(report))
     assert data["churn"] == {
         "ref": "topic",
+        "commit": None,
         "months": 2,
         "since": "2026-09",
         "status": "skipped",
