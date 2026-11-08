@@ -1874,28 +1874,18 @@ def test_git_discovery_timeout_fails_without_output_or_writes(
     calls = []
 
     class Process:
-        pid = 12345
-
         def __init__(self, command: list[str], **kwargs: object) -> None:
             calls.append(command)
-
-        def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
-            assert timeout in (30.0, 1)
-            raise subprocess.TimeoutExpired("git", timeout, output=b"partial.py\0")
-
-        def kill(self) -> None:
-            pass
-
-        def wait(self, *, timeout: float) -> int:
-            assert timeout == 5
-            return -9
 
     def no_walk(*args: object, **kwargs: object) -> list[Path]:
         raise AssertionError("timeout must not trigger filesystem fallback")
 
+    def timeout_capture(*args: object, **kwargs: object) -> None:
+        assert kwargs["timeout"] == 30.0
+        raise subprocess.TimeoutExpired("git", 30.0, output=b"partial.py\0")
+
+    monkeypatch.setattr(fallback, "capture_process", timeout_capture)
     monkeypatch.setattr("slopscope.fallback.subprocess.Popen", Process)
-    monkeypatch.setattr("slopscope.fallback.subprocess.run", lambda *args, **kwargs: None)
-    monkeypatch.setattr("slopscope.fallback.os.killpg", lambda *args: None, raising=False)
     monkeypatch.setattr(fallback, "discover_filesystem_files", no_walk)
     (tmp_path / "pyproject.toml").write_text(
         '[[tool.slopscope.profiles]]\nname = "physical"\nphysical_lines = true\n', encoding="utf-8"

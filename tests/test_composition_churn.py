@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, composition_churn, fallback
+from slopscope import _capture, cli, composition_churn, fallback
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
@@ -338,7 +338,7 @@ def test_interrupted_git_kills_group_and_reaps(
     process.stderr = io.BytesIO()
     process.wait.side_effect = [KeyboardInterrupt, 0]
     group_kill = Mock()
-    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
 
     with pytest.raises(KeyboardInterrupt):
@@ -368,7 +368,7 @@ def test_windows_tree_kill_failure_still_reaps_and_skips_churn(
         if failure == "missing"
         else subprocess.TimeoutExpired("taskkill", 5)
     )
-    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
     monkeypatch.setattr(subprocess, "run", tree_kill)
 
@@ -411,7 +411,7 @@ def test_long_running_git_cleanup_never_closes_busy_pipes(
     stdout, stderr = BusyPipe(), BusyPipe()
     process = Mock(pid=12345, stdout=stdout, stderr=stderr)
     monkeypatch.setattr(composition_churn, "GIT_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=Mock()))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name=platform, killpg=Mock()))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
     monkeypatch.setattr(subprocess, "run", Mock())
 
@@ -448,7 +448,7 @@ def test_git_timeout_drain_propagates_interruption(
 
     monkeypatch.setattr(threading.Thread, "join", interrupt_join)
     group_kill = Mock()
-    monkeypatch.setattr(composition_churn, "os", SimpleNamespace(name=platform, killpg=group_kill))
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name=platform, killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
     tree_kill = Mock()
     monkeypatch.setattr(subprocess, "run", tree_kill)

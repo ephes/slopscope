@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
-import signal
 import stat
 import subprocess
 from collections.abc import Iterable
@@ -12,6 +10,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
+from slopscope._capture import CaptureError, capture_process
 from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
 
 DEFAULT_EXCLUDED_PATH_SEGMENTS = frozenset(
@@ -68,6 +67,7 @@ LANGUAGES_BY_FILENAME = {
 
 
 GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
+MAX_GIT_DISCOVERY_OUTPUT_BYTES = 16 * 1024 * 1024
 
 
 class GitDiscoveryError(RuntimeError):
@@ -105,33 +105,19 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
     except OSError:
         return GitLsFilesResult(returncode=1, stdout=b"")
     try:
-        stdout, _stderr = process.communicate(timeout=GIT_DISCOVERY_TIMEOUT_SECONDS)
-    except BaseException as exc:
-        # Match cloc/churn cleanup, including descendants holding captured pipes open.
-        if os.name == "posix":
-            with contextlib.suppress(OSError):
-                os.killpg(process.pid, signal.SIGKILL)
-        else:
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                subprocess.run(
-                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                    capture_output=True,
-                    check=False,
-                    timeout=5,
-                )
-        with contextlib.suppress(OSError):
-            process.kill()
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            process.communicate(timeout=1)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=5)
-        if isinstance(exc, subprocess.TimeoutExpired):
-            raise GitDiscoveryError(
-                f"Git file discovery timed out after {GIT_DISCOVERY_TIMEOUT_SECONDS:g} seconds: "
-                f"{path}"
-            ) from exc
-        raise
-    return GitLsFilesResult(returncode=process.returncode, stdout=stdout)
+        result = capture_process(
+            process,
+            timeout=GIT_DISCOVERY_TIMEOUT_SECONDS,
+            max_bytes=MAX_GIT_DISCOVERY_OUTPUT_BYTES,
+            label="Git file discovery",
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GitDiscoveryError(
+            f"Git file discovery timed out after {GIT_DISCOVERY_TIMEOUT_SECONDS:g} seconds: {path}"
+        ) from exc
+    except CaptureError as exc:
+        raise GitDiscoveryError(f"{exc}: {path}") from exc
+    return GitLsFilesResult(returncode=result.returncode, stdout=result.stdout)
 
 
 def parse_git_ls_files_output(output: bytes) -> list[Path]:
