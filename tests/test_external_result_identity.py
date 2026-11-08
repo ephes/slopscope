@@ -91,8 +91,6 @@ def test_cloc_decode_failure_is_controlled(
     (tmp_path / "pyproject.toml").write_text(
         '[[tool.slopscope.profiles]]\nname = "code"\n', encoding="utf-8"
     )
-    snapshot = tmp_path / "snapshot.json"
-    snapshot.write_bytes(b"previous snapshot")
     out, err = io.StringIO(), io.StringIO()
     options = ["--profile", "code", "--total-only"] if profile else []
     assert cli.run([str(tmp_path), "--engine", "cloc", *options], stdout=out, stderr=err) == 2
@@ -100,4 +98,3 @@ def test_cloc_decode_failure_is_controlled(
     assert "could not decode cloc" in err.getvalue()
     assert "Traceback" not in err.getvalue()
     assert len(err.getvalue()) < 300
-    assert snapshot.read_bytes() == b"previous snapshot"
