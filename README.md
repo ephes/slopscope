@@ -165,6 +165,19 @@ links to contained files. Composition, size-limits, and physical-line profiles u
 exclude these links. The cloc engine's discovery is unchanged. Python fallback reports are marked with
 `Engine: python (physical lines)`.
 
+Composition and size-limits bind discovered Python files to their root, directory, and regular-file
+identities, then open each component without following links below the selected root. Changed or
+nonregular sources make analysis incomplete; snapshots and allowlists are preserved. Opening is
+nonblocking so a substituted FIFO cannot wait for a writer. These modes require descriptor-relative
+opening, `O_NOFOLLOW`, `O_DIRECTORY`, and `O_NONBLOCK`; platforms without these APIs refuse source
+analysis with a diagnostic. Windows lacks them, so `--composition` and `--size-limits` are unsupported
+on Windows and report every source as an incomplete-analysis failure. The selected root itself may be a symlink.
+
+Both modes admit at most 16 MiB per Python source by default, checking the opened file's size and
+bounding the byte read before PEP 263 decoding, AST parsing, or tokenization. Configure a positive
+`max_source_bytes` under `[tool.slopscope.composition]` to change the ceiling. Exact-limit sources
+are accepted; oversized or growing sources make analysis incomplete and preserve existing outputs.
+
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission
 denied), Python reports and physical-line profiles fail with exit code 2 and an incomplete-analysis diagnostic
 naming the file, without a report or total. The check is limited to that case: tracked paths that are missing

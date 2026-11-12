@@ -435,6 +435,7 @@ class CompositionSettings:
     """Settings that shaped a composition report."""
 
     limit: int
+    max_source_bytes: int
     min_duplicate_tokens: int
     qt_modules: tuple[str, ...]
     logging_patterns: tuple[str, ...]
@@ -451,6 +452,7 @@ class CompositionSettings:
         return {
             "language": "Python",
             "limit": self.limit,
+            "max_source_bytes": self.max_source_bytes,
             "min_duplicate_tokens": self.min_duplicate_tokens,
             "qt_modules": list(self.qt_modules),
             "logging_patterns": list(self.logging_patterns),

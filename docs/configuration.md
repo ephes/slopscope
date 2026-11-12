@@ -205,6 +205,7 @@ The composition report also has its own optional section:
 [tool.slopscope.composition]
 limit = 20
 min_duplicate_tokens = 80
+max_source_bytes = 16777216
 qt_modules = ["app.ui.qt"]
 logging_patterns = ["audit_log"]
 compat_markers = ["legacy", "fallback", "compat", "deprecated"]
