@@ -361,10 +361,18 @@ def _run_size_limits(
                 if args.allowlist is not None
                 else _allowlist_path(path, slopscope_config)
             )
-            with size_limits.allowlist_locks([allowlist], action=action):
-                report, pending = _plan_size_limits(path, allowlist, action, slopscope_config)
+            with size_limits.allowlist_locks([allowlist], action=action) as destinations:
+                report, pending = _plan_size_limits(
+                    path,
+                    allowlist,
+                    action,
+                    slopscope_config,
+                    destination=destinations.get(allowlist),
+                )
                 if pending is not None:
-                    size_limits.write_allowlist(allowlist, pending)
+                    size_limits.write_allowlist(
+                        allowlist, pending, destination=destinations[allowlist]
+                    )
             reports.append(report)
             rendered = report
         else:
@@ -387,7 +395,9 @@ def _run_size_limits(
                 raise size_limits.SizeLimitsError(
                     f"projects {shared[0]} and {shared[1]} share the allowlist {shared[2]}"
                 )
-            with size_limits.allowlist_locks(list(allowlists.values()), action=action):
+            with size_limits.allowlist_locks(
+                list(allowlists.values()), action=action
+            ) as destinations:
                 # Plan every project first: all refusals happen before any allowlist is written.
                 planned: list[tuple[str, SizeLimitsReport, size_limits.Units | None, Path]] = []
                 for configured_project in existing_projects:
@@ -397,6 +407,7 @@ def _run_size_limits(
                         action,
                         slopscope_config,
                         label=configured_project.name,
+                        destination=destinations.get(allowlists[configured_project.name]),
                     )
                     planned.append(
                         (
@@ -406,9 +417,14 @@ def _run_size_limits(
                             allowlists[configured_project.name],
                         )
                     )
-                for _name, _report, pending, allowlist in planned:
-                    if pending is not None:
-                        size_limits.write_allowlist(allowlist, pending)
+                size_limits.publish_allowlists(
+                    [
+                        (allowlist, pending)
+                        for _, _, pending, allowlist in planned
+                        if pending is not None
+                    ],
+                    destinations=destinations,
+                )
             project_reports = [
                 SizeLimitsProjectReport(name=name, report=report)
                 for name, report, _pending, _allowlist in planned
@@ -462,6 +478,7 @@ def _plan_size_limits(
     slopscope_config: config_module.SlopscopeConfig,
     *,
     label: str | None = None,
+    destination: size_limits.AllowlistDestination | None = None,
 ) -> tuple[SizeLimitsReport, size_limits.Units | None]:
     configured = slopscope_config.size_limits
     defaults = SizeLimitSettings()
@@ -469,6 +486,7 @@ def _plan_size_limits(
         return size_limits.plan(
             root,
             allowlist_path=allowlist,
+            destination=destination,
             settings=SizeLimitSettings(
                 max_function_lines=configured.max_function_lines or defaults.max_function_lines,
                 max_class_lines=configured.max_class_lines or defaults.max_class_lines,

@@ -132,7 +132,26 @@ Add `.size-limits.json.lock` to your project's `.gitignore` when using the defau
 including interruption. Lock acquisition failures return exit code 2. On Windows, the OS lock call
 retries for about 10 seconds before failing if the target remains busy. These advisory locks
 coordinate slopscope mutations on filesystems supporting OS locks; manual writers must coordinate
-separately. Multi-project publication is still atomic per file, not a multi-file transaction.
+separately.
+
+Mutations bind the requested path to its resolved target and parent directory while acquiring
+locks. Reads check the opened file descriptor against that admitted file. Publication rechecks
+both the requested path's resolution and the target/parent identities immediately before each
+replacement; a symlink retarget, ancestor replacement, or target replacement detected there is
+refused with exit code 2. This is best-effort detection: the rename itself is path-based, so a
+concurrent swap in the short window between the final check and the rename is not prevented.
+Existing symlinks are supported and remain symlinks.
+
+Multi-project seed/update prepares and fsyncs every output and recovery backup before replacing
+any allowlist. A handled staging or replacement error returns exit code 2 with no report and
+restores earlier replacements to their exact prior bytes and permissions (or removes newly
+seeded files), while all locks remain held. If compensation fails, the diagnostic names each
+failed restoration and its retained sibling `.<allowlist-name>.*.backup` file, or the newly
+seeded file to remove. Preserve that backup and restore it manually after resolving the error
+and coordinating with other writers. This is a handled-error guarantee, not a transaction
+across process death or power loss; an interruption may leave a partially published set.
+If publication or compensation is interrupted (for example by Ctrl-C), the sibling `.backup` file
+of every allowlist that was or may have been replaced and not yet restored is kept for manual recovery.
 
 ## Projects
 
@@ -186,7 +205,8 @@ and earlier reject this section as an unknown field; use `0.3.0a1` or later.
   whose items contain `name`, `path`, and a full `report` object, and `skipped_projects`.
 
 Allowlist writes use a flushed and fsynced sibling temporary file before atomic replacement.
-Failed writes leave the previous baseline intact and remove the temporary file. Existing file
+Handled write failures preserve the previous baseline or report retained recovery evidence
+as described above, and remove disposable temporary files. Existing file
 permissions are preserved, and symlinks continue to point at the updated target. New allowlists use
 mode 0600 to keep temporary and final contents private by default; use chmod if other local users
 need access. Cleanup is best effort if the filesystem also refuses temporary-file deletion.

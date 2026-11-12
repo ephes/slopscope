@@ -99,28 +99,95 @@ def _keyed(path: str, definitions: list[tuple[int, str, int]]) -> dict[str, int]
     return keyed
 
 
-def load_allowlist(path: Path) -> Units | None:
-    """Load an allowlist, or return ``None`` when the file does not exist."""
+@dataclasses.dataclass(frozen=True)
+class AllowlistDestination:
+    path: Path
+    target: Path
+    identity: tuple[int, int] | None
+    parent_identity: tuple[int, int] | None
+    mode: int | None
 
+
+def _identity(path: Path) -> tuple[int, int] | None:
     try:
+        info = path.stat()
+    except FileNotFoundError:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def _resolve(path: Path) -> Path:
+    try:
+        return path.resolve()
+    except RuntimeError as exc:
+        raise SizeLimitsError(f"allowlist path contains a symlink loop: {path}") from exc
+
+
+def _destination(path: Path, target: Path) -> AllowlistDestination:
+    try:
+        info = target.stat()
+    except FileNotFoundError:
+        info = None
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        raise SizeLimitsError(f"allowlist {path} must be a regular file")
+    return AllowlistDestination(
+        path,
+        target,
+        (info.st_dev, info.st_ino) if info else None,
+        _identity(target.parent),
+        stat.S_IMODE(info.st_mode) if info else None,
+    )
+
+
+def _verify_destination(destination: AllowlistDestination) -> None:
+    if (
+        _resolve(destination.path) != destination.target
+        or _resolve(destination.target) != destination.target
+        or _identity(destination.target) != destination.identity
+        or _identity(destination.target.parent) != destination.parent_identity
+    ):
+        raise SizeLimitsError(f"allowlist target changed after locking: {destination.path}")
+
+
+def _read_allowlist_bytes(
+    path: Path, destination: AllowlistDestination | None = None
+) -> bytes | None:
+    try:
+        if destination is not None:
+            _verify_destination(destination)
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(path, flags), "rb") as handle:
+        with os.fdopen(os.open(destination.target if destination else path, flags), "rb") as handle:
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise SizeLimitsError(f"allowlist {path} must be a regular file")
+            if destination is not None and (info.st_dev, info.st_ino) != destination.identity:
+                raise SizeLimitsError(f"allowlist target changed after locking: {path}")
             if info.st_size > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
-            # Bound the read as well: the file may grow after fstat.
             content = handle.read(MAX_ALLOWLIST_BYTES + 1)
             if len(content) > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
-        text = content.decode("utf-8")
+        if destination is not None:
+            _verify_destination(destination)
+        return content
     except FileNotFoundError:
+        if destination is not None:
+            _verify_destination(destination)
         return None
-    except UnicodeDecodeError as exc:
-        raise SizeLimitsError(f"allowlist {path} is not valid UTF-8: {exc}") from exc
     except OSError as exc:
         raise SizeLimitsError(f"could not read allowlist {path}: {exc}") from exc
+
+
+def load_allowlist(path: Path, *, destination: AllowlistDestination | None = None) -> Units | None:
+    """Load an allowlist, or return ``None`` when the file does not exist."""
+
+    content = _read_allowlist_bytes(path, destination)
+    if content is None:
+        return None
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SizeLimitsError(f"allowlist {path} is not valid UTF-8: {exc}") from exc
     try:
         data = json.loads(text, object_pairs_hook=unique_object)
     except DuplicateKeyError as exc:
@@ -148,47 +215,160 @@ def load_allowlist(path: Path) -> Units | None:
     return allowlist
 
 
-def write_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> None:
-    """Write an allowlist with every section and sorted keys."""
+def write_allowlist(
+    path: Path,
+    allowlist: Mapping[str, Mapping[str, int]],
+    *,
+    destination: AllowlistDestination | None = None,
+) -> None:
+    """Write an allowlist with every section and sorted keys.
 
-    data = {kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS}
-    text = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    temporary: Path | None = None
-    target = path.resolve()
+    Mutation callers pass the destination admitted by ``allowlist_locks``.
+    """
+
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
+        if destination is None:
+            target = _resolve(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            destination = _destination(path, target)
+        publish_allowlists([(path, allowlist)], destinations={path: destination})
+    except OSError as exc:
+        raise SizeLimitsError(f"could not write allowlist {path}: {exc}") from exc
+
+
+@dataclasses.dataclass
+class _PreparedAllowlist:
+    destination: AllowlistDestination
+    temporary: Path
+    backup: Path | None
+    installed_identity: tuple[int, int] | None = None
+    keep_backup: bool = False
+
+
+def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str) -> Path:
+    temporary: Path | None = None
+    try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=target.parent, prefix=f".{target.name}.", delete=False
+            mode="wb", dir=target.parent, prefix=f".{target.name}.", suffix=suffix, delete=False
         ) as handle:
             temporary = Path(handle.name)
             if mode is not None:
                 os.chmod(temporary, mode)
-            handle.write(text)
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, target)
-        temporary = None
-    except OSError as exc:
-        raise SizeLimitsError(f"could not write allowlist {path}: {exc}") from exc
-    finally:
+        return temporary
+    except BaseException:
         if temporary is not None:
             with contextlib.suppress(OSError):
                 temporary.unlink(missing_ok=True)
+        raise
+
+
+def publish_allowlists(
+    updates: Sequence[tuple[Path, Mapping[str, Mapping[str, int]]]],
+    *,
+    destinations: Mapping[Path, AllowlistDestination],
+) -> None:
+    """Stage the set, then replace; compensate handled errors under the caller's locks.
+
+    This does not provide a transaction across process death. Failed compensation retains
+    a named sibling backup for manual recovery.
+    """
+
+    prepared: list[_PreparedAllowlist] = []
+    replaced: list[_PreparedAllowlist] = []
+    try:
+        for path, allowlist in updates:
+            destination = destinations[path]
+            _verify_destination(destination)
+            data = {
+                kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS
+            }
+            content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            temporary = _stage_bytes(
+                destination.target, content, destination.mode, suffix=".pending"
+            )
+            item = _PreparedAllowlist(destination, temporary, None)
+            prepared.append(item)
+            prior = _read_allowlist_bytes(path, destination)
+            if prior is not None:
+                item.backup = _stage_bytes(
+                    destination.target, prior, destination.mode, suffix=".backup"
+                )
+        # No replacements before every project has a durable output and recovery copy.
+        for item in prepared:
+            _verify_destination(item.destination)
+        for item in prepared:
+            _verify_destination(item.destination)
+            item.installed_identity = _identity(item.temporary)
+            # Keep the prior bytes until the outcome is settled, so an interruption at any
+            # point after this replacement (including during compensation) retains them.
+            item.keep_backup = True
+            os.replace(item.temporary, item.destination.target)
+            replaced.append(item)
+        for item in prepared:
+            item.keep_backup = False
+    except (OSError, SizeLimitsError) as exc:
+        for item in prepared:
+            if item not in replaced:
+                item.keep_backup = False  # Not replaced: the target still holds its prior bytes.
+        recovery_errors: list[str] = []
+        for item in reversed(replaced):
+            destination = item.destination
+            try:
+                # Do not restore through a changed ancestor or clobber an external writer.
+                _verify_destination(
+                    dataclasses.replace(destination, identity=item.installed_identity)
+                )
+                if item.backup is None:
+                    destination.target.unlink()
+                else:
+                    os.replace(item.backup, destination.target)
+                item.keep_backup = False
+            except (OSError, SizeLimitsError) as recovery:
+                evidence = (
+                    f"restore from {item.backup}"
+                    if item.backup is not None
+                    else f"remove newly seeded {destination.target}"
+                )
+                recovery_errors.append(f"{destination.path}: {recovery}; {evidence}")
+        details = "; compensation failed: " + "; ".join(recovery_errors) if recovery_errors else ""
+        raise SizeLimitsError(f"could not publish allowlists: {exc}{details}") from exc
+    finally:
+        for item in prepared:
+            for leftover in (item.temporary, None if item.keep_backup else item.backup):
+                if leftover is not None:
+                    with contextlib.suppress(OSError):
+                        leftover.unlink(missing_ok=True)
 
 
 @contextlib.contextmanager
-def allowlist_locks(paths: Sequence[Path], *, action: str) -> Iterator[None]:
+def allowlist_locks(
+    paths: Sequence[Path], *, action: str
+) -> Iterator[dict[Path, AllowlistDestination]]:
     """Hold per-target OS locks across read/plan/publish; reports create no locks."""
 
     if action == REPORT:
-        yield
+        yield {}
         return
-    targets = sorted({path.resolve() for path in paths})
     with contextlib.ExitStack() as stack:
-        for target in targets:
-            stack.enter_context(_allowlist_lock(target))
-        yield
+        try:
+            targets = {path: _resolve(path) for path in paths}
+            parents = {}
+            for target in sorted(set(targets.values())):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                parents[target] = _identity(target.parent)
+                stack.enter_context(_allowlist_lock(target))
+            destinations = {}
+            for path, target in targets.items():
+                if _resolve(path) != target or _identity(target.parent) != parents[target]:
+                    raise SizeLimitsError(f"allowlist target changed while locking: {path}")
+                destinations[path] = _destination(path, target)
+        except OSError as exc:
+            raise SizeLimitsError(f"could not lock allowlist: {exc}") from exc
+        # Errors from the caller's body propagate unchanged rather than as lock failures.
+        yield destinations
 
 
 @contextlib.contextmanager
@@ -197,6 +377,7 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
     lock = target.with_name(f".{target.name}.lock")
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
+        parent_identity = _identity(lock.parent)
         descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NONBLOCK", 0), 0o600)
     except OSError as exc:
         raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
@@ -214,6 +395,11 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
         except OSError as exc:
             raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
+        if _identity(lock.parent) != parent_identity or _identity(lock) != (
+            os.fstat(descriptor).st_dev,
+            os.fstat(descriptor).st_ino,
+        ):
+            raise SizeLimitsError(f"allowlist target changed while locking: {target}")
         yield
     finally:
         os.close(descriptor)
@@ -233,10 +419,11 @@ def check(
 ) -> SizeLimitsReport:
     """Measure a project, apply ``action`` to its allowlist, and report the four groups."""
 
-    with allowlist_locks([allowlist_path], action=action):
+    with allowlist_locks([allowlist_path], action=action) as destinations:
         report, pending = plan(
             root,
             allowlist_path=allowlist_path,
+            destination=destinations.get(allowlist_path),
             settings=settings,
             action=action,
             excluded_paths=excluded_paths,
@@ -246,7 +433,7 @@ def check(
             max_source_bytes=max_source_bytes,
         )
         if pending is not None:
-            write_allowlist(allowlist_path, pending)
+            write_allowlist(allowlist_path, pending, destination=destinations[allowlist_path])
     return report
 
 
@@ -254,6 +441,7 @@ def plan(
     root: Path,
     *,
     allowlist_path: Path,
+    destination: AllowlistDestination | None = None,
     settings: SizeLimitSettings,
     action: str = REPORT,
     excluded_paths: Sequence[str],
@@ -266,10 +454,11 @@ def plan(
 
     Returns the report and, for seed and update, the allowlist to write. Every refusal is raised
     here, so a caller can plan several projects before writing any of them. Mutation callers must
-    hold ``allowlist_locks`` across all planning and publication, or use ``check``.
+    hold ``allowlist_locks`` across all planning and publication and pass its destination
+    to both operations, or use ``check``.
     """
 
-    loaded = load_allowlist(allowlist_path)
+    loaded = load_allowlist(allowlist_path, destination=destination)
     existed = loaded is not None
     if action == SEED and existed:
         raise SizeLimitsError(

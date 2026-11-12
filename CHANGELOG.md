@@ -8,10 +8,19 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bind allowlist mutation reads and publication to the locked resolved target and parent identity;
+  refuse symlink retargets and destination changes, including mismatched opened file descriptors.
+- Stage all project allowlists before publication and compensate earlier replacements on handled
+  errors, preserving prior bytes, modes, or absence. Failed compensation retains named recovery
+  backups, as does an interruption during publication or compensation for every allowlist that was
+  or may have been replaced and not yet restored; process death and power loss remain outside this
+  guarantee. Destination rechecks are best-effort: a swap racing the final path-based rename is not
+  prevented.
+
 - Bind composition and size-limit source reads to discovery identities using no-follow directory
   descriptors and nonblocking regular-file opens; changed sources make analysis incomplete and
-  preserve snapshots and allowlists. Platforms without the required OS APIs refuse source analysis; this makes `--composition` and
-  `--size-limits` unsupported on Windows.
+  preserve snapshots and allowlists. Platforms without the required OS APIs refuse source analysis;
+  this makes `--composition` and `--size-limits` unsupported on Windows.
 - Limit each Python source to 16 MiB before decoding or parsing, with an opened-file size check
   and bounded byte read; configure the positive ceiling with `composition.max_source_bytes`.
   Preserve PEP 263 encodings and newline normalization at the exact limit.
