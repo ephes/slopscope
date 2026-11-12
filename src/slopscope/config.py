@@ -42,6 +42,7 @@ class CompositionConfig:
 
     limit: int | None = None
     min_duplicate_tokens: int | None = None
+    max_source_bytes: int | None = None
     qt_modules: tuple[str, ...] = ()
     logging_patterns: tuple[str, ...] = ()
     compat_markers: tuple[str, ...] | None = None
@@ -96,6 +97,7 @@ _SIZE_LIMITS_FIELDS = {
 }
 _COMPOSITION_FIELDS = {
     "limit",
+    "max_source_bytes",
     "min_duplicate_tokens",
     "qt_modules",
     "logging_patterns",
@@ -235,6 +237,7 @@ def _composition_config(data: Mapping[str, object]) -> CompositionConfig:
     )
     return CompositionConfig(
         limit=_optional_positive_int(value, "limit", context=context),
+        max_source_bytes=_optional_positive_int(value, "max_source_bytes", context=context),
         min_duplicate_tokens=_optional_positive_int(value, "min_duplicate_tokens", context=context),
         qt_modules=_string_tuple(value, "qt_modules", default=()),
         logging_patterns=_string_tuple(value, "logging_patterns", default=()),

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import io
+import os
 import platform
 import re
 import tokenize
@@ -18,7 +19,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from slopscope import classify, composition_duplication, composition_semantics, fallback
+from slopscope import _source, classify, composition_duplication, composition_semantics, fallback
 from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
@@ -41,6 +42,7 @@ ANALYZER_VERSION = 2
 SCHEMA_VERSION = 4
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"
+DEFAULT_MAX_SOURCE_BYTES = 16 * 1024 * 1024
 SOURCE_TEST_KINDS = ("source", "tests", "other")
 
 BLANK = "blank"
@@ -167,17 +169,25 @@ def analyze_file(
     test_file: bool = False,
     interner: dict[str, int] | None = None,
     settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
+    admission: _source.Admission | None = None,
+    max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
 ) -> FileAnalysis:
     """Read one file with PEP 263 encoding detection and classify its lines."""
 
-    file_path = root / relative_path
     try:
-        with tokenize.open(file_path) as handle:
-            source = handle.read()
+        with _source.open_source(root, relative_path, admission) as handle:
+            if os.fstat(handle.fileno()).st_size > max_source_bytes:
+                raise CompositionAnalysisError(f"source exceeds {max_source_bytes} bytes")
+            raw = _source.read_bounded(handle, max_source_bytes)
+            if raw is None:
+                raise CompositionAnalysisError(f"source exceeds {max_source_bytes} bytes")
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
+        with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding) as text:
+            source = text.read()
     except UnicodeDecodeError as exc:
         raise CompositionAnalysisError(f"decode error: {exc}") from exc
     except SyntaxError as exc:
-        # tokenize.open() reports unknown or conflicting encoding declarations as SyntaxError.
+        # Encoding detection reports unknown or conflicting declarations as SyntaxError.
         raise CompositionAnalysisError(f"decode error: {exc.msg}") from exc
     except OSError as exc:
         raise CompositionAnalysisError(f"I/O error: {exc.strerror or exc}") from exc
@@ -191,6 +201,7 @@ def discover_python_files(
     *,
     excluded_paths: Iterable[str],
     include_globs: Iterable[str] = (),
+    admissions: dict[str, _source.Admission] | None = None,
 ) -> list[str]:
     """Discover Python files with the fallback discovery rules, sorted by relative path."""
 
@@ -207,7 +218,16 @@ def discover_python_files(
         # Tracked paths missing from the working tree are skipped, as in the default report.
         and (root / relative_path).is_file()
     }
-    return sorted(relative_paths)
+    paths = sorted(relative_paths)
+    if admissions is not None:
+        for relative_path in paths:
+            try:
+                admissions[relative_path] = _source.admit(root, relative_path)
+            except OSError as exc:
+                raise fallback.CountingError(
+                    f"incomplete analysis: could not admit source {relative_path!r}: {exc}"
+                ) from exc
+    return paths
 
 
 def build_composition_report(
@@ -220,6 +240,7 @@ def build_composition_report(
     named_areas: Sequence[str] = classify.DEFAULT_NAMED_AREAS,
     limit: int = DEFAULT_LIMIT,
     min_duplicate_tokens: int = composition_duplication.DEFAULT_MIN_TOKENS,
+    max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
     semantic_settings: composition_semantics.SemanticSettings = (
         composition_semantics.DEFAULT_SETTINGS
     ),
@@ -233,11 +254,13 @@ def build_composition_report(
     classes: list[CompositionClassRow] = []
     functions: list[CompositionFunctionRow] = []
     failures: list[CompositionFailure] = []
+    admissions: dict[str, _source.Admission] = {}
 
     for relative_path in discover_python_files(
         root,
         excluded_paths=excluded_paths,
         include_globs=include_globs,
+        admissions=admissions,
     ):
         kind = classify.classify_source_test(
             relative_path, source_dirs=source_dirs, test_dirs=test_dirs
@@ -249,6 +272,8 @@ def build_composition_report(
                 test_file=kind == "tests",
                 interner=interner,
                 settings=semantic_settings,
+                admission=admissions[relative_path],
+                max_source_bytes=max_source_bytes,
             )
         except CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
@@ -306,6 +331,7 @@ def build_composition_report(
         detectors=DETECTORS,
         settings=CompositionSettings(
             limit=limit,
+            max_source_bytes=max_source_bytes,
             min_duplicate_tokens=min_duplicate_tokens,
             qt_modules=semantic_settings.qt_modules,
             logging_patterns=semantic_settings.logging_patterns,

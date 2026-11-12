@@ -480,6 +480,8 @@ def _plan_size_limits(
             include_globs=slopscope_config.include_globs,
             source_dirs=slopscope_config.source_dirs,
             test_dirs=slopscope_config.test_dirs,
+            max_source_bytes=slopscope_config.composition.max_source_bytes
+            or composition.DEFAULT_MAX_SOURCE_BYTES,
         )
     except size_limits.SizeLimitsError as exc:
         if label is None:
@@ -794,6 +796,8 @@ def _build_composition_report(
         limit=limit,
         min_duplicate_tokens=composition_config.min_duplicate_tokens
         or composition_duplication.DEFAULT_MIN_TOKENS,
+        max_source_bytes=composition_config.max_source_bytes
+        or composition.DEFAULT_MAX_SOURCE_BYTES,
         semantic_settings=composition_semantics.SemanticSettings.configured(
             qt_modules=composition_config.qt_modules,
             logging_patterns=composition_config.logging_patterns,
