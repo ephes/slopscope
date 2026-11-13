@@ -34,15 +34,15 @@ def is_cloc_available(executable: str = "cloc") -> bool:
 
 
 def build_language_summary_command(path: Path | str, executable: str = "cloc") -> list[str]:
-    """Build the cloc command used for the first language-summary slice."""
+    """Build argv with an absolute root operand, including option-like directory names."""
 
-    return [executable, str(path), "--vcs=git", "--csv", "--quiet"]
+    return [executable, str(Path(path).resolve()), "--vcs=git", "--csv", "--quiet"]
 
 
 def build_file_summary_command(path: Path | str, executable: str = "cloc") -> list[str]:
-    """Build the cloc command used for file-level count rows."""
+    """Build file-summary argv; absolute roots also anchor emitted file identities."""
 
-    return [executable, str(path), "--vcs=git", "--by-file", "--csv", "--quiet"]
+    return [executable, str(Path(path).resolve()), "--vcs=git", "--by-file", "--csv", "--quiet"]
 
 
 def run_command(command: Sequence[str]) -> ClocResult:

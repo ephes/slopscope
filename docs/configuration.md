@@ -129,6 +129,10 @@ With `physical_lines = false`, profiles use normal engine semantics: `--engine c
 use `cloc` code counts from file-level rows, while `--engine python` or unavailable `cloc` in `auto` mode use Python
 physical-line rows.
 
+Cloc receives the selected root as one absolute argv operand, so names beginning with `--`,
+spaces, and newlines stay paths. Grouping uses root-relative file identities for `.` and nested
+relative roots as well as absolute roots; a child sharing the root basename is retained.
+
 Supported profile fields are `name`, `include_languages`, `exclude_languages`, `include_globs`, `physical_lines`,
 `group_by`, and `top`.
 
