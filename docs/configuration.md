@@ -153,6 +153,16 @@ slopscope --profile roles
 slopscope --profile roles --top 10
 ```
 
+The selected profile's effective include/exclude language filters must not overlap after inheritance.
+Policy is checked before engine selection, Git/cloc execution, or file counting, even in an empty
+repository. Errors name the selected profile. Each non-empty profile filter replaces only its
+matching top-level filter; empty fields inherit as before.
+
+`group_by` must be a relative slash-separated path with exactly one `*` segment and literal
+surrounding segments. Empty, `.` or `..` segments, absolute paths, and other glob syntax (`?`,
+`[]`, or partial/repeated wildcards) are refused before counting. Literal suffixes such as
+`roles/*/tasks` are supported.
+
 Grouped reports support plain, Rich, and JSON output. Rich remains optional and falls back to plain output when Rich
 is unavailable or disabled. A pattern such as `roles/*` groups matching files by `roles/<name>`. Files that do not
 match the group pattern are ignored for grouped rows and grouped totals. Rows are sorted by code descending, files

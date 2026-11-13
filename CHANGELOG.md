@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Admit serialized allowlists and composition snapshots against their readers' 16 MiB UTF-8
+  ceilings before staging; an oversized multi-project allowlist batch preserves every prior
+  artifact. Exact-limit payloads remain readable and accepted.
+
+- Validate selected profiles after language-filter inheritance and reject malformed grouping
+  patterns before engine selection or counting, with a bounded profile-specific diagnostic.
+
 - Pass absolute root operands to cloc, protecting option-like directory names and keeping
   grouped profile identities consistent for relative and absolute roots.
 

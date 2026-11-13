@@ -228,6 +228,7 @@ def write_allowlist(
 
     try:
         if destination is None:
+            _serialize_allowlist(path, allowlist)  # Admit before creating a missing parent.
             target = _resolve(path)
             target.parent.mkdir(parents=True, exist_ok=True)
             destination = _destination(path, target)
@@ -265,6 +266,14 @@ def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str)
         raise
 
 
+def _serialize_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> bytes:
+    data = {kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS}
+    content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(content) > MAX_ALLOWLIST_BYTES:
+        raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+    return content
+
+
 def publish_allowlists(
     updates: Sequence[tuple[Path, Mapping[str, Mapping[str, int]]]],
     *,
@@ -276,16 +285,14 @@ def publish_allowlists(
     a named sibling backup for manual recovery.
     """
 
+    # Admit the whole batch before staging any output or recovery copy.
+    contents = [(path, _serialize_allowlist(path, data)) for path, data in updates]
     prepared: list[_PreparedAllowlist] = []
     replaced: list[_PreparedAllowlist] = []
     try:
-        for path, allowlist in updates:
+        for path, content in contents:
             destination = destinations[path]
             _verify_destination(destination)
-            data = {
-                kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS
-            }
-            content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
             temporary = _stage_bytes(
                 destination.target, content, destination.mode, suffix=".pending"
             )

@@ -403,6 +403,11 @@ all selected projects. A distinct snapshot inside the repository is allowed.
 The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
 Write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
 Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
+Snapshot output has the same 16 MiB (16,777,216 bytes) ceiling as the baseline reader,
+including the entire multi-project envelope. The complete serialized UTF-8 bytes (formatting
+and final newline included) are checked before creating a temporary file. Exact-limit output
+is accepted; overflow returns exit code 2 without a report or publication, retaining every
+previous snapshot byte. Terminal-only JSON output is not subject to this artifact ceiling.
 A symlinked snapshot updates the resolved target approved during preflight. Publication rechecks
 that resolution and the destination and parent-directory identities before writing and again before
 replacement. A changed target, including a symlink retarget during analysis or writing, returns exit
