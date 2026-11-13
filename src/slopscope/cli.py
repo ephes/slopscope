@@ -729,6 +729,9 @@ def _verify_snapshot_destination(path: Path, destination: _SnapshotDestination) 
 
 def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination) -> None:
     """Publish serialized JSON without truncating a previous snapshot."""
+    content = text.encode("utf-8")
+    if len(content) > composition_baseline.MAX_BASELINE_BYTES:
+        raise OSError(f"snapshot {path} exceeds {composition_baseline.MAX_BASELINE_BYTES} bytes")
     _verify_snapshot_destination(path, destination)
     target = destination.target
     temporary: Path | None = None
@@ -742,10 +745,10 @@ def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination)
                 raise OSError("snapshot destination must be a regular file")
             mode = stat.S_IMODE(metadata.st_mode)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=target.parent, prefix=f".{target.name}.", delete=False
+            mode="wb", dir=target.parent, prefix=f".{target.name}.", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            handle.write(text)
+            handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
             if mode is not None:

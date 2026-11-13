@@ -289,6 +289,10 @@ units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offend
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
 one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
 including duplicates with identical values; refused inputs leave existing outputs unchanged.
+Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,
+including JSON formatting and the final newline. Exact-limit outputs are accepted. Overflow
+returns exit code 2 before staging; any oversized allowlist in a multi-project batch preserves
+all previous allowlists. Multi-project snapshots share one ceiling for the complete envelope.
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Multi-project publication stages all outputs first and restores earlier writes on handled
 errors; failed restoration retains a named recovery backup. Process death is outside this guarantee.

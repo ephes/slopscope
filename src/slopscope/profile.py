@@ -29,10 +29,11 @@ def find_profile(
     slopscope_config: config_module.SlopscopeConfig,
     name: str,
 ) -> config_module.ProfileConfig:
-    """Return a configured profile by name, or raise a user-facing error."""
+    """Find a named profile and validate its effective policy before engine selection."""
 
     for configured_profile in slopscope_config.profiles:
         if configured_profile.name == name:
+            _validate_effective_profile(slopscope_config, configured_profile)
             return configured_profile
     raise ProfileError(f"no configured profile named {name!r}")
 
@@ -47,6 +48,7 @@ def build_profile_report(
 ) -> ProfileReport:
     """Build a total or grouped report for one configured profile."""
 
+    _validate_effective_profile(slopscope_config, selected_profile)
     file_rows = _build_profile_file_rows(
         path=path,
         slopscope_config=slopscope_config,
@@ -208,11 +210,39 @@ def _group_name(path: Path | str, pattern: str) -> str | None:
 
 
 def _group_wildcard_index(pattern: str) -> int:
-    pattern_parts = _path_parts(pattern)
+    pattern_parts = tuple(pattern.split("/"))
     wildcard_indexes = [index for index, part in enumerate(pattern_parts) if part == "*"]
-    if len(wildcard_indexes) != 1:
-        raise ProfileError(f"group_by must contain exactly one '*' path segment: {pattern}")
+    if len(wildcard_indexes) != 1 or any(
+        part != "*" and (part in ("", ".", "..") or any(char in part for char in "*?[]"))
+        for part in pattern_parts
+    ):
+        raise ProfileError(
+            "group_by must contain exactly one '*' path segment "
+            "and otherwise literal relative path segments"
+        )
     return wildcard_indexes[0]
+
+
+def _validate_effective_profile(
+    slopscope_config: config_module.SlopscopeConfig,
+    selected_profile: config_module.ProfileConfig,
+) -> None:
+    """Admit inherited policy before engine selection, discovery, or counting."""
+
+    context = f"profile {selected_profile.name[:80]!r}"
+    include = _effective_include_languages(
+        slopscope_config=slopscope_config, selected_profile=selected_profile
+    )
+    exclude = _effective_exclude_languages(
+        slopscope_config=slopscope_config, selected_profile=selected_profile
+    )
+    if set(include).intersection(exclude):
+        raise ProfileError(f"{context}: include_languages and exclude_languages must not overlap")
+    if selected_profile.group_by is not None:
+        try:
+            _group_wildcard_index(selected_profile.group_by)
+        except ProfileError as exc:
+            raise ProfileError(f"{context}: {exc}") from exc
 
 
 def _effective_include_languages(

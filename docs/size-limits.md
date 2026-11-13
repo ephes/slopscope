@@ -94,6 +94,11 @@ agree, with a bounded key diagnostic and object member index. Existing allowlist
 Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
 (16,777,216 bytes). The opened descriptor is checked before a bounded read; special files such as
 named pipes are refused without waiting for a writer.
+Seed/update output uses the same 16 MiB ceiling, measured on the complete serialized UTF-8
+bytes including formatting and the final newline. Exact-limit output is accepted. Every
+project's payload is checked before staging any output or recovery backup; an oversized
+payload returns exit code 2 and preserves all prior allowlists (or their absence). Stable
+lock files may remain as usual. The ceiling is per allowlist, not the sum across projects.
 
 ## Report
 

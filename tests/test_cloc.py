@@ -32,7 +32,7 @@ def test_cloc_availability_detection_when_missing(monkeypatch: pytest.MonkeyPatc
 def test_build_language_summary_command() -> None:
     assert cloc.build_language_summary_command(Path(".")) == [
         "cloc",
-        ".",
+        str(Path(".").resolve()),
         "--vcs=git",
         "--csv",
         "--quiet",
@@ -42,7 +42,7 @@ def test_build_language_summary_command() -> None:
 def test_build_file_summary_command() -> None:
     assert cloc.build_file_summary_command(Path(".")) == [
         "cloc",
-        ".",
+        str(Path(".").resolve()),
         "--vcs=git",
         "--by-file",
         "--csv",
@@ -53,7 +53,7 @@ def test_build_file_summary_command() -> None:
 def test_build_file_summary_command_accepts_custom_executable() -> None:
     assert cloc.build_file_summary_command("src", executable="custom-cloc") == [
         "custom-cloc",
-        "src",
+        str(Path("src").resolve()),
         "--vcs=git",
         "--by-file",
         "--csv",
@@ -74,7 +74,7 @@ def test_run_file_summary_uses_file_summary_command(monkeypatch: pytest.MonkeyPa
 
     assert result == cloc.ClocResult(returncode=0, stdout="", stderr="")
     assert calls == [
-        ["custom-cloc", "src", "--vcs=git", "--by-file", "--csv", "--quiet"],
+        ["custom-cloc", str(Path("src").resolve()), "--vcs=git", "--by-file", "--csv", "--quiet"],
     ]
 
 
