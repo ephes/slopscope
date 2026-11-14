@@ -8,6 +8,23 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Count physical lines in bounded binary chunks with the existing UTF-8/ignored-error and
+  universal-newline semantics; enforce 16 MiB per source and 128 MiB per physical report.
+  Compatibility: these physical-line limits and the filesystem discovery limits below are fixed,
+  not configurable. A python-engine report (including `auto` without cloc) or a
+  `physical_lines = true` profile over them, for example with a large data fixture or minified
+  bundle, now exits 2 without output where it previously reported. Exclude such paths or use the
+  cloc engine. Limit diagnostics quote and truncate paths.
+- Bound composition source bytes, shared code tokens/interner, and potential duplicate anchors
+  across the entire repository/project. Configure positive `max_total_source_bytes`,
+  `max_total_tokens`, and `max_total_anchors`; overflow refuses partial reports/snapshots and
+  preserves prior artifacts. Exact-limit inputs retain existing counting and duplicate detection.
+
+- Analyze working-tree bytes once per exact Git path, including unresolved index stages;
+  retain first discovery order and distinct case/Unicode spellings.
+- Bound filesystem fallback entry, file, directory, and depth work before counting or publication;
+  refuse excess trees with an incomplete-analysis error and preserve snapshots/allowlists.
+
 - Admit serialized allowlists and composition snapshots against their readers' 16 MiB UTF-8
   ceilings before staging; an oversized multi-project allowlist batch preserves every prior
   artifact. Exact-limit payloads remain readable and accepted.

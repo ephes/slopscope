@@ -157,6 +157,15 @@ composition, and size-limits. Git startup failures (including a missing executab
 filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
 `subprocess.run`, process creation itself may not be interruptible on every platform.
 
+Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
+stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.
+Filesystem fallback visits at most 200,000 entries (including excluded entries in visited directories),
+admits at most 100,000 regular files and 20,000 directories (including the root), and descends at most
+128 directory levels below the root. Excluded directories remain pruned; ordinary sorted depth-first
+ordering is unchanged. These fixed per-discovery limits are checked before retaining excess entries
+or sorting a listing. Overflow returns exit code 2 without a report, snapshot, or allowlist write.
+The cloc engine's discovery is unchanged.
+
 The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
 default excludes for common caches, virtual environments, dependency directories, and build output, then counts
 physical lines in mapped text-like files using UTF-8 with ignored decode errors. Source symlink files and paths
@@ -177,6 +186,23 @@ Both modes admit at most 16 MiB per Python source by default, checking the opene
 bounding the byte read before PEP 263 decoding, AST parsing, or tokenization. Configure a positive
 `max_source_bytes` under `[tool.slopscope.composition]` to change the ceiling. Exact-limit sources
 are accepted; oversized or growing sources make analysis incomplete and preserve existing outputs.
+
+Python physical-line reports and physical-line profiles read at most 16 MiB per included source
+and 128 MiB of raw source bytes per report, using binary reads of at most 64 KiB. These fixed
+limits include invalid UTF-8 bytes; decoding still ignores errors, CR/LF/CRLF count as line endings,
+and a final unterminated decoded line counts once. One overflow-probe byte may be read. Oversized
+or growing inputs return exit code 2 with an incomplete-analysis error and no report or total.
+These limits are not configurable: exclude large generated or data files, or use the cloc engine.
+
+Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
+2,000,000 retained code tokens, and 500,000 potential duplicate anchors (code line starts within
+each token segment). These ceilings include all files together; unique interned strings cannot
+outnumber admitted code tokens. Raw bytes are charged before decoding, including reads from failed
+files. A file's token/anchor batch is admitted before changing the shared interner or retaining its
+segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
+under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
+or snapshot; prior artifacts survive. These aggregate composition settings do not apply to size-limits
+or cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
 
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission
 denied), Python reports and physical-line profiles fail with exit code 2 and an incomplete-analysis diagnostic

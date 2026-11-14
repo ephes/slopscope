@@ -46,6 +46,9 @@ adjusts it:
 limit = 20
 min_duplicate_tokens = 80
 max_source_bytes = 16777216
+max_total_source_bytes = 134217728
+max_total_tokens = 2000000
+max_total_anchors = 500000
 qt_modules = ["app.ui.qt"]
 logging_patterns = ["audit_log"]
 compat_markers = ["legacy", "fallback", "compat", "deprecated"]
@@ -58,6 +61,9 @@ churn_months = 24
 | `limit` | Rows in the largest-item and duplicate lists. `--limit` overrides it. | 10 |
 | `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
 | `max_source_bytes` | Positive per-source byte ceiling, also used by size-limits, checked before decoding or parsing. | 16777216 (16 MiB) |
+| `max_total_source_bytes` | Positive cumulative raw-byte ceiling for all sources read in one composition report, charged before decoding (including failed files). | 134217728 (128 MiB) |
+| `max_total_tokens` | Positive cumulative retained code-token ceiling; also bounds the number of shared interned strings. | 2000000 |
+| `max_total_anchors` | Positive cumulative potential duplicate-anchor ceiling: code line starts in token segments, including short segments without a full duplicate window. | 500000 |
 | `qt_modules` | Extra modules treated as Qt, added to `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, and `qtpy`. Dotted names match the module and everything inside it, so a project's own Qt wrapper package can count. | none |
 | `logging_patterns` | Opt-in substrings: a call whose dotted function name contains one of them, such as `audit_log.write()` for `audit_log`, gets the `logging` tag. | none |
 | `compat_markers` | Words for the `compat` marker, replacing the defaults. An empty list turns the marker off. | `legacy`, `fallback`, `compat` |
@@ -107,7 +113,20 @@ the ceiling plus one byte to detect growth. These checks precede decoding, parsi
 Encoding detection uses `tokenize.detect_encoding()` to honor PEP 263 declarations and a UTF-8 BOM;
 `\r\n` and `\r` line endings are normalized to `\n`.
 
+Whole-report budgets apply per repository/project, across every selected Python source. Reads use
+at most 64 KiB chunks and one overflow-probe byte. Each file's code-token and potential-anchor
+counts are checked before mutating the shared interner or retaining its token/line arrays; the
+actual duplicate index has no more anchors than this admitted upper bound. Per-file parsing and
+tokenization remain bounded by `max_source_bytes`. Exact ceilings are accepted; below the limits,
+counts and exact duplicate detection are unchanged. The aggregate budgets are composition-only;
+size-limits continues to use its per-source ceiling.
+
 ## Failures
+
+Filesystem discovery-limit or whole-composition budget exhaustion stops immediately with an
+incomplete-analysis diagnostic and exit code 2. No partial report or snapshot is published; an
+existing snapshot remains unchanged, including a multi-project snapshot if any project fails.
+This differs from the per-file failures below.
 
 A file that changed after discovery, exceeds the source byte ceiling, cannot be safely read (I/O error),
 decoded (bad bytes or an unknown encoding declaration), tokenized, or parsed (syntax error) is
@@ -320,6 +339,9 @@ file to keep a snapshot.
     "language": "Python",
     "limit": 10,
     "max_source_bytes": 16777216,
+    "max_total_source_bytes": 134217728,
+    "max_total_tokens": 2000000,
+    "max_total_anchors": 500000,
     "min_duplicate_tokens": 50,
     "qt_modules": ["PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"],
     "logging_patterns": [],
@@ -430,7 +452,8 @@ Comparison rules:
   JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
 - A different analyzer version, detector version, or counting setting (every `settings` entry except
-  `language`, `limit`, and the admission-only `max_source_bytes`) prints a
+  `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
+  `max_total_anchors`, which only control presentation or admission) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
   changed rules or settings alone. A different Python version is
   reported as a warning but stays comparable.

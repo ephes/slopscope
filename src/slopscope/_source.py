@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import BinaryIO
@@ -46,7 +46,9 @@ def _check(actual: os.stat_result, expected: os.stat_result, *, directory: bool)
 _READ_CHUNK = 64 * 1024
 
 
-def read_bounded(handle: BinaryIO, limit: int) -> bytes | None:
+def read_bounded(
+    handle: BinaryIO, limit: int, *, consume: Callable[[int], None] | None = None
+) -> bytes | None:
     """Read at most ``limit`` bytes in fixed-size chunks; return None if the source is larger.
 
     Chunked reads keep allocation proportional to the bytes actually present, so a large
@@ -59,6 +61,8 @@ def read_bounded(handle: BinaryIO, limit: int) -> bytes | None:
         chunk = handle.read(min(_READ_CHUNK, limit - total + 1))
         if not chunk:
             return b"".join(chunks)
+        if consume is not None:
+            consume(len(chunk))
         total += len(chunk)
         if total > limit:
             return None

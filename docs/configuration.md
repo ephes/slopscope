@@ -220,6 +220,9 @@ The composition report also has its own optional section:
 limit = 20
 min_duplicate_tokens = 80
 max_source_bytes = 16777216
+max_total_source_bytes = 134217728
+max_total_tokens = 2000000
+max_total_anchors = 500000
 qt_modules = ["app.ui.qt"]
 logging_patterns = ["audit_log"]
 compat_markers = ["legacy", "fallback", "compat", "deprecated"]

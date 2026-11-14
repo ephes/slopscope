@@ -24,6 +24,9 @@ from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
     COMPOSITION_CONSTRUCTS,
+    DEFAULT_MAX_TOTAL_ANCHORS,
+    DEFAULT_MAX_TOTAL_SOURCE_BYTES,
+    DEFAULT_MAX_TOTAL_TOKENS,
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
@@ -87,6 +90,19 @@ class CompositionAnalysisError(Exception):
     """A file could not be read, decoded, tokenized, or parsed."""
 
 
+@dataclass
+class AnalysisBudget:
+    """Raw bytes read and token/index state admitted across one complete report."""
+
+    source_bytes: int
+    tokens: composition_duplication.TokenBudget
+
+    def consume_source(self, size: int) -> None:
+        if size > self.source_bytes:
+            raise composition_duplication.BudgetExceeded("source byte limit exceeded")
+        self.source_bytes -= size
+
+
 @dataclass(frozen=True)
 class DefinitionSize:
     """Span of one class or function definition inside a file."""
@@ -121,6 +137,7 @@ def analyze_source(
     path: str = "<source>",
     test_file: bool = False,
     interner: dict[str, int] | None = None,
+    budget: AnalysisBudget | None = None,
     settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
 ) -> FileAnalysis:
     """Classify every physical line of Python source text and run the semantic detectors.
@@ -155,7 +172,10 @@ def analyze_source(
         if interner is None:
             return analysis
         segments = composition_duplication.token_segments(
-            tokens, analysis.line_categories, interner
+            tokens,
+            analysis.line_categories,
+            interner,
+            budget=budget.tokens if budget is not None else None,
         )
         return dataclasses.replace(analysis, segments=segments)
     except (RecursionError, MemoryError) as exc:
@@ -168,6 +188,7 @@ def analyze_file(
     *,
     test_file: bool = False,
     interner: dict[str, int] | None = None,
+    budget: AnalysisBudget | None = None,
     settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
     admission: _source.Admission | None = None,
     max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
@@ -176,10 +197,20 @@ def analyze_file(
 
     try:
         with _source.open_source(root, relative_path, admission) as handle:
-            if os.fstat(handle.fileno()).st_size > max_source_bytes:
+            source_size = os.fstat(handle.fileno()).st_size
+            if source_size > max_source_bytes:
                 raise CompositionAnalysisError(f"source exceeds {max_source_bytes} bytes")
-            raw = _source.read_bounded(handle, max_source_bytes)
+            read_limit = max_source_bytes
+            if budget is not None:
+                if source_size > budget.source_bytes:
+                    raise composition_duplication.BudgetExceeded("source byte limit exceeded")
+                read_limit = min(read_limit, budget.source_bytes)
+            raw = _source.read_bounded(
+                handle, read_limit, consume=budget.consume_source if budget is not None else None
+            )
             if raw is None:
+                if read_limit < max_source_bytes:
+                    raise composition_duplication.BudgetExceeded("source byte limit exceeded")
                 raise CompositionAnalysisError(f"source exceeds {max_source_bytes} bytes")
         encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
         with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding) as text:
@@ -192,7 +223,12 @@ def analyze_file(
     except OSError as exc:
         raise CompositionAnalysisError(f"I/O error: {exc.strerror or exc}") from exc
     return analyze_source(
-        source, path=relative_path, test_file=test_file, interner=interner, settings=settings
+        source,
+        path=relative_path,
+        test_file=test_file,
+        interner=interner,
+        settings=settings,
+        budget=budget,
     )
 
 
@@ -241,6 +277,9 @@ def build_composition_report(
     limit: int = DEFAULT_LIMIT,
     min_duplicate_tokens: int = composition_duplication.DEFAULT_MIN_TOKENS,
     max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
+    max_total_source_bytes: int | None = None,
+    max_total_tokens: int | None = None,
+    max_total_anchors: int | None = None,
     semantic_settings: composition_semantics.SemanticSettings = (
         composition_semantics.DEFAULT_SETTINGS
     ),
@@ -248,6 +287,17 @@ def build_composition_report(
     """Discover, analyze, classify, and aggregate Python files below a path."""
 
     root = Path(path)
+    max_total_source_bytes = (
+        DEFAULT_MAX_TOTAL_SOURCE_BYTES if max_total_source_bytes is None else max_total_source_bytes
+    )
+    max_total_tokens = DEFAULT_MAX_TOTAL_TOKENS if max_total_tokens is None else max_total_tokens
+    max_total_anchors = (
+        DEFAULT_MAX_TOTAL_ANCHORS if max_total_anchors is None else max_total_anchors
+    )
+    budget = AnalysisBudget(
+        max_total_source_bytes,
+        composition_duplication.TokenBudget(max_total_tokens, max_total_anchors),
+    )
     interner: dict[str, int] = {}
     analyses: list[FileAnalysis] = []
     file_rows: list[CompositionFileRow] = []
@@ -271,10 +321,13 @@ def build_composition_report(
                 relative_path,
                 test_file=kind == "tests",
                 interner=interner,
+                budget=budget,
                 settings=semantic_settings,
                 admission=admissions[relative_path],
                 max_source_bytes=max_source_bytes,
             )
+        except composition_duplication.BudgetExceeded as exc:
+            raise fallback.CountingError(f"incomplete analysis: whole-composition {exc}") from exc
         except CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
             continue
@@ -332,6 +385,9 @@ def build_composition_report(
         settings=CompositionSettings(
             limit=limit,
             max_source_bytes=max_source_bytes,
+            max_total_source_bytes=max_total_source_bytes,
+            max_total_tokens=max_total_tokens,
+            max_total_anchors=max_total_anchors,
             min_duplicate_tokens=min_duplicate_tokens,
             qt_modules=semantic_settings.qt_modules,
             logging_patterns=semantic_settings.logging_patterns,

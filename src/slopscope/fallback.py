@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 import stat
 import subprocess
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -68,6 +69,13 @@ LANGUAGES_BY_FILENAME = {
 
 GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
 MAX_GIT_DISCOVERY_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_DISCOVERY_ENTRIES = 200_000
+MAX_DISCOVERY_FILES = 100_000
+MAX_DISCOVERY_DIRECTORIES = 20_000  # Includes the selected root and queued directories.
+MAX_DISCOVERY_DEPTH = 128
+PHYSICAL_READ_CHUNK = 64 * 1024
+MAX_PHYSICAL_SOURCE_BYTES = 16 * 1024 * 1024
+MAX_PHYSICAL_TOTAL_BYTES = 128 * 1024 * 1024
 
 
 class GitDiscoveryError(RuntimeError):
@@ -123,7 +131,8 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
 def parse_git_ls_files_output(output: bytes) -> list[Path]:
     """Parse NUL-delimited git file output as relative paths."""
 
-    return [Path(os.fsdecode(part)) for part in output.split(b"\0") if part]
+    # Deduplicate the exact spelling, without case folding or Unicode normalization.
+    return [Path(os.fsdecode(part)) for part in dict.fromkeys(output.split(b"\0")) if part]
 
 
 def discover_files(
@@ -230,24 +239,48 @@ def discover_filesystem_files(
     pruned_names = set(pruned_dir_names)
     files: list[Path] = []
 
-    def traversal_error(error: OSError) -> None:
-        affected = repr(str(error.filename or root))[:240]
-        raise CountingError(f"incomplete analysis: could not traverse {affected}") from error
-
-    for current, dirnames, filenames in os.walk(root, onerror=traversal_error):
-        dirnames[:] = sorted(
-            name
-            for name in dirnames
-            if not is_excluded_path((Path(current) / name).relative_to(root), pruned_names)
-            and not (Path(current) / name).is_symlink()
-        )
-        current_path = Path(current)
-        for filename in sorted(filenames):
-            file_path = current_path / filename
-            # Check links before is_file(), which follows their targets.
-            if not file_path.is_symlink() and file_path.is_file() and filename not in pruned_names:
-                relative_path = file_path.relative_to(root)
-                files.append(relative_path)
+    pending = [root]
+    entries = 0
+    directories = 1
+    while pending:
+        current = pending.pop()
+        subdirs: list[Path] = []
+        current_files: list[Path] = []
+        try:
+            with os.scandir(current) as listing:
+                for entry in listing:
+                    entries += 1
+                    if entries > MAX_DISCOVERY_ENTRIES:
+                        raise CountingError(
+                            "incomplete analysis: filesystem discovery entry limit exceeded"
+                        )
+                    relative = (current / entry.name).relative_to(root)
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if is_excluded_path(relative, pruned_names):
+                            continue
+                        directories += 1
+                        if directories > MAX_DISCOVERY_DIRECTORIES:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery directory limit exceeded"
+                            )
+                        if len(relative.parts) > MAX_DISCOVERY_DEPTH:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery depth limit exceeded"
+                            )
+                        subdirs.append(current / entry.name)
+                    elif entry.is_file(follow_symlinks=False) and entry.name not in pruned_names:
+                        if len(files) + len(current_files) >= MAX_DISCOVERY_FILES:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery file limit exceeded"
+                            )
+                        current_files.append(relative)
+        except OSError as error:
+            affected = repr(str(error.filename or current))[:240]
+            raise CountingError(f"incomplete analysis: could not traverse {affected}") from error
+        files.extend(sorted(current_files))
+        pending.extend(sorted(subdirs, reverse=True))
 
     return files
 
@@ -262,15 +295,58 @@ def map_language(path: Path | str) -> str | None:
     return LANGUAGES_BY_SUFFIX.get(file_path.suffix.lower())
 
 
-def count_physical_lines(path: Path | str) -> int | None:
-    """Count physical lines as UTF-8 text, ignoring decode errors.
+@dataclass
+class PhysicalByteBudget:
+    """Remaining raw source bytes for one physical-line report."""
 
-    None signals a path that could not be opened or read; the caller decides how to handle it.
+    remaining: int = field(default_factory=lambda: MAX_PHYSICAL_TOTAL_BYTES)
+
+
+def count_physical_lines(
+    path: Path | str, *, budget: PhysicalByteBudget | None = None
+) -> int | None:
+    """Count UTF-8/ignored-error universal-newline lines in bounded binary chunks.
+
+    None signals an I/O failure; exceeding a source or report byte budget raises CountingError.
     """
 
+    source_bytes = 0
+    lines = 0
+    tail = False
+    previous_cr = False
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
     try:
-        with Path(path).open(encoding="utf-8", errors="ignore") as handle:
-            return sum(1 for _line in handle)
+        with Path(path).open("rb") as handle:
+            while True:
+                allowance = MAX_PHYSICAL_SOURCE_BYTES - source_bytes
+                if budget is not None:
+                    allowance = min(allowance, budget.remaining)
+                chunk = handle.read(min(PHYSICAL_READ_CHUNK, allowance + 1))
+                source_bytes += len(chunk)
+                if source_bytes > MAX_PHYSICAL_SOURCE_BYTES:
+                    affected = repr(str(path))[:240]
+                    raise CountingError(
+                        f"incomplete analysis: source byte limit exceeded: {affected}"
+                    )
+                if budget is not None:
+                    if len(chunk) > budget.remaining:
+                        affected = repr(str(path))[:240]
+                        raise CountingError(
+                            f"incomplete analysis: total source byte limit exceeded: {affected}"
+                        )
+                    budget.remaining -= len(chunk)
+                text = decoder.decode(chunk, final=not chunk)
+                if text:
+                    # CR already ended a line in the previous chunk; consume only its LF partner.
+                    if previous_cr and text.startswith("\n"):
+                        text = text[1:]
+                    previous_cr = text.endswith("\r")
+                    if text:
+                        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+                        lines += normalized.count("\n")
+                        tail = not normalized.endswith("\n")
+                if not chunk:
+                    return lines + int(tail)
     except OSError:
         return None
 
@@ -335,6 +411,7 @@ def build_file_rows(
 
     root = Path(path)
     rows: list[FileRow] = []
+    budget = PhysicalByteBudget()
     included_languages = set(include_languages)
     excluded_languages = set(exclude_languages)
 
@@ -356,7 +433,7 @@ def build_file_rows(
         # non-regular paths (directories, submodules, special files) are skipped unopened.
         if _is_missing_or_not_regular(file_path):
             continue
-        physical_lines = count_physical_lines(file_path)
+        physical_lines = count_physical_lines(file_path, budget=budget)
         if physical_lines is None:
             if _is_missing_or_not_regular(file_path):
                 # Removed or replaced while counting: same as absent at discovery.
