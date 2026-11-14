@@ -819,6 +819,9 @@ def _build_composition_report(
         or composition_duplication.DEFAULT_MIN_TOKENS,
         max_source_bytes=composition_config.max_source_bytes
         or composition.DEFAULT_MAX_SOURCE_BYTES,
+        max_total_source_bytes=composition_config.max_total_source_bytes,
+        max_total_tokens=composition_config.max_total_tokens,
+        max_total_anchors=composition_config.max_total_anchors,
         semantic_settings=composition_semantics.SemanticSettings.configured(
             qt_modules=composition_config.qt_modules,
             logging_patterns=composition_config.logging_patterns,

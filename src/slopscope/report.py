@@ -445,6 +445,9 @@ class CompositionSettings:
     source_dirs: tuple[str, ...]
     test_dirs: tuple[str, ...]
     areas: tuple[str, ...]
+    max_total_source_bytes: int = 128 * 1024 * 1024
+    max_total_tokens: int = 2_000_000
+    max_total_anchors: int = 500_000
 
     def as_mapping(self) -> dict[str, object]:
         """Return the settings as JSON-ready values, in output order."""
@@ -453,6 +456,9 @@ class CompositionSettings:
             "language": "Python",
             "limit": self.limit,
             "max_source_bytes": self.max_source_bytes,
+            "max_total_source_bytes": self.max_total_source_bytes,
+            "max_total_tokens": self.max_total_tokens,
+            "max_total_anchors": self.max_total_anchors,
             "min_duplicate_tokens": self.min_duplicate_tokens,
             "qt_modules": list(self.qt_modules),
             "logging_patterns": list(self.logging_patterns),

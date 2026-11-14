@@ -385,7 +385,7 @@ def test_source_symlinks_are_never_read(
             fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(1, b"")
         )
 
-    def fail_read(path: Path | str) -> int:
+    def fail_read(path: Path | str, **_kwargs: object) -> int:
         assert Path(path) == root / "regular.py"
         return 1
 
@@ -499,7 +499,7 @@ def test_unreadable_regular_file_fails_counting(
     (tmp_path / "unreadable.py").write_text("two\n", encoding="utf-8")
     original_count_physical_lines = fallback.count_physical_lines
 
-    def fake_count_physical_lines(path: Path | str) -> int | None:
+    def fake_count_physical_lines(path: Path | str, **_kwargs: object) -> int | None:
         if Path(path).name == "unreadable.py":
             return None
         return original_count_physical_lines(path)
@@ -522,7 +522,7 @@ def test_uninspectable_path_fails_counting(monkeypatch: pytest.MonkeyPatch, tmp_
         return original_lstat(path)
 
     monkeypatch.setattr(Path, "lstat", fail_lstat)
-    monkeypatch.setattr(fallback, "count_physical_lines", lambda _path: None)
+    monkeypatch.setattr(fallback, "count_physical_lines", lambda _path, **_kwargs: None)
 
     with pytest.raises(fallback.CountingError, match="incomplete analysis.*locked.py"):
         fallback.build_file_rows(tmp_path)

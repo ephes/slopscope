@@ -47,7 +47,16 @@ METRICS = (
 
 # Settings that only change what is listed, not what is counted.
 # The admission ceiling also leaves counts unchanged for complete reports.
-_PRESENTATION_SETTINGS = frozenset({"language", "limit", "max_source_bytes"})
+_PRESENTATION_SETTINGS = frozenset(
+    {
+        "language",
+        "limit",
+        "max_source_bytes",
+        "max_total_source_bytes",
+        "max_total_tokens",
+        "max_total_anchors",
+    }
+)
 
 
 class BaselineError(Exception):

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 import stat
 import subprocess
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -72,6 +73,9 @@ MAX_DISCOVERY_ENTRIES = 200_000
 MAX_DISCOVERY_FILES = 100_000
 MAX_DISCOVERY_DIRECTORIES = 20_000  # Includes the selected root and queued directories.
 MAX_DISCOVERY_DEPTH = 128
+PHYSICAL_READ_CHUNK = 64 * 1024
+MAX_PHYSICAL_SOURCE_BYTES = 16 * 1024 * 1024
+MAX_PHYSICAL_TOTAL_BYTES = 128 * 1024 * 1024
 
 
 class GitDiscoveryError(RuntimeError):
@@ -291,15 +295,54 @@ def map_language(path: Path | str) -> str | None:
     return LANGUAGES_BY_SUFFIX.get(file_path.suffix.lower())
 
 
-def count_physical_lines(path: Path | str) -> int | None:
-    """Count physical lines as UTF-8 text, ignoring decode errors.
+@dataclass
+class PhysicalByteBudget:
+    """Remaining raw source bytes for one physical-line report."""
 
-    None signals a path that could not be opened or read; the caller decides how to handle it.
+    remaining: int = field(default_factory=lambda: MAX_PHYSICAL_TOTAL_BYTES)
+
+
+def count_physical_lines(
+    path: Path | str, *, budget: PhysicalByteBudget | None = None
+) -> int | None:
+    """Count UTF-8/ignored-error universal-newline lines in bounded binary chunks.
+
+    None signals an I/O failure; exceeding a source or report byte budget raises CountingError.
     """
 
+    source_bytes = 0
+    lines = 0
+    tail = False
+    previous_cr = False
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
     try:
-        with Path(path).open(encoding="utf-8", errors="ignore") as handle:
-            return sum(1 for _line in handle)
+        with Path(path).open("rb") as handle:
+            while True:
+                allowance = MAX_PHYSICAL_SOURCE_BYTES - source_bytes
+                if budget is not None:
+                    allowance = min(allowance, budget.remaining)
+                chunk = handle.read(min(PHYSICAL_READ_CHUNK, allowance + 1))
+                source_bytes += len(chunk)
+                if source_bytes > MAX_PHYSICAL_SOURCE_BYTES:
+                    raise CountingError(f"incomplete analysis: source byte limit exceeded: {path}")
+                if budget is not None:
+                    if len(chunk) > budget.remaining:
+                        raise CountingError(
+                            f"incomplete analysis: total source byte limit exceeded: {path}"
+                        )
+                    budget.remaining -= len(chunk)
+                text = decoder.decode(chunk, final=not chunk)
+                if text:
+                    # CR already ended a line in the previous chunk; consume only its LF partner.
+                    if previous_cr and text.startswith("\n"):
+                        text = text[1:]
+                    previous_cr = text.endswith("\r")
+                    if text:
+                        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+                        lines += normalized.count("\n")
+                        tail = not normalized.endswith("\n")
+                if not chunk:
+                    return lines + int(tail)
     except OSError:
         return None
 
@@ -364,6 +407,7 @@ def build_file_rows(
 
     root = Path(path)
     rows: list[FileRow] = []
+    budget = PhysicalByteBudget()
     included_languages = set(include_languages)
     excluded_languages = set(exclude_languages)
 
@@ -385,7 +429,7 @@ def build_file_rows(
         # non-regular paths (directories, submodules, special files) are skipped unopened.
         if _is_missing_or_not_regular(file_path):
             continue
-        physical_lines = count_physical_lines(file_path)
+        physical_lines = count_physical_lines(file_path, budget=budget)
         if physical_lines is None:
             if _is_missing_or_not_regular(file_path):
                 # Removed or replaced while counting: same as absent at discovery.

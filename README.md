@@ -187,6 +187,22 @@ bounding the byte read before PEP 263 decoding, AST parsing, or tokenization. Co
 `max_source_bytes` under `[tool.slopscope.composition]` to change the ceiling. Exact-limit sources
 are accepted; oversized or growing sources make analysis incomplete and preserve existing outputs.
 
+Python physical-line reports and physical-line profiles read at most 16 MiB per included source
+and 128 MiB of raw source bytes per report, using binary reads of at most 64 KiB. These fixed
+limits include invalid UTF-8 bytes; decoding still ignores errors, CR/LF/CRLF count as line endings,
+and a final unterminated decoded line counts once. One overflow-probe byte may be read. Oversized
+or growing inputs return exit code 2 with an incomplete-analysis error and no report or total.
+
+Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
+2,000,000 retained code tokens, and 500,000 potential duplicate anchors (code line starts within
+each token segment). These ceilings include all files together; unique interned strings cannot
+outnumber admitted code tokens. Raw bytes are charged before decoding, including reads from failed
+files. A file's token/anchor batch is admitted before changing the shared interner or retaining its
+segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
+under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
+or snapshot; prior artifacts survive. These aggregate composition settings do not apply to size-limits
+or cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
+
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission
 denied), Python reports and physical-line profiles fail with exit code 2 and an incomplete-analysis diagnostic
 naming the file, without a report or total. The check is limited to that case: tracked paths that are missing

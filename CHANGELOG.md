@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Count physical lines in bounded binary chunks with the existing UTF-8/ignored-error and
+  universal-newline semantics; enforce 16 MiB per source and 128 MiB per physical report.
+- Bound composition source bytes, shared code tokens/interner, and potential duplicate anchors
+  across the entire repository/project. Configure positive `max_total_source_bytes`,
+  `max_total_tokens`, and `max_total_anchors`; overflow refuses partial reports/snapshots and
+  preserves prior artifacts. Exact-limit inputs retain existing counting and duplicate detection.
+
 - Analyze working-tree bytes once per exact Git path, including unresolved index stages;
   retain first discovery order and distinct case/Unicode spellings.
 - Bound filesystem fallback entry, file, directory, and depth work before counting or publication;

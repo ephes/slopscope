@@ -67,12 +67,51 @@ class DuplicationResult:
     blocks: tuple[Block, ...]
 
 
+class BudgetExceeded(RuntimeError):
+    """A whole-composition resource allowance was exhausted."""
+
+
+@dataclass
+class TokenBudget:
+    """Cumulative code tokens and potential duplicate anchors retained by one report."""
+
+    tokens: int
+    anchors: int
+
+    def reserve(self, tokens: int, anchors: int) -> None:
+        if tokens > self.tokens:
+            raise BudgetExceeded("token limit exceeded")
+        if anchors > self.anchors:
+            raise BudgetExceeded("anchor limit exceeded")
+        self.tokens -= tokens
+        self.anchors -= anchors
+
+
 def token_segments(
     tokens: Sequence[tokenize.TokenInfo],
     line_categories: Sequence[str],
     interner: dict[str, int],
+    *,
+    budget: TokenBudget | None = None,
 ) -> tuple[Segment, ...]:
     """Split a file's tokens into code segments, interning token strings."""
+
+    if budget is not None:
+        # Preflight the complete file before changing the shared interner or retaining arrays.
+        count = anchors = 0
+        previous_line = None
+        for token in tokens:
+            if token.type in _SKIPPED_TOKEN_TYPES:
+                continue
+            row = token.start[0]
+            if row <= len(line_categories) and line_categories[row - 1] == "docstring":
+                previous_line = None
+                continue
+            count += 1
+            if row != previous_line:
+                anchors += 1
+            previous_line = row
+        budget.reserve(count, anchors)
 
     segments: list[Segment] = []
     ids: array[int] = array("i")
