@@ -12,10 +12,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   configurable through the existing composition settings. Exhaustion returns exit code 2
   without a partial report or allowlist write; exact-limit measurements are unchanged.
 - Inspect composition/size-limits discovery stat errors explicitly: missing tracked paths
-  remain skipped, while permission and I/O errors refuse incomplete analysis and preserve outputs.
+  (also below a parent replaced by a file) and looping symlinks remain skipped, while permission and I/O errors refuse incomplete analysis and preserve outputs.
 
 - Retire owned POSIX process groups after successful and nonzero capture wrapper exits,
-  including redirected descendants, with bounded TERM/KILL confirmation. Unconfirmed cleanup
+  including redirected descendants, with bounded TERM/KILL confirmation (transient EPERM
+  on signal delivery or probing is retried within the deadline). Unconfirmed cleanup
   refuses the result; confirmed cleanup preserves the wrapper's output and return code.
 - Normalize allowlist integer-decoder resource failures to bounded, value-free diagnostics in
   every size-limit mode, preserving the refused allowlist bytes.

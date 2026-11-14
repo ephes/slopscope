@@ -95,7 +95,8 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
   report. Default Python reports and physical-line profiles additionally fail when an existing regular file cannot
   be read at counting time; composition reports unreadable files through its own parse failures.
 - Source symlink files, including links to contained files, and paths through symlink directories below the
-  selected root are skipped. Stat errors other than missing files, including permission and I/O
+  selected root are skipped. Stat errors other than missing files (including a regular file in place of a parent directory)
+  and looping symlinks, including permission and I/O
   failures, return an incomplete-analysis diagnostic and exit code 2, preserving snapshots and allowlists.
 - `include_languages` and `exclude_languages` do not apply: the report is Python-only by definition.
 - Files are classified as `source`, `tests`, or `other` and into areas with the same `source_dirs`, `test_dirs`, and

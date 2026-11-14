@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import errno
 import io
 import os
 import platform
@@ -260,10 +261,15 @@ def discover_python_files(
             continue
         try:
             info = (root / candidate).stat()
-        except FileNotFoundError:
-            # Working-tree deletions and sparse checkout paths remain skippable.
+        except (FileNotFoundError, NotADirectoryError):
+            # Working-tree deletions, sparse checkout paths and tracked paths whose
+            # parent became a regular file remain skippable.
             continue
         except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                # Looping/self-referential source symlinks are skipped like other
+                # non-regular paths.
+                continue
             raise fallback.CountingError(
                 f"incomplete analysis: could not stat source {str(candidate)[:200]!r}: "
                 f"{exc.strerror or 'I/O error'}"

@@ -190,3 +190,18 @@ def test_composition_discovery_skips_missing_and_nonregular_in_order(
         lambda _: fallback.GitLsFilesResult(0, b"z.py\0missing.py\0directory.py\0a.py\0"),
     )
     assert composition.discover_python_files(tmp_path, excluded_paths=()) == ["a.py", "z.py"]
+
+
+def test_composition_discovery_skips_parent_file_and_looping_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pkg").write_text("not a directory\n", encoding="utf-8")
+    (tmp_path / "loop.py").symlink_to("loop.py")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fallback,
+        "run_git_ls_files",
+        lambda _: fallback.GitLsFilesResult(0, b"pkg/mod.py\0loop.py\0a.py\0"),
+    )
+    assert composition.discover_python_files(tmp_path, excluded_paths=()) == ["a.py"]

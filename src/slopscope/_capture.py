@@ -137,20 +137,21 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
             (signal.SIGTERM, _GROUP_TERM_SECONDS),
             (signal.SIGKILL, _GROUP_KILL_SECONDS),
         ):
-            try:
-                os.killpg(process.pid, sig)
-            except ProcessLookupError:
-                return
             deadline = time.monotonic() + grace
+            pending: int = sig
             while True:
                 try:
-                    os.killpg(process.pid, 0)
+                    # Send ``sig`` until it is delivered, then probe with signal 0.
+                    os.killpg(process.pid, pending)
                 except ProcessLookupError:
                     return
                 except PermissionError:
-                    # A terminating/reparented group can be temporarily uninspectable.
-                    # Retry only within the same deadline; never infer success from EPERM.
+                    # A terminating/reparented group can be temporarily unsignalable or
+                    # uninspectable (e.g. only zombies remain on macOS). Retry only
+                    # within the same deadline; never infer success from EPERM.
                     pass
+                else:
+                    pending = 0
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break

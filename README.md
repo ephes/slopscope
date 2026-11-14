@@ -160,7 +160,8 @@ filesystem fallback. Successful Git output remains NUL-delimited, preserving unu
 On POSIX, captured cloc and Git commands retire their owned process group after successful
 and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows
 0.2 seconds after TERM and 0.8 seconds after KILL; unconfirmed cleanup returns a bounded
-error instead of accepting the result. Confirmed cleanup preserves the wrapper's return code
+error instead of accepting the result. A transient permission error while signalling or
+probing the group is retried within the same deadline. Confirmed cleanup preserves the wrapper's return code
 and captured output. Descendants that leave the owned group are outside this guarantee;
 Windows tree termination remains best-effort.
 
@@ -224,7 +225,8 @@ not regular files (directories, submodule entries, special files) are still skip
 unknown languages and files excluded by configuration. The cloc engine and composition retain their own file-read error handling.
 
 Composition and size-limits inspect discovered Python paths with explicit stat calls. Missing
-tracked files remain skipped; other stat failures (including permission and I/O errors) make
+tracked files (including paths whose parent directory became a regular file) and looping
+symlinks remain skipped; other stat failures (including permission and I/O errors) make
 analysis incomplete with exit code 2 and preserve snapshots and allowlists. Nonregular paths
 remain skipped, and regular-file/link identity admission stays in the source-opening boundary.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -355,3 +356,31 @@ def test_group_cleanup_retries_transient_probe_permission_error(
     result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert result.returncode == 7 and result.stdout == b"output"
     assert group_kill.call_count == 3
+
+
+def test_group_cleanup_retries_transient_signal_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from slopscope import _capture
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=0,
+        stdout=io.BytesIO(b"output"),
+        stderr=io.BytesIO(),
+    )
+    # SIGTERM delivery is refused once (zombie-only group), then succeeds; the
+    # group is gone at the next probe.
+    group_kill = Mock(side_effect=[PermissionError("transient"), None, ProcessLookupError()])
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    assert result.returncode == 0 and result.stdout == b"output"
+    assert [call.args[1] for call in group_kill.call_args_list] == [
+        signal.SIGTERM,
+        signal.SIGTERM,
+        0,
+    ]
