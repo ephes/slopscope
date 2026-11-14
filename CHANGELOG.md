@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Retire owned POSIX process groups after successful and nonzero capture wrapper exits,
+  including redirected descendants, with bounded TERM/KILL confirmation. Unconfirmed cleanup
+  refuses the result; confirmed cleanup preserves the wrapper's output and return code.
+- Normalize allowlist integer-decoder resource failures to bounded, value-free diagnostics in
+  every size-limit mode, preserving the refused allowlist bytes.
+
 - Snapshot classification policy iterables at public aggregate boundaries, keeping generator
   policies consistent across every row and report section without buffering standalone rows.
 - Normalize baseline integer-decoder resource errors to bounded diagnostics, including integers

@@ -157,6 +157,13 @@ composition, and size-limits. Git startup failures (including a missing executab
 filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
 `subprocess.run`, process creation itself may not be interruptible on every platform.
 
+On POSIX, captured cloc and Git commands retire their owned process group after successful
+and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows
+0.2 seconds after TERM and 0.8 seconds after KILL; unconfirmed cleanup returns a bounded
+error instead of accepting the result. Confirmed cleanup preserves the wrapper's return code
+and captured output. Descendants that leave the owned group are outside this guarantee;
+Windows tree termination remains best-effort.
+
 Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
 stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.
 Filesystem fallback visits at most 200,000 entries (including excluded entries in visited directories),
@@ -181,6 +188,10 @@ nonblocking so a substituted FIFO cannot wait for a writer. These modes require 
 opening, `O_NOFOLLOW`, `O_DIRECTORY`, and `O_NONBLOCK`; platforms without these APIs refuse source
 analysis with a diagnostic. Windows lacks them, so `--composition` and `--size-limits` are unsupported
 on Windows and report every source as an incomplete-analysis failure. The selected root itself may be a symlink.
+
+Allowlist JSON integer-decoder resource failures, including in unused extension fields, return
+exit code 2 with a bounded diagnostic that omits raw values. Report, strict, seed, and update
+all preserve the refused allowlist bytes.
 
 Both modes admit at most 16 MiB per Python source by default, checking the opened file's size and
 bounding the byte read before PEP 263 decoding, AST parsing, or tokenization. Configure a positive

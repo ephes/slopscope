@@ -581,3 +581,17 @@ def test_allowlist_lock_refuses_without_no_follow(
         size_limits._allowlist_lock(tmp_path / "allowlist.toml"),
     ):
         pass
+
+
+@pytest.mark.parametrize("section", ["functions", "extension"])
+def test_allowlist_integer_decoder_limit_is_domain_error(tmp_path: Path, section: str) -> None:
+    import sys
+
+    if not sys.get_int_max_str_digits():
+        pytest.skip("interpreter integer decoder limit disabled")
+    path = tmp_path / "allowlist.json"
+    original = '{"' + section + '": {"invented": ' + "9" * 5000 + "}}"
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(size_limits.SizeLimitsError, match="JSON number exceeds decoder limits"):
+        size_limits.load_allowlist(path)
+    assert path.read_text(encoding="utf-8") == original

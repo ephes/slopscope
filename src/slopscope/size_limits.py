@@ -195,6 +195,8 @@ def load_allowlist(path: Path, *, destination: AllowlistDestination | None = Non
         raise SizeLimitsError(f"allowlist {path}: JSON nesting is too deep") from exc
     except json.JSONDecodeError as exc:
         raise SizeLimitsError(f"allowlist {path} is not valid JSON: {exc}") from exc
+    except ValueError as exc:
+        raise SizeLimitsError(f"allowlist {path}: JSON number exceeds decoder limits") from exc
     if not isinstance(data, dict):
         raise SizeLimitsError(f"allowlist {path} must be a JSON object")
     unknown = sorted(set(data) - set(SIZE_LIMIT_KINDS))

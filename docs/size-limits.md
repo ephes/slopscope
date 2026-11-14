@@ -88,7 +88,7 @@ sorted keys and a trailing newline, so diffs stay small:
 The default path is `size-limits.json` in the analyzed project root. Configure another path in
 `[tool.slopscope.size_limits]` (relative to the project root, or absolute), or pass `--allowlist PATH` for one run.
 Without an allowlist file, nothing is allowlisted. An invalid file (not JSON, unknown sections, sizes that are not
-positive integers, duplicate object keys at any nesting level, or decoder recursion exhaustion from deeply nested JSON) fails with a concise `slopscope:`
+positive integers, duplicate object keys at any nesting level, decoder recursion exhaustion from deeply nested JSON, or integer-decoder resource limits) fails with a concise `slopscope:`
 error and exit code 2 before any allowlist write. Duplicate keys are refused even when their values
 agree, with a bounded key diagnostic and object member index. Existing allowlist bytes are preserved.
 Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
