@@ -205,15 +205,16 @@ and a final unterminated decoded line counts once. One overflow-probe byte may b
 or growing inputs return exit code 2 with an incomplete-analysis error and no report or total.
 These limits are not configurable: exclude large generated or data files, or use the cloc engine.
 
-Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
+Composition and size-limits also bound the entire analysis per repository/project: 128 MiB of raw source bytes,
 2,000,000 retained code tokens, and 500,000 potential duplicate anchors (code line starts within
 each token segment). These ceilings include all files together; unique interned strings cannot
 outnumber admitted code tokens. Raw bytes are charged before decoding, including reads from failed
 files. A file's token/anchor batch is admitted before changing the shared interner or retaining its
 segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
 under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
-or snapshot; prior artifacts survive. These aggregate composition settings do not apply to size-limits
-or cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
+or snapshot/allowlist; prior artifacts survive. Size-limits uses these same composition settings
+to bound cumulative measurement and retained units; it does not run duplicate-block comparisons.
+These aggregate settings do not apply to cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
 
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission
 denied), Python reports and physical-line profiles fail with exit code 2 and an incomplete-analysis diagnostic
@@ -221,6 +222,11 @@ naming the file, without a report or total. The check is limited to that case: t
 from the working tree (working-tree deletions, sparse checkouts, files removed during the run) and paths that are
 not regular files (directories, submodule entries, special files) are still skipped without a diagnostic, as are
 unknown languages and files excluded by configuration. The cloc engine and composition retain their own file-read error handling.
+
+Composition and size-limits inspect discovered Python paths with explicit stat calls. Missing
+tracked files remain skipped; other stat failures (including permission and I/O errors) make
+analysis incomplete with exit code 2 and preserve snapshots and allowlists. Nonregular paths
+remain skipped, and regular-file/link identity admission stays in the source-opening boundary.
 
 Filesystem traversal errors fail Python reports, profiles, composition, and size-limits with
 exit code 2 and a bounded affected-path diagnostic, preserving snapshots and allowlists.

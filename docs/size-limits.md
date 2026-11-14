@@ -16,6 +16,17 @@ Windows process-tree termination is best-effort and untested. Filesystem travers
 preserving snapshots and allowlists. Deliberately excluded directories stay pruned.
 See [README](../README.md) for discovery details.
 
+Size measurement also shares the composition whole-project budgets: 128 MiB of raw source
+bytes, 2,000,000 code tokens, and 500,000 code-line anchors by default. Configure positive
+`max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors` under
+`[tool.slopscope.composition]`; budgets reset per project. Source bytes from failed files
+still count. Token admission precedes adding each file's units to the report, so retained
+functions/classes and shared token strings are bounded too. No duplicate-block comparisons
+run in size-limits mode. Exact-limit inputs keep the same spans and test-file code counts.
+Exhaustion stops with exit code 2, no partial report, and no allowlist publication.
+Missing tracked sources remain skipped, but permission or I/O failures during discovery stat
+make analysis incomplete and preserve allowlists. Nonregular paths remain skipped.
+
 ```bash
 slopscope --size-limits                    # report, exit 0
 slopscope --size-limits --strict           # exit 1 when a unit is new over its limit or grew

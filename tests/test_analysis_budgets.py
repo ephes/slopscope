@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from slopscope import cli, composition, composition_duplication, fallback
+from slopscope import cli, composition, composition_duplication, fallback, size_limits
 
 
 @pytest.mark.parametrize("chunk", [1, 2, 3, 7, 65536])
@@ -263,3 +263,105 @@ def test_physical_limit_diagnostic_escapes_and_bounds_path(
     message = str(error.value)
     assert "\n" not in message and "\x1b" not in message
     assert "\\n" in message and len(message) < 320
+
+
+@pytest.mark.parametrize(
+    "setting,limit",
+    [("max_total_source_bytes", 30), ("max_total_tokens", 8), ("max_total_anchors", 3)],
+)
+@pytest.mark.parametrize("mode", [[], ["--strict"], ["--seed-allowlist"], ["--update-allowlist"]])
+def test_size_cumulative_limit_stops_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    limit: int,
+    mode: list[str],
+) -> None:
+    for index in range(5):
+        (tmp_path / f"{index}.py").write_text(
+            f"def unique_{index}():\n    return {index}\n", encoding="utf-8"
+        )
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.slopscope.composition]\nmax_source_bytes = 1000\n{setting} = {limit}\n",
+        encoding="utf-8",
+    )
+    allowlist = tmp_path / "size-limits.json"
+    if mode != ["--seed-allowlist"]:
+        allowlist.write_bytes(b"{}\n")
+    previous = allowlist.read_bytes() if allowlist.exists() else None
+    analyzed: list[str] = []
+    retained: list[int] = []
+    original = composition.analyze_source
+    token_segments = composition_duplication.token_segments
+
+    def record_source(source: str, **kwargs: Any) -> Any:
+        analyzed.append(kwargs["path"])
+        return original(source, **kwargs)
+
+    def record_segments(*args: Any, **kwargs: Any) -> Any:
+        result = token_segments(*args, **kwargs)
+        retained.append(sum(len(segment.ids) for segment in result))
+        return result
+
+    monkeypatch.setattr(composition, "analyze_source", record_source)
+    monkeypatch.setattr(composition_duplication, "token_segments", record_segments)
+    out, err = io.StringIO(), io.StringIO()
+    assert cli.run([str(tmp_path), "--size-limits", *mode], stdout=out, stderr=err) == 2
+    assert "whole-size-limits" in err.getvalue()
+    assert out.getvalue() == ""
+    assert (allowlist.read_bytes() if allowlist.exists() else None) == previous
+    assert 1 <= len(analyzed) <= 2
+    assert len(retained) == 1
+    assert sum(retained) <= 8
+
+
+@pytest.mark.parametrize(
+    "constant,limit",
+    [
+        ("DEFAULT_MAX_TOTAL_SOURCE_BYTES", 30),
+        ("DEFAULT_MAX_TOTAL_TOKENS", 8),
+        ("DEFAULT_MAX_TOTAL_ANCHORS", 3),
+    ],
+)
+def test_size_measure_uses_cumulative_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    constant: str,
+    limit: int,
+) -> None:
+    for index in range(5):
+        (tmp_path / f"{index}.py").write_text(
+            f"def unique_{index}():\n    return {index}\n", encoding="utf-8"
+        )
+    monkeypatch.setattr(composition, constant, limit)
+    with pytest.raises(fallback.CountingError, match="whole-size-limits"):
+        size_limits.measure(tmp_path, excluded_paths=())
+
+
+def test_size_exact_cumulative_limits_preserve_units(tmp_path: Path) -> None:
+    source = "class Box:\n    def run(self):\n        return 1\n"
+    budget = composition.AnalysisBudget(1000, composition_duplication.TokenBudget(1000, 1000))
+    composition.analyze_source(source, interner={}, budget=budget)
+    (tmp_path / "tests").mkdir()
+    for path in ("app.py", "tests/test_app.py"):
+        (tmp_path / path).write_text(source, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.slopscope.composition]\n"
+        f"max_total_source_bytes = {len(source.encode()) * 2}\n"
+        f"max_total_tokens = {(1000 - budget.tokens.tokens) * 2}\n"
+        f"max_total_anchors = {(1000 - budget.tokens.anchors) * 2}\n",
+        encoding="utf-8",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    assert (
+        cli.run([str(tmp_path), "--size-limits", "--format", "json"], stdout=out, stderr=err) == 0
+    )
+    report = json.loads(out.getvalue())
+    assert report["units"] == {"functions": 2, "classes": 2, "test_files": 1}
+    units, failures = size_limits.measure(tmp_path, excluded_paths=())
+    assert failures == ()
+    assert units == {
+        "classes": {"app.py::Box": 3, "tests/test_app.py::Box": 3},
+        "functions": {"app.py::Box.run": 2, "tests/test_app.py::Box.run": 2},
+        "test_files": {"tests/test_app.py": 3},
+    }

@@ -61,7 +61,7 @@ churn_months = 24
 | `limit` | Rows in the largest-item and duplicate lists. `--limit` overrides it. | 10 |
 | `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
 | `max_source_bytes` | Positive per-source byte ceiling, also used by size-limits, checked before decoding or parsing. | 16777216 (16 MiB) |
-| `max_total_source_bytes` | Positive cumulative raw-byte ceiling for all sources read in one composition report, charged before decoding (including failed files). | 134217728 (128 MiB) |
+| `max_total_source_bytes` | Positive cumulative raw-byte ceiling for all sources read in one composition or size-limits report, charged before decoding (including failed files). | 134217728 (128 MiB) |
 | `max_total_tokens` | Positive cumulative retained code-token ceiling; also bounds the number of shared interned strings. | 2000000 |
 | `max_total_anchors` | Positive cumulative potential duplicate-anchor ceiling: code line starts in token segments, including short segments without a full duplicate window. | 500000 |
 | `qt_modules` | Extra modules treated as Qt, added to `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, and `qtpy`. Dotted names match the module and everything inside it, so a project's own Qt wrapper package can count. | none |
@@ -95,7 +95,8 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
   report. Default Python reports and physical-line profiles additionally fail when an existing regular file cannot
   be read at counting time; composition reports unreadable files through its own parse failures.
 - Source symlink files, including links to contained files, and paths through symlink directories below the
-  selected root are skipped. Uninspectable tracked paths are also skipped.
+  selected root are skipped. Stat errors other than missing files, including permission and I/O
+  failures, return an incomplete-analysis diagnostic and exit code 2, preserving snapshots and allowlists.
 - `include_languages` and `exclude_languages` do not apply: the report is Python-only by definition.
 - Files are classified as `source`, `tests`, or `other` and into areas with the same `source_dirs`, `test_dirs`, and
   `areas` rules as the default report.
@@ -118,8 +119,8 @@ at most 64 KiB chunks and one overflow-probe byte. Each file's code-token and po
 counts are checked before mutating the shared interner or retaining its token/line arrays; the
 actual duplicate index has no more anchors than this admitted upper bound. Per-file parsing and
 tokenization remain bounded by `max_source_bytes`. Exact ceilings are accepted; below the limits,
-counts and exact duplicate detection are unchanged. The aggregate budgets are composition-only;
-size-limits continues to use its per-source ceiling.
+counts and exact duplicate detection are unchanged. The aggregate budgets also apply to size-limits
+measurement, alongside its per-source ceiling; exhaustion preserves allowlists and returns exit code 2 without a partial report.
 
 ## Failures
 

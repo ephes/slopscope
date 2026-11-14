@@ -13,6 +13,7 @@ import io
 import os
 import platform
 import re
+import stat
 import tokenize
 import warnings
 from collections.abc import Iterable, Sequence
@@ -24,9 +25,6 @@ from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
     COMPOSITION_CONSTRUCTS,
-    DEFAULT_MAX_TOTAL_ANCHORS,
-    DEFAULT_MAX_TOTAL_SOURCE_BYTES,
-    DEFAULT_MAX_TOTAL_TOKENS,
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
@@ -38,6 +36,15 @@ from slopscope.report import (
     CompositionFunctionRow,
     CompositionReport,
     CompositionSettings,
+)
+from slopscope.report import (
+    DEFAULT_MAX_TOTAL_ANCHORS as DEFAULT_MAX_TOTAL_ANCHORS,
+)
+from slopscope.report import (
+    DEFAULT_MAX_TOTAL_SOURCE_BYTES as DEFAULT_MAX_TOTAL_SOURCE_BYTES,
+)
+from slopscope.report import (
+    DEFAULT_MAX_TOTAL_TOKENS as DEFAULT_MAX_TOTAL_TOKENS,
 )
 
 ANALYZER_NAME = "slopscope.composition"
@@ -247,13 +254,22 @@ def discover_python_files(
         excluded_paths=excluded_paths,
         include_globs=include_globs,
     )
-    relative_paths = {
-        relative_path.as_posix()
-        for relative_path in discovered
-        if fallback.map_language(relative_path) == COMPOSITION_LANGUAGE
-        # Tracked paths missing from the working tree are skipped, as in the default report.
-        and (root / relative_path).is_file()
-    }
+    relative_paths: set[str] = set()
+    for candidate in discovered:
+        if fallback.map_language(candidate) != COMPOSITION_LANGUAGE:
+            continue
+        try:
+            info = (root / candidate).stat()
+        except FileNotFoundError:
+            # Working-tree deletions and sparse checkout paths remain skippable.
+            continue
+        except OSError as exc:
+            raise fallback.CountingError(
+                f"incomplete analysis: could not stat source {str(candidate)[:200]!r}: "
+                f"{exc.strerror or 'I/O error'}"
+            ) from exc
+        if stat.S_ISREG(info.st_mode):
+            relative_paths.add(candidate.as_posix())
     paths = sorted(relative_paths)
     if admissions is not None:
         for relative_path in paths:

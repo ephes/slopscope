@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Apply shared composition source-byte, token, and anchor budgets to size-limits measurement,
+  configurable through the existing composition settings. Exhaustion returns exit code 2
+  without a partial report or allowlist write; exact-limit measurements are unchanged.
+- Inspect composition/size-limits discovery stat errors explicitly: missing tracked paths
+  remain skipped, while permission and I/O errors refuse incomplete analysis and preserve outputs.
+
 - Retire owned POSIX process groups after successful and nonzero capture wrapper exits,
   including redirected descendants, with bounded TERM/KILL confirmation. Unconfirmed cleanup
   refuses the result; confirmed cleanup preserves the wrapper's output and return code.
