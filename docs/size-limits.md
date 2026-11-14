@@ -162,7 +162,7 @@ of every allowlist that was or may have been replaced and not yet restored is ke
 Mutation lock entries must be single-link regular files, opened with `O_NOFOLLOW` and checked
 with `lstat` against the opened descriptor after lock acquisition. Symlinks, hardlinks, and
 replacement while waiting are refused before analysis/publication. Platforms without
-`O_NOFOLLOW` cannot mutate allowlists. Normal sibling locks remain on disk to serialize waiters.
+`O_NOFOLLOW` (including Windows) cannot mutate allowlists. Normal sibling locks remain on disk to serialize waiters.
 
 Catchable failures during staged multi-project publication, including `KeyboardInterrupt` and
 `SystemExit` immediately after a replacement, trigger reverse compensation. Prior bytes, modes,

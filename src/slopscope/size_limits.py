@@ -12,7 +12,6 @@ import dataclasses
 import json
 import os
 import stat
-import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -409,14 +408,11 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise SizeLimitsError(f"allowlist lock {lock} must be a single-link regular file")
-            if sys.platform == "win32":
-                import msvcrt
+            # POSIX only: platforms without O_NOFOLLOW (Windows) were refused above,
+            # matching size-limits source analysis, which is unsupported there.
+            import fcntl
 
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
         except OSError as exc:
             raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
         info = os.fstat(descriptor)

@@ -396,6 +396,7 @@ class _ScopedImports(ImportMap):
         *,
         class_scope: bool = False,
         fields: dict[str, set[str]] | None = None,
+        shallow: bool = False,
     ) -> None:
         nodes = _scope_nodes(body)
         bindings = _scope_bindings(nodes, inherited, arguments)
@@ -478,13 +479,24 @@ class _ScopedImports(ImportMap):
                     for child in children:
                         if isinstance(child, ast.AST):
                             self._expression(child, bindings)
+        if shallow:
+            # Only this scope's own bindings are needed (to gather class fields);
+            # the caller visits the full body exactly once afterwards.
+            return
         for node in nodes:
             if isinstance(
                 node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
             ):
                 self._expression(node, bindings)
             elif isinstance(node, _FUNCTION_TYPES):
-                self._visit(node.body, inherited if class_scope else bindings, node.args)
+                # Methods are visited shallowly here; their ClassDef visits them fully
+                # once, with fields. Visiting twice would double work per nesting level.
+                self._visit(
+                    node.body,
+                    inherited if class_scope else bindings,
+                    node.args,
+                    shallow=class_scope,
+                )
             elif isinstance(node, ast.ClassDef):
                 outer = inherited if class_scope else bindings
                 self._visit(node.body, outer, class_scope=True)
@@ -521,6 +533,7 @@ class _ScopedImports(ImportMap):
                     if all(values)
                 }
                 for method in methods:
+                    own: dict[str, set[str]] | None = None
                     if method.args.args and not method.decorator_list:
                         receiver = method.args.args[0].arg
                         own = {
@@ -528,7 +541,7 @@ class _ScopedImports(ImportMap):
                             for name, value in known.items()
                             if name.startswith(receiver + ".")
                         }
-                        self._visit(method.body, outer, method.args, fields=own)
+                    self._visit(method.body, outer, method.args, fields=own)
 
 
 def detect(

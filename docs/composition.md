@@ -202,6 +202,10 @@ leak into a parent or sibling; class-local imports do not bind method bodies. Fu
 decorators, and class bases use the enclosing scope. Lambdas and comprehensions keep their own
 bindings. Relative imports never match a third-party or standard library module. Star imports
 tag their own line but conservatively invalidate import resolution within their scope.
+Conflicting imports include the common Qt-binding fallback (`try: from PySide6.QtWidgets import
+QWidget` / `except ImportError: from PyQt5.QtWidgets import QWidget`): only the two import lines
+are tagged, while uses such as `class W(QWidget)` or `QWidget()` are no longer counted as Qt
+classes. This is a known count drop of version 2.
 
 A logger alias must have one unambiguous assignment from a resolved `logging.getLogger()` call.
 Instance logger fields may be shared between direct undecorated methods of the same class using

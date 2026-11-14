@@ -17,6 +17,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   detectors advance to version 2, so comparisons with old counts warn as non-comparable.
 - Refuse symlinked, hardlinked, and replaced allowlist lock entries through no-follow opening,
   single-link regular-file admission, and descriptor/name identity checks after waiting.
+  Allowlist mutation (`--seed-allowlist`, `--update-allowlist`) now requires `O_NOFOLLOW` and
+  therefore no longer runs on Windows; size-limits source analysis was already unsupported there.
 - Bound expanded duplicate metadata and traversal work across each project. Exhaustion refuses
   partial reports/snapshots with exit code 2; complete duplicate output is unchanged.
 - Compensate multi-project allowlist publication on catchable interruptions as well as ordinary

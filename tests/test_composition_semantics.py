@@ -528,3 +528,23 @@ def test_ambiguous_instance_fields_are_not_shared(method: str) -> None:
         + '    def run(self):\n        self.logger.info("no")\n'
     )
     assert result.tag("logging") == (2 if "getLogger" in method else 1)
+
+
+def test_nested_class_method_scopes_are_visited_once_per_subtree() -> None:
+    import ast
+    import time
+
+    from slopscope.composition_semantics import _ScopedImports
+
+    # Each class -> method level used to visit its subtree twice (2**depth work).
+    lines = ["import logging"]
+    indent = ""
+    for level in range(30):
+        lines += [f"{indent}class C{level}:", f"{indent}    def m{level}(self):"]
+        indent += "        "
+    lines += [f"{indent}self.log = logging.getLogger(__name__)", f"{indent}self.log.info('x')"]
+    tree = ast.parse("\n".join(lines) + "\n")
+    started = time.perf_counter()
+    scopes = _ScopedImports(tree)
+    assert time.perf_counter() - started < 2.0
+    assert scopes.scopes
