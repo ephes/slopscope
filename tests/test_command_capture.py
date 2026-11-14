@@ -333,3 +333,25 @@ def test_unconfirmed_group_cleanup_is_bounded_domain_error(
         _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert process.wait.call_args.kwargs == {"timeout": 5}
     assert group_kill.call_count < 20
+
+
+def test_group_cleanup_retries_transient_probe_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from slopscope import _capture
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=7,
+        stdout=io.BytesIO(b"output"),
+        stderr=io.BytesIO(),
+    )
+    group_kill = Mock(side_effect=[None, PermissionError("transient"), ProcessLookupError()])
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    assert result.returncode == 7 and result.stdout == b"output"
+    assert group_kill.call_count == 3

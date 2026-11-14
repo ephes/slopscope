@@ -147,6 +147,10 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
                     os.killpg(process.pid, 0)
                 except ProcessLookupError:
                     return
+                except PermissionError:
+                    # A terminating/reparented group can be temporarily uninspectable.
+                    # Retry only within the same deadline; never infer success from EPERM.
+                    pass
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
