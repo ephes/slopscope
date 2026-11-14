@@ -68,6 +68,10 @@ LANGUAGES_BY_FILENAME = {
 
 GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
 MAX_GIT_DISCOVERY_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_DISCOVERY_ENTRIES = 200_000
+MAX_DISCOVERY_FILES = 100_000
+MAX_DISCOVERY_DIRECTORIES = 20_000  # Includes the selected root and queued directories.
+MAX_DISCOVERY_DEPTH = 128
 
 
 class GitDiscoveryError(RuntimeError):
@@ -123,7 +127,8 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
 def parse_git_ls_files_output(output: bytes) -> list[Path]:
     """Parse NUL-delimited git file output as relative paths."""
 
-    return [Path(os.fsdecode(part)) for part in output.split(b"\0") if part]
+    # Deduplicate the exact spelling, without case folding or Unicode normalization.
+    return [Path(os.fsdecode(part)) for part in dict.fromkeys(output.split(b"\0")) if part]
 
 
 def discover_files(
@@ -230,24 +235,48 @@ def discover_filesystem_files(
     pruned_names = set(pruned_dir_names)
     files: list[Path] = []
 
-    def traversal_error(error: OSError) -> None:
-        affected = repr(str(error.filename or root))[:240]
-        raise CountingError(f"incomplete analysis: could not traverse {affected}") from error
-
-    for current, dirnames, filenames in os.walk(root, onerror=traversal_error):
-        dirnames[:] = sorted(
-            name
-            for name in dirnames
-            if not is_excluded_path((Path(current) / name).relative_to(root), pruned_names)
-            and not (Path(current) / name).is_symlink()
-        )
-        current_path = Path(current)
-        for filename in sorted(filenames):
-            file_path = current_path / filename
-            # Check links before is_file(), which follows their targets.
-            if not file_path.is_symlink() and file_path.is_file() and filename not in pruned_names:
-                relative_path = file_path.relative_to(root)
-                files.append(relative_path)
+    pending = [root]
+    entries = 0
+    directories = 1
+    while pending:
+        current = pending.pop()
+        subdirs: list[Path] = []
+        current_files: list[Path] = []
+        try:
+            with os.scandir(current) as listing:
+                for entry in listing:
+                    entries += 1
+                    if entries > MAX_DISCOVERY_ENTRIES:
+                        raise CountingError(
+                            "incomplete analysis: filesystem discovery entry limit exceeded"
+                        )
+                    relative = (current / entry.name).relative_to(root)
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if is_excluded_path(relative, pruned_names):
+                            continue
+                        directories += 1
+                        if directories > MAX_DISCOVERY_DIRECTORIES:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery directory limit exceeded"
+                            )
+                        if len(relative.parts) > MAX_DISCOVERY_DEPTH:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery depth limit exceeded"
+                            )
+                        subdirs.append(current / entry.name)
+                    elif entry.is_file(follow_symlinks=False) and entry.name not in pruned_names:
+                        if len(files) + len(current_files) >= MAX_DISCOVERY_FILES:
+                            raise CountingError(
+                                "incomplete analysis: filesystem discovery file limit exceeded"
+                            )
+                        current_files.append(relative)
+        except OSError as error:
+            affected = repr(str(error.filename or current))[:240]
+            raise CountingError(f"incomplete analysis: could not traverse {affected}") from error
+        files.extend(sorted(current_files))
+        pending.extend(sorted(subdirs, reverse=True))
 
     return files
 

@@ -157,6 +157,15 @@ composition, and size-limits. Git startup failures (including a missing executab
 filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
 `subprocess.run`, process creation itself may not be interruptible on every platform.
 
+Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
+stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.
+Filesystem fallback visits at most 200,000 entries (including excluded entries in visited directories),
+admits at most 100,000 regular files and 20,000 directories (including the root), and descends at most
+128 directory levels below the root. Excluded directories remain pruned; ordinary sorted depth-first
+ordering is unchanged. These fixed per-discovery limits are checked before retaining excess entries
+or sorting a listing. Overflow returns exit code 2 without a report, snapshot, or allowlist write.
+The cloc engine's discovery is unchanged.
+
 The Python engine discovers files with `git ls-files` when possible and otherwise walks the filesystem. It applies
 default excludes for common caches, virtual environments, dependency directories, and build output, then counts
 physical lines in mapped text-like files using UTF-8 with ignored decode errors. Source symlink files and paths

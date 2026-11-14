@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Analyze working-tree bytes once per exact Git path, including unresolved index stages;
+  retain first discovery order and distinct case/Unicode spellings.
+- Bound filesystem fallback entry, file, directory, and depth work before counting or publication;
+  refuse excess trees with an incomplete-analysis error and preserve snapshots/allowlists.
+
 - Admit serialized allowlists and composition snapshots against their readers' 16 MiB UTF-8
   ceilings before staging; an oversized multi-project allowlist batch preserves every prior
   artifact. Exact-limit payloads remain readable and accepted.
