@@ -371,7 +371,7 @@ def test_unittest_placement_rules_resolve_testcase_bases() -> None:
     assert sum(placement.values()) == result.code
 
 
-def test_a_name_keeps_every_import_binding() -> None:
+def test_ambiguous_import_binding_tags_only_the_import() -> None:
     result = counts(
         """
         from PySide6.QtWidgets import QLabel as Label
@@ -381,7 +381,7 @@ def test_a_name_keeps_every_import_binding() -> None:
         """
     )
 
-    assert result.tag("qt") == 2
+    assert result.tag("qt") == 1
 
 
 def test_star_imports_tag_their_own_line() -> None:
@@ -417,3 +417,114 @@ def test_fixture_methods_in_any_top_level_class_are_fixtures() -> None:
 
     assert result.placement("fixture") == 3
     assert result.placement("helper_or_unknown") == 3
+
+
+@pytest.mark.parametrize("binding", ["parameter", "assignment", "child-import"])
+def test_semantic_tags_exclude_shadowed_or_child_bindings(binding: str) -> None:
+    imports = (
+        "import logging\nfrom dataclasses import dataclass as dc\n"
+        "from qtpy import QWidget as Widget\n"
+    )
+    if binding == "parameter":
+        source = imports + "def f(logging, dc, Widget):\n"
+    elif binding == "assignment":
+        source = imports + "def f():\n    logging = dc = Widget = object()\n"
+    else:
+        source = "def unrelated():\n" + textwrap.indent(imports, "    ") + "def f():\n"
+    source += (
+        '    logging.info("x")\n    @dc\n    class Model(Widget):\n'
+        "        field: int\n    return Widget()\n"
+    )
+    result = counts(source)
+    assert result.tag("logging") == 1  # Only the explicit import.
+    assert result.tag("qt") == 1
+    assert result.tag("data_shape") == 0
+    assert result.construct("qt_classes") == 0
+    assert result.construct("data_shape_classes") == 0
+
+
+def test_logger_fields_do_not_leak_to_unrelated_classes_or_rebound_names() -> None:
+    result = counts("""
+        import logging as log
+        logger = log.getLogger("module")
+        def shadow(logger):
+            logger.info("not logging")
+        class Service:
+            def __init__(self):
+                self.logger = log.getLogger("service")
+            def run(self):
+                self.logger.info("logging")
+        class Other:
+            def run(self):
+                self.logger.info("not logging")
+        def rebound():
+            local = log.getLogger("local")
+            local = object()
+            local.info("not logging")
+    """)
+    assert result.tag("logging") == 5
+
+
+def test_nested_import_aliases_stay_local_and_remain_resolvable() -> None:
+    result = counts("""
+        def real():
+            import logging as log
+            from dataclasses import dataclass as dc
+            from qtpy import QWidget as Widget
+            log.info("yes")
+            @dc
+            class Model(Widget):
+                value: int
+            return Widget()
+        def unrelated():
+            log.info("no")
+            @dc
+            class Other(Widget):
+                value: int
+    """)
+    assert result.tag("logging") == 2
+    assert result.tag("qt") == 4
+    assert result.tag("data_shape") == 1
+    assert result.construct("qt_classes") == 1
+    assert result.construct("data_shape_classes") == 1
+
+
+def test_lambda_and_comprehension_bindings_do_not_leak() -> None:
+    result = counts("""
+        import logging
+        shadow = lambda logging: logging.info("no")
+        real = lambda: logging.info("yes")
+        values = [logging.info("no") for logging in objects]
+        others = [logging.info("yes") for item in objects]
+        logging.info("yes")
+    """)
+    assert result.tag("logging") == 4
+
+
+@pytest.mark.parametrize(
+    "rebind",
+    [
+        "import other as logger",
+        "try:\n    pass\nexcept Exception as logger:\n    pass",
+        "match value:\n    case logger:\n        pass",
+    ],
+)
+def test_logger_assignment_with_another_binding_is_ambiguous(rebind: str) -> None:
+    source = "import logging\nlogger = logging.getLogger()\n" + rebind + '\nlogger.info("no")\n'
+    assert counts(source).tag("logging") == 2
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "@property\ndef reset(self):\n    self.logger = None\n",
+        "def setup(self):\n    self = other\n    self.logger = logging.getLogger()\n",
+    ],
+)
+def test_ambiguous_instance_fields_are_not_shared(method: str) -> None:
+    result = counts(
+        "import logging\nclass Service:\n"
+        + textwrap.indent(method, "    ")
+        + '    def run(self):\n        self.logger.info("no")\n'
+    )
+    assert result.tag("logging") == (2 if "getLogger" in method else 1)

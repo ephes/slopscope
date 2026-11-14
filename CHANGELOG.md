@@ -8,6 +8,21 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Snapshot classification policy iterables at public aggregate boundaries, keeping generator
+  policies consistent across every row and report section without buffering standalone rows.
+- Normalize baseline integer-decoder resource errors to bounded diagnostics, including integers
+  in extension fields; refused baselines preserve prior snapshots.
+- Resolve Qt, logging, and data-shape names conservatively by lexical binding scope; exclude
+  shadowed/ambiguous names and keep logger instance fields within their own class. These three
+  detectors advance to version 2, so comparisons with old counts warn as non-comparable.
+- Refuse symlinked, hardlinked, and replaced allowlist lock entries through no-follow opening,
+  single-link regular-file admission, and descriptor/name identity checks after waiting.
+- Bound expanded duplicate metadata and traversal work across each project. Exhaustion refuses
+  partial reports/snapshots with exit code 2; complete duplicate output is unchanged.
+- Compensate multi-project allowlist publication on catchable interruptions as well as ordinary
+  errors, including interruptions immediately after rename. Preserve the primary failure and
+  retain named recovery backups if compensation fails; process death is outside the guarantee.
+
 - Count physical lines in bounded binary chunks with the existing UTF-8/ignored-error and
   universal-newline semantics; enforce 16 MiB per source and 128 MiB per physical report.
   Compatibility: these physical-line limits and the filesystem discovery limits below are fixed,
@@ -39,8 +54,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   refuse symlink retargets and destination changes, including mismatched opened file descriptors.
 - Stage all project allowlists before publication and compensate earlier replacements on handled
   errors, preserving prior bytes, modes, or absence. Failed compensation retains named recovery
-  backups, as does an interruption during publication or compensation for every allowlist that was
-  or may have been replaced and not yet restored; process death and power loss remain outside this
+  backups for every allowlist that was or may have been replaced and not yet restored;
+  process death and power loss remain outside this
   guarantee. Destination rechecks are best-effort: a swap racing the final path-based rename is not
   prevented.
 

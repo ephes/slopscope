@@ -5,6 +5,8 @@ import textwrap
 import tokenize
 from pathlib import Path
 
+import pytest
+
 from slopscope import composition, composition_duplication, fallback
 
 EXCLUDES = tuple(sorted(fallback.DEFAULT_EXCLUDED_PATH_SEGMENTS))
@@ -280,3 +282,29 @@ assert result.intervals == {index: [(1, 1)] for index in range(120)}
         timeout=30,
     )
     assert child.returncode == 0, child.stderr
+
+
+@pytest.mark.parametrize("prefix", ["repeated", "staircase"])
+@pytest.mark.parametrize("limit", ["MAX_DUPLICATE_OUTPUT_ITEMS", "MAX_DUPLICATE_WORK"])
+def test_duplicate_expansion_has_a_whole_analysis_budget(
+    monkeypatch: pytest.MonkeyPatch, limit: str, prefix: str
+) -> None:
+    from array import array
+
+    files = [
+        [
+            composition_duplication.Segment(
+                array(
+                    "i", ([1] * size if prefix == "repeated" else list(range(size))) + [size + 100]
+                ),
+                array("i", range(1, size + 2)),
+            )
+        ]
+        for size in range(1, 41)
+    ]
+    expected = composition_duplication.find_duplicates(files, min_tokens=1)
+    monkeypatch.setattr(composition_duplication, limit, 100 if prefix == "repeated" else 5000)
+    with pytest.raises(composition_duplication.BudgetExceeded, match="duplicate"):
+        composition_duplication.find_duplicates(files, min_tokens=1)
+    monkeypatch.setattr(composition_duplication, limit, 10_000_000)
+    assert composition_duplication.find_duplicates(files, min_tokens=1) == expected

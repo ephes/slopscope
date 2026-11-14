@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import re
 import tokenize
+from collections import Counter
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
@@ -32,9 +33,9 @@ MODULE_LEVEL = "module_level"
 HELPER_OR_UNKNOWN = "helper_or_unknown"
 
 DETECTORS = (
-    CompositionDetector(name=QT, kind="tag", version=1),
-    CompositionDetector(name=LOGGING, kind="tag", version=1),
-    CompositionDetector(name=DATA_SHAPE, kind="tag", version=1),
+    CompositionDetector(name=QT, kind="tag", version=2),
+    CompositionDetector(name=LOGGING, kind="tag", version=2),
+    CompositionDetector(name=DATA_SHAPE, kind="tag", version=2),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
     CompositionDetector(name="test_placement", kind="placement", version=1),
 )
@@ -230,6 +231,65 @@ class ImportMap:
         return any(in_modules(module, modules) for module in self.modules)
 
 
+def _scope_nodes(body: Sequence[ast.stmt]) -> list[ast.AST]:
+    """Collect one lexical scope without importing bindings from child scopes."""
+    nodes: list[ast.AST] = []
+    pending: list[ast.AST] = list(body)
+    while pending:
+        node = pending.pop()
+        nodes.append(node)
+        if not isinstance(
+            node,
+            (
+                *_FUNCTION_TYPES,
+                ast.ClassDef,
+                ast.Lambda,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
+        ):
+            pending.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def _scope_bindings(
+    nodes: Sequence[ast.AST], inherited: ImportMap, arguments: ast.arguments | None = None
+) -> ImportMap:
+    imports = ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom))
+    if any(isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names) for n in nodes):
+        inherited = ImportMap(())
+        imports = ImportMap(())
+    bindings = ImportMap(())
+    bindings.names = {**inherited.names, **imports.names}
+    shadowed: set[str] = set()
+    for node in nodes:
+        if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef)):
+            shadowed.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            shadowed.add(node.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+            name = dotted_name(node)
+            if name is not None:
+                shadowed.add(name.split(".", 1)[0])
+        elif (
+            isinstance(node, ast.ExceptHandler)
+            and node.name
+            or isinstance(node, ast.MatchAs | ast.MatchStar)
+            and node.name
+        ):
+            shadowed.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            shadowed.add(node.rest)
+    if arguments is not None:
+        shadowed.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
+    for name in tuple(bindings.names):
+        if name.split(".", 1)[0] in shadowed:
+            bindings.names.pop(name, None)
+    return bindings
+
+
 def overload_functions(tree: ast.Module) -> frozenset[int]:
     """Find typing overloads using scoped imports, refusing ambiguous/shadowed bindings.
 
@@ -254,37 +314,7 @@ def overload_functions(tree: ast.Module) -> frozenset[int]:
             nodes.append(node)
             if not isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
                 pending.extend(ast.iter_child_nodes(node))
-        imports = ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom))
-        if any(
-            isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names) for n in nodes
-        ):
-            inherited = ImportMap(())
-            imports = ImportMap(())
-        bindings = ImportMap(())
-        bindings.names = {**inherited.names, **imports.names}
-        shadowed: set[str] = set()
-        for node in nodes:
-            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef)):
-                shadowed.add(node.name)
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
-                shadowed.add(node.id)
-            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
-                name = dotted_name(node)
-                if name is not None:
-                    shadowed.add(name.split(".", 1)[0])
-            elif (
-                isinstance(node, ast.ExceptHandler)
-                and node.name
-                or isinstance(node, ast.MatchAs | ast.MatchStar)
-                and node.name
-            ):
-                shadowed.add(node.name)
-            elif isinstance(node, ast.MatchMapping) and node.rest:
-                shadowed.add(node.rest)
-        if arguments is not None:
-            shadowed.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
-        for name in shadowed:
-            bindings.names.pop(name, None)
+        bindings = _scope_bindings(nodes, inherited, arguments)
         for node in nodes:
             if isinstance(node, _FUNCTION_TYPES):
                 if any(
@@ -311,6 +341,196 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
+class _ScopedImports(ImportMap):
+    """Resolve each expression in its lexical environment; class fields stay in their class."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        super().__init__(())
+        self.scopes: dict[int, ImportMap] = {}
+        self._visit(tree.body, ImportMap(()))
+
+    def resolve(self, node: ast.AST) -> frozenset[str]:
+        bindings = self.scopes.get(id(node))
+        if bindings is not None:
+            name = dotted_name(node)
+            if name in bindings.names:
+                return frozenset(bindings.names[name])
+        if isinstance(node, ast.Attribute):
+            return frozenset(f"{base}.{node.attr}" for base in self.resolve(node.value))
+        return frozenset()
+
+    def _expression(self, node: ast.AST, bindings: ImportMap) -> None:
+        self.scopes[id(node)] = bindings
+        if isinstance(node, ast.Lambda):
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    self._expression(default, bindings)
+            local = _scope_bindings((), bindings, node.args)
+            self._expression(node.body, local)
+        elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            local = ImportMap(())
+            local.names = dict(bindings.names)
+            for generator in node.generators:
+                self._expression(generator.iter, local)
+                targets = {n.id for n in ast.walk(generator.target) if isinstance(n, ast.Name)}
+                local = _scope_bindings(list(ast.walk(generator.target)), local)
+                for name in tuple(local.names):
+                    if name.split(".", 1)[0] in targets:
+                        local.names.pop(name, None)
+                for condition in generator.ifs:
+                    self._expression(condition, local)
+            if isinstance(node, ast.DictComp):
+                self._expression(node.key, local)
+                self._expression(node.value, local)
+            else:
+                self._expression(node.elt, local)
+        else:
+            for child in ast.iter_child_nodes(node):
+                self._expression(child, bindings)
+
+    def _visit(
+        self,
+        body: Sequence[ast.stmt],
+        inherited: ImportMap,
+        arguments: ast.arguments | None = None,
+        *,
+        class_scope: bool = False,
+        fields: dict[str, set[str]] | None = None,
+    ) -> None:
+        nodes = _scope_nodes(body)
+        bindings = _scope_bindings(nodes, inherited, arguments)
+        # Tags refuse every ambiguous import and declared cross-scope mutation.
+        ambiguous = {name for name, values in bindings.names.items() if len(values) != 1}
+        ambiguous.update(
+            name for n in nodes if isinstance(n, ast.Global | ast.Nonlocal) for name in n.names
+        )
+        for binding_name in tuple(bindings.names):
+            if binding_name.split(".", 1)[0] in ambiguous:
+                bindings.names.pop(binding_name, None)
+        if fields:
+            rebound = {
+                n.id
+                for n in nodes
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del)
+            }
+            bindings.names.update(
+                {
+                    name: value
+                    for name, value in fields.items()
+                    if name.split(".", 1)[0] not in rebound
+                }
+            )
+        assignments = [n for n in nodes if isinstance(n, ast.Assign | ast.AnnAssign)]
+        # Ordinary rebinding, deletion or a different assignment invalidates a logger alias.
+        writes: dict[str, list[ast.AST | None]] = {}
+        for node in nodes:
+            if isinstance(node, ast.Name | ast.Attribute) and isinstance(
+                node.ctx, ast.Store | ast.Del
+            ):
+                name = dotted_name(node)
+                if name is not None:
+                    writes.setdefault(name, [])
+        for assignment in assignments:
+            targets = (
+                assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
+            )
+            for target in targets:
+                name = dotted_name(target)
+                if name is not None:
+                    writes.setdefault(name, []).append(assignment.value)
+        stores = Counter(
+            dotted_name(n)
+            for n in nodes
+            if isinstance(n, ast.Name | ast.Attribute) and isinstance(n.ctx, ast.Store | ast.Del)
+        )
+        other_bindings = {n.name for n in nodes if isinstance(n, (*_FUNCTION_TYPES, ast.ClassDef))}
+        other_bindings.update(
+            ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom)).names
+        )
+        for node in nodes:
+            if isinstance(node, ast.Global | ast.Nonlocal):
+                other_bindings.update(node.names)
+            elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+                other_bindings.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                other_bindings.add(node.rest)
+        if arguments is not None:
+            other_bindings.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
+        for name, values in writes.items():
+            bindings.names.pop(name, None)
+            # Do not infer through augmented assignment, deletion, or other rebinding.
+            if (
+                len(values) == 1
+                and values[0] is not None
+                and _is_logging_getlogger(values[0], bindings)
+                and stores[name] == 1
+                and name not in other_bindings
+            ):
+                bindings.names[name] = {"<logging.Logger>"}
+        for node in nodes:
+            self.scopes[id(node)] = bindings
+            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
+                # Decorators/defaults/bases execute in the enclosing environment.
+                for field, value in ast.iter_fields(node):
+                    if field == "body":
+                        continue
+                    children = value if isinstance(value, list) else [value]
+                    for child in children:
+                        if isinstance(child, ast.AST):
+                            self._expression(child, bindings)
+        for node in nodes:
+            if isinstance(
+                node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+            ):
+                self._expression(node, bindings)
+            elif isinstance(node, _FUNCTION_TYPES):
+                self._visit(node.body, inherited if class_scope else bindings, node.args)
+            elif isinstance(node, ast.ClassDef):
+                outer = inherited if class_scope else bindings
+                self._visit(node.body, outer, class_scope=True)
+                # Gather instance fields from this class's direct methods only. A field with
+                # any non-logger write is ambiguous. Do not share fields with other classes.
+                methods = [n for n in _scope_nodes(node.body) if isinstance(n, _FUNCTION_TYPES)]
+                field_values: dict[str, list[bool]] = {}
+                for method in methods:
+                    if not method.args.args:
+                        continue
+                    receiver = method.args.args[0].arg
+                    method_nodes = _scope_nodes(method.body)
+                    receiver_rebound = any(
+                        isinstance(n, ast.Name)
+                        and n.id == receiver
+                        and isinstance(n.ctx, ast.Store | ast.Del)
+                        for n in method_nodes
+                    )
+                    for child in method_nodes:
+                        if isinstance(child, ast.Attribute) and isinstance(
+                            child.ctx, ast.Store | ast.Del
+                        ):
+                            name = dotted_name(child)
+                            if name and name.startswith(receiver + "."):
+                                resolved = self.scopes[id(child)].names.get(name, set())
+                                field_values.setdefault(name, []).append(
+                                    resolved == {"<logging.Logger>"}
+                                    and not method.decorator_list
+                                    and not receiver_rebound
+                                )
+                known = {
+                    name: {"<logging.Logger>"}
+                    for name, values in field_values.items()
+                    if all(values)
+                }
+                for method in methods:
+                    if method.args.args and not method.decorator_list:
+                        receiver = method.args.args[0].arg
+                        own = {
+                            name: value
+                            for name, value in known.items()
+                            if name.startswith(receiver + ".")
+                        }
+                        self._visit(method.body, outer, method.args, fields=own)
+
+
 def detect(
     tree: ast.Module,
     *,
@@ -328,21 +548,17 @@ def detect(
 
     scan = _Scan(tree)
     imports = ImportMap(scan.imports)
+    scoped = _ScopedImports(tree)
     tag_lines: dict[str, set[int]] = {tag: set() for tag in COMPOSITION_TAGS}
 
     qt_modules = settings.qt_modules
-    qt_names = imports.names_from(qt_modules)
     qt_active = imports.imports_any(qt_modules)
-    logger_targets = _logger_targets(scan.assignments, imports)
     logging_active = imports.imports_any(("logging",)) or bool(settings.logging_patterns)
     if qt_active or logging_active:
         context = _TagContext(
-            imports=imports,
+            imports=scoped,
             qt_modules=qt_modules,
-            qt_names=qt_names,
-            qt_packages=imports.names_above(qt_modules),
             qt_active=qt_active,
-            logger_targets=logger_targets,
             logging_patterns=settings.logging_patterns,
             logging_active=logging_active,
         )
@@ -359,9 +575,9 @@ def detect(
     data_shape_classes = 0
     qt_classes = 0
     for node in scan.classes:
-        if qt_active and any(_resolves_into(base, imports, qt_modules) for base in node.bases):
+        if qt_active and any(_resolves_into(base, scoped, qt_modules) for base in node.bases):
             qt_classes += 1
-        if _is_data_shape(node, imports):
+        if _is_data_shape(node, scoped):
             data_shape_classes += 1
             for stmt in node.body:
                 if isinstance(stmt, ast.AnnAssign | ast.Assign):
@@ -408,13 +624,10 @@ class _Scan:
 
     def __init__(self, tree: ast.Module) -> None:
         self.imports: list[ast.Import | ast.ImportFrom] = []
-        self.assignments: list[ast.Assign | ast.AnnAssign] = []
         self.classes: list[ast.ClassDef] = []
         for node in _statements(tree.body):
             if isinstance(node, ast.Import | ast.ImportFrom):
                 self.imports.append(node)
-            elif isinstance(node, ast.Assign | ast.AnnAssign):
-                self.assignments.append(node)
             elif isinstance(node, ast.ClassDef):
                 self.classes.append(node)
 
@@ -454,24 +667,6 @@ def _is_logging_getlogger(node: ast.AST, imports: ImportMap) -> bool:
     return isinstance(node, ast.Call) and "logging.getLogger" in imports.resolve(node.func)
 
 
-def _logger_targets(
-    assignments: Iterable[ast.Assign | ast.AnnAssign],
-    imports: ImportMap,
-) -> frozenset[str]:
-    """Return names and attribute chains assigned from ``logging.getLogger()``."""
-
-    targets: set[str] = set()
-    for node in assignments:
-        if node.value is None or not _is_logging_getlogger(node.value, imports):
-            continue
-        candidates = node.targets if isinstance(node, ast.Assign) else [node.target]
-        for target in candidates:
-            name = dotted_name(target)
-            if name is not None:
-                targets.add(name)
-    return frozenset(targets)
-
-
 def _is_logging_call(node: ast.Call, context: _TagContext) -> bool:
     imports = context.imports
     if any(qualified.startswith("logging.") for qualified in imports.resolve(node.func)):
@@ -479,7 +674,7 @@ def _is_logging_call(node: ast.Call, context: _TagContext) -> bool:
     func = node.func
     if isinstance(func, ast.Attribute) and func.attr in LOGGER_METHODS:
         receiver = func.value
-        if dotted_name(receiver) in context.logger_targets or _is_logging_getlogger(
+        if "<logging.Logger>" in imports.resolve(receiver) or _is_logging_getlogger(
             receiver, imports
         ):
             return True
@@ -493,18 +688,9 @@ def _is_logging_call(node: ast.Call, context: _TagContext) -> bool:
 class _TagContext:
     imports: ImportMap
     qt_modules: tuple[str, ...]
-    qt_names: frozenset[str]
-    qt_packages: frozenset[str]
     qt_active: bool
-    logger_targets: frozenset[str]
     logging_patterns: tuple[str, ...]
     logging_active: bool
-
-
-def _root_name(node: ast.AST) -> str | None:
-    while isinstance(node, ast.Attribute):
-        node = node.value
-    return node.id if isinstance(node, ast.Name) else None
 
 
 def _unit_tags(nodes: Sequence[ast.AST], context: _TagContext) -> tuple[bool, bool]:
@@ -514,13 +700,8 @@ def _unit_tags(nodes: Sequence[ast.AST], context: _TagContext) -> tuple[bool, bo
     is_qt = False
     is_logging = False
     for node in _walk(nodes):
-        if isinstance(node, ast.Name):
-            is_qt = is_qt or node.id in context.qt_names
-        elif isinstance(node, ast.Attribute):
-            is_qt = is_qt or (
-                _root_name(node) in context.qt_packages
-                and _resolves_into(node, imports, context.qt_modules)
-            )
+        if isinstance(node, ast.Name | ast.Attribute):
+            is_qt = is_qt or _resolves_into(node, imports, context.qt_modules)
         elif isinstance(node, ast.Call):
             is_logging = is_logging or (context.logging_active and _is_logging_call(node, context))
         elif isinstance(node, ast.Import | ast.ImportFrom):

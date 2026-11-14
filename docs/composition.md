@@ -195,12 +195,21 @@ Tags are a second, separate dimension. A tag marks code lines (lines that are no
 with what the code is about. Unlike categories, tags overlap: a line can carry several tags or none, tag counts do not
 add up to anything, and tags never change a line's category.
 
-Every tag is resolved through the file's own imports. Naming conventions alone never trigger a tag, and a name that is
-reassigned or shadowed after its import still counts as imported. Imports anywhere in the file count, including
-imports inside functions. A name keeps every binding it gets, so importing another object under the same name later
-does not erase an earlier Qt, logging, or data-shape binding. Relative imports never match a third-party or standard
-library module. A star import (`from PySide6.QtWidgets import *`) tags its own line, but the names it brings in are
-unknown, so their uses are not tagged.
+Qt, logging, and data-shape detector version 2 resolves names through lexically scoped imports.
+Parameters, assignment/deletion, conflicting imports, and declared `global`/`nonlocal` names
+invalidate a binding throughout that scope, regardless of statement order. Child imports never
+leak into a parent or sibling; class-local imports do not bind method bodies. Function defaults,
+decorators, and class bases use the enclosing scope. Lambdas and comprehensions keep their own
+bindings. Relative imports never match a third-party or standard library module. Star imports
+tag their own line but conservatively invalidate import resolution within their scope.
+
+A logger alias must have one unambiguous assignment from a resolved `logging.getLogger()` call.
+Instance logger fields may be shared between direct undecorated methods of the same class using
+the same receiver name; other classes do not inherit that evidence. Rebinding a field invalidates
+that shared evidence. This is static analysis: call side effects, inheritance, decorated methods,
+and runtime mutation across scopes are not inferred. Version 2 can reduce semantic counts;
+baselines with older detector versions are marked non-comparable. Test placement and the
+compatibility wording marker retain their existing rules.
 
 A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
 signature of a `def`, bases of a `class`, the condition of an `if` or `while`, the target and iterable of a `for`, the
@@ -210,7 +219,7 @@ header never spreads to the block below it.
 | Tag | Code lines |
 |---|---|
 | `qt` | Units that use a name bound by an import from `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, `qtpy`, or a configured `qt_modules` entry, including those imports. Without such an import no line is tagged: CamelCase method names, or `.connect()` and `.emit()` calls, are never enough on their own. Calls on objects whose type is only known at runtime, such as `self.setText(...)`, are not tagged. |
-| `logging` | Units that import from `logging`, call anything resolved into the `logging` module (such as `logging.info(...)` or `logging.getLogger(...)`), or call a logger method (`debug`, `info`, `warning`, `warn`, `error`, `exception`, `critical`, `fatal`, `log`) on a name or attribute chain assigned from `logging.getLogger()` anywhere in the file. Names such as `logger` or `log_metric` that are not tied to `logging` are never tagged, unless configured `logging_patterns` match them. |
+| `logging` | Units that import from `logging`, call anything resolved into the `logging` module (such as `logging.info(...)` or `logging.getLogger(...)`), or call a logger method (`debug`, `info`, `warning`, `warn`, `error`, `exception`, `critical`, `fatal`, `log`) on a name or attribute chain unambiguously assigned from `logging.getLogger()` in its lexical scope or its own class. Names such as `logger` or `log_metric` that are not tied to `logging` are never tagged, unless configured `logging_patterns` match them. |
 | `data_shape` | Field declarations (annotated and plain assignments directly in the class body) of classes decorated with `dataclasses.dataclass` or an `attr`/`attrs` class decorator, or deriving from `enum.Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `typing` or `typing_extensions` `NamedTuple` or `TypedDict`, or `pydantic.BaseModel`. Only direct bases count; subclasses of a local data-shape class are not detected. |
 
 ### Markers
@@ -281,6 +290,18 @@ counts too: when two files share a block, both files report its lines.
 Largest duplicate blocks are ranked by the physical lines spanned by their longest copy, then by number of copies and
 tokens, and list up to five locations each.
 
+### Duplicate expansion limits
+
+In addition to token and anchor admission, each project has fixed duplicate-analysis budgets:
+1,000,000 cumulative metadata entries for blocks, occurrence memberships, line intervals, and
+anchor coverage memberships, plus 10,000,000 comparison/traversal work units. Verification,
+subgroup extension, and coverage scans share the work allowance across all groups. Entries
+are charged before retention, including subgroup results before materializing occurrences.
+These limits are not configurable and do not change counts or ordering below the ceiling.
+Exhaustion returns exit code 2 with an incomplete-analysis diagnostic, no partial report or
+snapshot, and no changes to existing artifacts. Exclude generated/repeated code to reduce work.
+
+
 ## Largest Items
 
 - Largest modules are ranked by code lines.
@@ -327,9 +348,9 @@ file to keep a snapshot.
   "schema_version": 4,
   "analyzer": {"name": "slopscope.composition", "version": 2, "python_version": "3.13.1"},
   "detectors": [
-    {"name": "qt", "kind": "tag", "version": 1},
-    {"name": "logging", "kind": "tag", "version": 1},
-    {"name": "data_shape", "kind": "tag", "version": 1},
+    {"name": "qt", "kind": "tag", "version": 2},
+    {"name": "logging", "kind": "tag", "version": 2},
+    {"name": "data_shape", "kind": "tag", "version": 2},
     {"name": "compat", "kind": "marker", "version": 1},
     {"name": "test_placement", "kind": "placement", "version": 1},
     {"name": "duplication", "kind": "duplication", "version": 1}
@@ -451,6 +472,9 @@ Comparison rules:
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
   JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
+  Integer-decoder resource failures (including huge integers in unused extension fields) are
+  normalized to a bounded numeric-decoding diagnostic and exit code 2 without snapshot publication.
+
 - A different analyzer version, detector version, or counting setting (every `settings` entry except
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
   `max_total_anchors`, which only control presentation or admission) prints a

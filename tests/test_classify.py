@@ -167,3 +167,38 @@ def test_build_file_aggregate_report_returns_all_sections() -> None:
             DirectoryRow(name="tests", files=1, code=3),
         ),
     )
+
+
+def test_aggregation_snapshots_generator_policies() -> None:
+    rows = [
+        row(path, i)
+        for i, path in enumerate(
+            (
+                "lib/a/one.py",
+                "lib/b/two.py",
+                "checks/unit/a.py",
+                "checks/unit/b.py",
+                "tools/a.py",
+                "tools/b.py",
+                "shells/desktop/a.py",
+                "shells/server/b.py",
+            ),
+            1,
+        )
+    ]
+    policies = dict(
+        source_dirs=("lib",),
+        test_dirs=("checks",),
+        named_areas=("tools",),
+        nested_bucket_dirs=("shells",),
+    )
+    for aggregate, names in (
+        (classify.aggregate_source_tests, ("source_dirs", "test_dirs")),
+        (classify.aggregate_areas, ("source_dirs", "test_dirs", "named_areas")),
+        (classify.aggregate_directories, ("source_dirs", "test_dirs", "nested_bucket_dirs")),
+        (classify.build_file_aggregate_report, tuple(policies)),
+    ):
+        selected = {name: policies[name] for name in names}
+        assert aggregate(
+            iter(rows), **{name: iter(value) for name, value in selected.items()}
+        ) == aggregate(iter(rows), **selected)

@@ -366,6 +366,8 @@ def build_composition_report(
 
     try:
         duplicates = _apply_duplication(analyses, file_rows, min_duplicate_tokens)
+    except composition_duplication.BudgetExceeded as exc:
+        raise fallback.CountingError(f"incomplete analysis: whole-composition {exc}") from exc
     except (RecursionError, MemoryError):
         duplicates = []
         failures.append(

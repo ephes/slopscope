@@ -93,9 +93,9 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
     assert data["files"][0]["path"] == "docs/conf.py"
     assert data["failures"] == []
     assert data["detectors"] == [
-        {"name": "qt", "kind": "tag", "version": 1},
-        {"name": "logging", "kind": "tag", "version": 1},
-        {"name": "data_shape", "kind": "tag", "version": 1},
+        {"name": "qt", "kind": "tag", "version": 2},
+        {"name": "logging", "kind": "tag", "version": 2},
+        {"name": "data_shape", "kind": "tag", "version": 2},
         {"name": "compat", "kind": "marker", "version": 1},
         {"name": "test_placement", "kind": "placement", "version": 1},
         {"name": "duplication", "kind": "duplication", "version": 1},

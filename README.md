@@ -258,6 +258,10 @@ Profile execution supports:
 When a profile sets its own language filters or include globs, those profile values are used for that profile.
 Top-level values are used only when the profile field is empty. Top-level `exclude_dirs` always apply.
 
+The public aggregation helpers snapshot classification policy iterables once per call. Generator
+policies therefore give the same source/test, area, and directory totals as tuple policies;
+individual aggregate helpers still stream file rows.
+
 Default rendered sections are:
 
 - Language Summary
@@ -273,7 +277,7 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - statements (`ast.stmt` nodes), code lines per statement, and continuation lines, which are size signals independent
   of formatter layout
 - semantic tags that overlap the categories: `qt`, `logging`, and `data_shape`, each resolved through the file's own
-  imports, plus a `compat` marker for identifiers that name themselves legacy, fallback, or compat code
+  lexically scoped imports, plus a `compat` marker for identifiers that name themselves legacy, fallback, or compat code
 - construct counts, and where test-file code lines sit: tests, fixtures, setup, module level, or helpers
 - duplicated code lines and the largest duplicate blocks, found on exact token sequences so formatting and comments
   do not matter
@@ -281,9 +285,19 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`
 
+Qt, logging, and data-shape detector version 2 uses conservative lexical binding resolution.
+Parameters, assignments, deletions, ambiguous imports, and declared global/nonlocal bindings
+invalidate names throughout their scope; nested imports do not leak. Logger instance fields
+are shared only among direct undecorated methods of their own class. These accuracy changes can
+reduce counts; baseline comparison warns about older detector versions.
+
 Duplicate extension compares overlap positions only within each token segment and expands nested
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
-incomplete and preserves any snapshot.
+incomplete and preserves any snapshot. Each project also has fixed whole-analysis ceilings of
+1,000,000 cumulative metadata entries (blocks, occurrences, line intervals, and coverage memberships)
+and 10,000,000 duplicate comparison/traversal work units. Admission happens before expansion;
+exhaustion exits 2 with an incomplete-analysis diagnostic and no report or snapshot. Exact-limit
+analyses retain the same output.
 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
@@ -315,13 +329,18 @@ units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offend
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
 one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
 including duplicates with identical values; refused inputs leave existing outputs unchanged.
+Baseline integer-decoder resource failures, including oversized integers in extension fields,
+return exit code 2 with a bounded diagnostic and preserve prior snapshots.
 Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,
 including JSON formatting and the final newline. Exact-limit outputs are accepted. Overflow
 returns exit code 2 before staging; any oversized allowlist in a multi-project batch preserves
 all previous allowlists. Multi-project snapshots share one ceiling for the complete envelope.
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
-changes. Multi-project publication stages all outputs first and restores earlier writes on handled
-errors; failed restoration retains a named recovery backup. Process death is outside this guarantee.
+changes. Lock entries are opened without following symlinks and must be single-link regular files;
+identity is rechecked after acquiring the lock. Multi-project publication stages all outputs first
+and restores earlier writes on catchable failures, including `KeyboardInterrupt` and `SystemExit`.
+The original interruption propagates after recovery; failed restoration retains a named recovery
+backup reported in exception notes. Process death is outside this guarantee.
 See [Size Limits](docs/size-limits.md).
 
 ## Development

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 
 DEFAULT_MIN_TOKENS = 50
 DUPLICATION_VERSION = 1
+MAX_DUPLICATE_OUTPUT_ITEMS = 1_000_000
+MAX_DUPLICATE_WORK = 10_000_000
 
 _SKIPPED_TOKEN_TYPES = frozenset(
     {
@@ -87,6 +89,22 @@ class TokenBudget:
         self.anchors -= anchors
 
 
+@dataclass
+class _DuplicateBudget:
+    """Charge expanded metadata and traversal across every group in one analysis."""
+
+    output: int
+    work: int
+
+    def reserve(self, *, output: int = 0, work: int = 0) -> None:
+        if output > self.output:
+            raise BudgetExceeded("duplicate output limit exceeded")
+        if work > self.work:
+            raise BudgetExceeded("duplicate work limit exceeded")
+        self.output -= output
+        self.work -= work
+
+
 def token_segments(
     tokens: Sequence[tokenize.TokenInfo],
     line_categories: Sequence[str],
@@ -143,6 +161,7 @@ def find_duplicates(
 ) -> DuplicationResult:
     """Find duplicated blocks of at least ``min_tokens`` tokens across and within files."""
 
+    budget = _DuplicateBudget(MAX_DUPLICATE_OUTPUT_ITEMS, MAX_DUPLICATE_WORK)
     segments: list[tuple[int, Segment]] = [
         (file_index, segment)
         for file_index, file_segments in enumerate(files)
@@ -175,8 +194,10 @@ def find_duplicates(
     for bucket in buckets.values():
         verified: list[tuple[array[int], list[int]]] = []
         for anchor in bucket:
+            budget.reserve(work=min_tokens)
             tokens = window(anchor)
             for reference, members in verified:
+                budget.reserve(work=min_tokens)
                 if reference == tokens:
                     members.append(anchor)
                     break
@@ -190,25 +211,28 @@ def find_duplicates(
     covered_by: dict[int, list[tuple[int, int]]] = {}
     blocks: list[Block] = []
     for group in groups:
+        budget.reserve(work=len(group))
         members = _without_overlaps(group, anchor_segment, anchor_position, min_tokens)
         if len(members) < 2:
             continue
         for anchor in members:
+            budget.reserve(output=1)
             file_index, segment = segments[anchor_segment[anchor]]
             position = anchor_position[anchor]
             intervals.setdefault(file_index, []).append(
                 (segment.lines[position], segment.lines[position + min_tokens - 1])
             )
 
-        if _continues_block(members, covered_by, blocks):
+        if _continues_block(members, covered_by, blocks, budget=budget):
             continue
 
         for block_members, length in _extend_blocks(
-            members, min_tokens, anchor_segment, anchor_position, segments
+            members, min_tokens, anchor_segment, anchor_position, segments, budget=budget
         ):
             block_index = len(blocks)
             occurrences: list[Occurrence] = []
             for occurrence_index, anchor in enumerate(block_members):
+                budget.reserve(output=1)  # The interval, in addition to the reserved occurrence.
                 file_index, segment = segments[anchor_segment[anchor]]
                 position = anchor_position[anchor]
                 end = position + length
@@ -227,6 +251,7 @@ def find_duplicates(
                     and anchor_segment[next_anchor] == anchor_segment[anchor]
                     and anchor_position[next_anchor] + min_tokens <= end
                 ):
+                    budget.reserve(output=1, work=1)
                     covered_by.setdefault(next_anchor, []).append((block_index, occurrence_index))
                     next_anchor += 1
             blocks.append(Block(tokens=length, occurrences=tuple(occurrences)))
@@ -262,14 +287,19 @@ def _continues_block(
     members: Sequence[int],
     covered_by: dict[int, list[tuple[int, int]]],
     blocks: Sequence[Block],
+    *,
+    budget: _DuplicateBudget,
 ) -> bool:
     """Return whether one found block has every member inside a different one of its copies."""
 
+    budget.reserve(work=len(members))
     covers = [covered_by.get(anchor, []) for anchor in members]
+    budget.reserve(work=sum(len(cover) for cover in covers))
     if not all(covers):
         return False
     shared_blocks = set.intersection(*({block for block, _occurrence in cover} for cover in covers))
     for block in shared_blocks:
+        budget.reserve(work=sum(len(cover) for cover in covers))
         occurrences = {
             occurrence for cover in covers for covered, occurrence in cover if covered == block
         }
@@ -286,6 +316,7 @@ def _extend_blocks(
     segments: Sequence[tuple[int, Segment]],
     *,
     subgroup: bool = False,
+    budget: _DuplicateBudget | None = None,
 ) -> list[tuple[Sequence[int], int]]:
     """Extend a verified group while every copy agrees, then keep extending subgroups.
 
@@ -294,10 +325,13 @@ def _extend_blocks(
     Copies in the same segment never run into each other.
     """
 
+    if budget is None:
+        budget = _DuplicateBudget(MAX_DUPLICATE_OUTPUT_ITEMS, MAX_DUPLICATE_WORK)
     blocks: list[tuple[Sequence[int], int]] = []
     pending = [(members, length, subgroup)]
     while pending:
         members, length, subgroup = pending.pop()
+        budget.reserve(work=len(members))
         start_length = length
         starts = [
             (
@@ -317,6 +351,7 @@ def _extend_blocks(
                 limit = min(limit, second - first)
         reference_ids, reference_position, _segment = starts[0]
         while length < limit:
+            budget.reserve(work=len(starts))
             token = reference_ids[reference_position + length]
             if any(ids[position + length] != token for ids, position, _segment in starts[1:]):
                 break
@@ -324,17 +359,17 @@ def _extend_blocks(
 
         # A subgroup is only its own block when it is longer than the block it split from.
         if not subgroup or length > start_length:
+            budget.reserve(output=1 + len(members))  # Block and occurrence memberships.
             blocks.append((members, length))
         next_tokens: dict[int, list[int]] = {}
         for anchor, (ids, position, _segment) in zip(members, starts, strict=True):
             if position + length < len(ids):
                 next_tokens.setdefault(ids[position + length], []).append(anchor)
         # Reverse insertion order so the stack preserves the recursive depth-first order.
-        pending.extend(
-            (agreeing, length, True)
-            for agreeing in reversed(next_tokens.values())
-            if 2 <= len(agreeing) < len(members)
-        )
+        for agreeing in reversed(next_tokens.values()):
+            if 2 <= len(agreeing) < len(members):
+                budget.reserve(work=len(agreeing))
+                pending.append((agreeing, length, True))
     return blocks
 
 

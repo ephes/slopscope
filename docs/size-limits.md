@@ -134,8 +134,7 @@ Locks use persistent sibling files named `.<allowlist-name>.lock`, created with 
 delete these files while mutations may be running. Mutations can create these files and their parent
 directories even if planning later refuses the operation (for example, updating a missing allowlist).
 Add `.size-limits.json.lock` to your project's `.gitignore` when using the default allowlist path. The OS releases a lock when its process exits,
-including interruption. Lock acquisition failures return exit code 2. On Windows, the OS lock call
-retries for about 10 seconds before failing if the target remains busy. These advisory locks
+including interruption. Lock acquisition failures return exit code 2. These advisory locks
 coordinate slopscope mutations on filesystems supporting OS locks; manual writers must coordinate
 separately.
 
@@ -154,9 +153,25 @@ seeded files), while all locks remain held. If compensation fails, the diagnosti
 failed restoration and its retained sibling `.<allowlist-name>.*.backup` file, or the newly
 seeded file to remove. Preserve that backup and restore it manually after resolving the error
 and coordinating with other writers. This is a handled-error guarantee, not a transaction
-across process death or power loss; an interruption may leave a partially published set.
+across process death or power loss; an uncatchable interruption may leave a partially published set.
 If publication or compensation is interrupted (for example by Ctrl-C), the sibling `.backup` file
 of every allowlist that was or may have been replaced and not yet restored is kept for manual recovery.
+
+### Lock authority and interrupted publication
+
+Mutation lock entries must be single-link regular files, opened with `O_NOFOLLOW` and checked
+with `lstat` against the opened descriptor after lock acquisition. Symlinks, hardlinks, and
+replacement while waiting are refused before analysis/publication. Platforms without
+`O_NOFOLLOW` cannot mutate allowlists. Normal sibling locks remain on disk to serialize waiters.
+
+Catchable failures during staged multi-project publication, including `KeyboardInterrupt` and
+`SystemExit` immediately after a replacement, trigger reverse compensation. Prior bytes, modes,
+or absence are restored under the existing identity checks before the original interruption
+propagates. Recovery failures do not replace the primary failure: named backup paths are retained
+in the diagnostic or exception notes for manual recovery. Compensation attempts continue for
+other projects even if one recovery fails. Process death, power loss, and swaps racing the final
+path-based rename remain outside this guarantee.
+
 
 ## Projects
 

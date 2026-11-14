@@ -312,18 +312,24 @@ def publish_allowlists(
             # Keep the prior bytes until the outcome is settled, so an interruption at any
             # point after this replacement (including during compensation) retains them.
             item.keep_backup = True
+            replaced.append(item)  # Include an interrupted rename whose outcome is uncertain.
             os.replace(item.temporary, item.destination.target)
-            replaced.append(item)
         for item in prepared:
             item.keep_backup = False
-    except (OSError, SizeLimitsError) as exc:
+    except BaseException as exc:
         for item in prepared:
             if item not in replaced:
                 item.keep_backup = False  # Not replaced: the target still holds its prior bytes.
         recovery_errors: list[str] = []
         for item in reversed(replaced):
+            item.keep_backup = True
             destination = item.destination
             try:
+                # A rename may have been interrupted before it changed the target.
+                if _identity(destination.target) == destination.identity:
+                    _verify_destination(destination)
+                    item.keep_backup = False
+                    continue
                 # Do not restore through a changed ancestor or clobber an external writer.
                 _verify_destination(
                     dataclasses.replace(destination, identity=item.installed_identity)
@@ -333,15 +339,21 @@ def publish_allowlists(
                 else:
                     os.replace(item.backup, destination.target)
                 item.keep_backup = False
-            except (OSError, SizeLimitsError) as recovery:
+            except BaseException as recovery:
                 evidence = (
                     f"restore from {item.backup}"
                     if item.backup is not None
                     else f"remove newly seeded {destination.target}"
                 )
-                recovery_errors.append(f"{destination.path}: {recovery}; {evidence}")
+                recovery_errors.append(
+                    f"{destination.path}: {type(recovery).__name__}: {recovery}; {evidence}"
+                )
         details = "; compensation failed: " + "; ".join(recovery_errors) if recovery_errors else ""
-        raise SizeLimitsError(f"could not publish allowlists: {exc}{details}") from exc
+        if isinstance(exc, OSError | SizeLimitsError):
+            raise SizeLimitsError(f"could not publish allowlists: {exc}{details}") from exc
+        if details:
+            exc.add_note(details.lstrip("; "))
+        raise
     finally:
         for item in prepared:
             for leftover in (item.temporary, None if item.keep_backup else item.backup):
@@ -385,13 +397,18 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
         parent_identity = _identity(lock.parent)
-        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | getattr(os, "O_NONBLOCK", 0), 0o600)
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise SizeLimitsError("allowlist locks require O_NOFOLLOW")
+        descriptor = os.open(
+            lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), 0o600
+        )
     except OSError as exc:
         raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
     try:
         try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise SizeLimitsError(f"allowlist lock {lock} must be a regular file")
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise SizeLimitsError(f"allowlist lock {lock} must be a single-link regular file")
             if sys.platform == "win32":
                 import msvcrt
 
@@ -402,9 +419,14 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
         except OSError as exc:
             raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
-        if _identity(lock.parent) != parent_identity or _identity(lock) != (
-            os.fstat(descriptor).st_dev,
-            os.fstat(descriptor).st_ino,
+        info = os.fstat(descriptor)
+        named = lock.lstat()
+        if (
+            _identity(lock.parent) != parent_identity
+            or not stat.S_ISREG(named.st_mode)
+            or named.st_nlink != 1
+            or info.st_nlink != 1
+            or (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino)
         ):
             raise SizeLimitsError(f"allowlist target changed while locking: {target}")
         yield
