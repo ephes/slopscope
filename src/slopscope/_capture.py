@@ -12,6 +12,8 @@ import time
 from typing import BinaryIO
 
 _CAPTURE_CHUNK_BYTES = 64 * 1024
+_GROUP_TERM_SECONDS = 0.2
+_GROUP_KILL_SECONDS = 0.8
 
 
 class CaptureError(RuntimeError):
@@ -21,7 +23,11 @@ class CaptureError(RuntimeError):
 def capture_process(
     process: subprocess.Popen[bytes], *, timeout: float, max_bytes: int, label: str
 ) -> subprocess.CompletedProcess[bytes]:
-    """Capture both pipes within one combined budget; kill the owned tree on failure."""
+    """Capture both pipes within one budget and retire the owned tree on every outcome.
+
+    Callers must start a new session on POSIX. Descendants that leave that session/group
+    are outside this ownership boundary; Windows tree termination remains best-effort.
+    """
     # Each reader retains only its share of one combined byte budget. Separate readers
     # prevent a full stderr pipe from blocking stdout (and work on Windows too).
     buffers = (bytearray(), bytearray())
@@ -81,6 +87,7 @@ def capture_process(
         if failures:
             raise failures[0]
         process.wait(timeout=max(0, deadline - time.monotonic()))
+        _retire_group(process, label=label)
     except BaseException:
         stopped.set()
         if os.name == "posix":
@@ -110,3 +117,45 @@ def capture_process(
     return subprocess.CompletedProcess(
         process.args, process.returncode, bytes(buffers[0]), bytes(buffers[1])
     )
+
+
+def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
+    """Retire redirected descendants too, even after their wrapper has exited."""
+
+    if os.name != "posix":
+        # The wrapper may already be gone, so taskkill cannot always find its tree.
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        return
+    try:
+        for sig, grace in (
+            (signal.SIGTERM, _GROUP_TERM_SECONDS),
+            (signal.SIGKILL, _GROUP_KILL_SECONDS),
+        ):
+            deadline = time.monotonic() + grace
+            pending: int = sig
+            while True:
+                try:
+                    # Send ``sig`` until it is delivered, then probe with signal 0.
+                    os.killpg(process.pid, pending)
+                except ProcessLookupError:
+                    return
+                except PermissionError:
+                    # A terminating/reparented group can be temporarily unsignalable or
+                    # uninspectable (e.g. only zombies remain on macOS). Retry only
+                    # within the same deadline; never infer success from EPERM.
+                    pass
+                else:
+                    pending = 0
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(remaining, 0.01))
+    except OSError as exc:
+        raise CaptureError(f"could not confirm {label} process-group cleanup") from exc
+    raise CaptureError(f"could not confirm {label} process-group cleanup")

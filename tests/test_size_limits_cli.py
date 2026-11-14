@@ -736,3 +736,25 @@ def test_publication_interrupt_keeps_named_backup_on_failed_recovery(
     assert backups[0].read_bytes() == original
     assert str(backups[0]) in " ".join(raised.value.__notes__)
     assert paths[1].read_bytes() == original
+
+
+@pytest.mark.parametrize("mode", [[], ["--strict"], ["--seed-allowlist"], ["--update-allowlist"]])
+@pytest.mark.parametrize("section", ["functions", "extension"])
+def test_allowlist_integer_decoder_limit_preserves_file(
+    tmp_path: Path, mode: list[str], section: str
+) -> None:
+    import sys
+
+    if not sys.get_int_max_str_digits():
+        pytest.skip("interpreter integer decoder limit disabled")
+    project = make_project(tmp_path)
+    allowlist = project / "size-limits.json"
+    original = ('{"' + section + '": {"invented": ' + "9" * 5000 + "}}").encode()
+    allowlist.write_bytes(original)
+    code, stdout, stderr = run_cli(["--size-limits", *mode, str(project)])
+    assert code == 2
+    assert stdout == ""
+    assert "JSON number exceeds decoder limits" in stderr
+    assert len(stderr) < 300
+    assert "999999" not in stderr
+    assert allowlist.read_bytes() == original

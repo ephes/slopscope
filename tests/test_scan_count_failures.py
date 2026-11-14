@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import errno
 import io
 import os
 from collections.abc import Iterator
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, cloc, fallback
+from slopscope import cli, cloc, composition, fallback
 
 
 @pytest.mark.parametrize("mode", ["report", "profile", "composition", "seed", "update"])
@@ -122,3 +123,85 @@ def test_excluded_unreadable_directory_is_pruned(
     assert tmp_path in scanned
     assert blocked not in scanned
     assert err.getvalue() == ""
+
+
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.EIO])
+@pytest.mark.parametrize("mode", ["composition", "report", "seed", "update"])
+def test_composition_discovery_stat_failure_preserves_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_number: int,
+    mode: str,
+) -> None:
+    source = tmp_path / "app.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(0, b"app.py\0")
+    )
+    original_stat, original_is_file = Path.stat, Path.is_file
+    attempts: list[Path] = []
+
+    def fail_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        if path == source and follow_symlinks:
+            attempts.append(path)
+            raise OSError(error_number, "invented discovery failure")
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    def suppress_stat_errors(path: Path) -> bool:
+        # Model Python versions where is_file suppresses every OSError.
+        try:
+            return original_is_file(path)
+        except OSError:
+            return False
+
+    monkeypatch.setattr(Path, "stat", fail_stat)
+    monkeypatch.setattr(Path, "is_file", suppress_stat_errors)
+    snapshot, allowlist = tmp_path / "snapshot.json", tmp_path / "size-limits.json"
+    snapshot.write_bytes(b"previous snapshot")
+    if mode != "seed":
+        allowlist.write_bytes(b"{}\n")
+    previous = allowlist.read_bytes() if allowlist.exists() else None
+    options = {
+        "composition": ["--composition", "--snapshot", str(snapshot)],
+        "report": ["--size-limits"],
+        "seed": ["--size-limits", "--seed-allowlist"],
+        "update": ["--size-limits", "--update-allowlist"],
+    }[mode]
+    out, err = io.StringIO(), io.StringIO()
+    assert cli.run([str(tmp_path), *options], stdout=out, stderr=err) == 2
+    assert attempts
+    assert out.getvalue() == ""
+    assert "incomplete analysis" in err.getvalue() and "app.py" in err.getvalue()
+    assert len(err.getvalue()) < 400
+    assert snapshot.read_bytes() == b"previous snapshot"
+    assert (allowlist.read_bytes() if allowlist.exists() else None) == previous
+
+
+def test_composition_discovery_skips_missing_and_nonregular_in_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "directory.py").mkdir()
+    for name in ("z.py", "a.py"):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fallback,
+        "run_git_ls_files",
+        lambda _: fallback.GitLsFilesResult(0, b"z.py\0missing.py\0directory.py\0a.py\0"),
+    )
+    assert composition.discover_python_files(tmp_path, excluded_paths=()) == ["a.py", "z.py"]
+
+
+def test_composition_discovery_skips_parent_file_and_looping_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pkg").write_text("not a directory\n", encoding="utf-8")
+    (tmp_path / "loop.py").symlink_to("loop.py")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(
+        fallback,
+        "run_git_ls_files",
+        lambda _: fallback.GitLsFilesResult(0, b"pkg/mod.py\0loop.py\0a.py\0"),
+    )
+    assert composition.discover_python_files(tmp_path, excluded_paths=()) == ["a.py"]

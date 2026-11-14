@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -242,3 +244,143 @@ def test_overflow_stops_descendant_retaining_pipes(
     # A surviving holder would finish this bounded task; the tree must stop it first.
     time.sleep(1.2)
     assert not completed.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="owned POSIX process groups")
+@pytest.mark.parametrize("returncode", [0, 7])
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_wrapper_exit_retires_redirected_descendant(
+    tmp_path: Path, returncode: int, ignore_term: bool
+) -> None:
+    import os
+    import signal
+    import time
+
+    from slopscope import _capture
+
+    ready = tmp_path / "child.pid"
+    holder = (
+        "import os,pathlib,signal,sys,time; "
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else "")
+        + "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    wrapper = (
+        "import pathlib,subprocess,sys,time; "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]], "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "ready=pathlib.Path(sys.argv[2]); deadline=time.monotonic()+5; "
+        "\nwhile not ready.exists() and time.monotonic()<deadline: time.sleep(0.01)\n"
+        "assert ready.exists(); print('result'); print('diagnostic', file=sys.stderr); "
+        "sys.exit(int(sys.argv[3]))"
+    )
+    unrelated = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", wrapper, holder, str(ready), str(returncode)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    cleaned = False
+    try:
+        started = time.monotonic()
+        result = _capture.capture_process(process, timeout=5, max_bytes=100, label="synthetic")
+        assert result.args == process.args
+        assert result.returncode == returncode
+        assert result.stdout == b"result\n"
+        assert result.stderr == b"diagnostic\n"
+        assert time.monotonic() - started < 8
+        child_pid = int(ready.read_text())
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail("redirected descendant survived wrapper completion")
+        cleaned = True
+        assert unrelated.poll() is None
+    finally:
+        if not cleaned:
+            with contextlib.suppress(OSError):
+                os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=5)
+        unrelated.kill()
+        unrelated.wait(timeout=5)
+
+
+@pytest.mark.parametrize("failure", ["permission", "survivor"])
+def test_unconfirmed_group_cleanup_is_bounded_domain_error(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from slopscope import _capture
+
+    process = Mock(pid=12345, args=["synthetic"], stdout=io.BytesIO(), stderr=io.BytesIO())
+    group_kill = Mock(
+        side_effect=PermissionError("private detail") if failure == "permission" else None
+    )
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 0.01)
+    monkeypatch.setattr(_capture, "_GROUP_KILL_SECONDS", 0.01)
+    with pytest.raises(
+        _capture.CaptureError, match="could not confirm synthetic process-group cleanup"
+    ):
+        _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    assert process.wait.call_args.kwargs == {"timeout": 5}
+    assert group_kill.call_count < 20
+
+
+def test_group_cleanup_retries_transient_probe_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from slopscope import _capture
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=7,
+        stdout=io.BytesIO(b"output"),
+        stderr=io.BytesIO(),
+    )
+    group_kill = Mock(side_effect=[None, PermissionError("transient"), ProcessLookupError()])
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    assert result.returncode == 7 and result.stdout == b"output"
+    assert group_kill.call_count == 3
+
+
+def test_group_cleanup_retries_transient_signal_permission_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from slopscope import _capture
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=0,
+        stdout=io.BytesIO(b"output"),
+        stderr=io.BytesIO(),
+    )
+    # SIGTERM delivery is refused once (zombie-only group), then succeeds; the
+    # group is gone at the next probe.
+    group_kill = Mock(side_effect=[PermissionError("transient"), None, ProcessLookupError()])
+    monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    assert result.returncode == 0 and result.stdout == b"output"
+    assert [call.args[1] for call in group_kill.call_args_list] == [
+        signal.SIGTERM,
+        signal.SIGTERM,
+        0,
+    ]

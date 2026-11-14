@@ -8,6 +8,19 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Apply shared composition source-byte, token, and anchor budgets to size-limits measurement,
+  configurable through the existing composition settings. Exhaustion returns exit code 2
+  without a partial report or allowlist write; exact-limit measurements are unchanged.
+- Inspect composition/size-limits discovery stat errors explicitly: missing tracked paths
+  (also below a parent replaced by a file) and looping symlinks remain skipped, while permission and I/O errors refuse incomplete analysis and preserve outputs.
+
+- Retire owned POSIX process groups after successful and nonzero capture wrapper exits,
+  including redirected descendants, with bounded TERM/KILL confirmation (transient EPERM
+  on signal delivery or probing is retried within the deadline). Unconfirmed cleanup
+  refuses the result; confirmed cleanup preserves the wrapper's output and return code.
+- Normalize allowlist integer-decoder resource failures to bounded, value-free diagnostics in
+  every size-limit mode, preserving the refused allowlist bytes.
+
 - Snapshot classification policy iterables at public aggregate boundaries, keeping generator
   policies consistent across every row and report section without buffering standalone rows.
 - Normalize baseline integer-decoder resource errors to bounded diagnostics, including integers
