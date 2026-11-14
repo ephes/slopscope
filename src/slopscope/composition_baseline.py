@@ -94,6 +94,8 @@ def load_baseline(
         raise BaselineError(f"baseline file {path}: JSON nesting is too deep") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise BaselineError(f"baseline file {path} is not valid JSON: {exc}") from exc
+    except ValueError as exc:
+        raise BaselineError(f"baseline file {path}: JSON numeric decoding limit exceeded") from exc
 
     if not isinstance(data, dict):
         raise BaselineError(f"baseline file {path} is not a composition report")

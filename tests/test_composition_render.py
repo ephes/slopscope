@@ -100,7 +100,7 @@ def test_human_baseline_unknown_and_signed_deltas(
     warning = "Warning: not directly comparable with this baseline; see the warnings below."
     assert (warning in lines) is detector_mismatch
     if detector_mismatch:
-        assert "Warning: detector qt version differs: baseline 0, current 1" in lines
+        assert "Warning: detector qt version differs: baseline 0, current 2" in lines
     else:
         assert not any("detector" in line for line in lines)
 

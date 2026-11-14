@@ -621,36 +621,43 @@ def test_mutation_refuses_replaced_canonical_parent(
     assert (moved / target.name).read_bytes() == prior
 
 
-def test_interrupted_publication_retains_replaced_backups(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("action", ["seed", "update"])
+@pytest.mark.parametrize("after", [1, 2])
+def test_interrupted_publication_restores_all_allowlists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, after: int
 ) -> None:
     import os
 
     _two_projects(tmp_path)
     paths = [tmp_path / name / "size-limits.json" for name in ("one", "two")]
     original = b'{ "functions": {"src/big.py::big": 20} }\n'
-    for path in paths:
-        path.write_bytes(original)
+    if action == "update":
+        for path in paths:
+            path.write_bytes(original)
     real_replace = os.replace
+    count = 0
+    interruption = KeyboardInterrupt("injected interrupt")
 
     def replace(src: str | Path, dst: str | Path) -> None:
-        if Path(dst) == paths[1]:
-            raise KeyboardInterrupt
+        nonlocal count
         real_replace(src, dst)
+        if Path(src).suffix == ".pending":
+            count += 1
+            if count == after:
+                raise interruption
 
     monkeypatch.setattr(os, "replace", replace)
-    with pytest.raises(KeyboardInterrupt):
-        run_cli(["--size-limits", "--project", "all", "--update-allowlist", str(tmp_path)])
-    assert paths[0].read_bytes() != original
-    backups = list(paths[0].parent.glob(".size-limits.json.*.backup"))
-    assert len(backups) == 1
-    assert backups[0].read_bytes() == original
-    assert paths[1].read_bytes() == original
-    # The interrupted replacement's outcome is unknown, so its backup is conservatively kept.
-    kept = list(paths[1].parent.glob(".size-limits.json.*.backup"))
-    assert len(kept) == 1
-    assert kept[0].read_bytes() == original
-    assert not list(paths[1].parent.glob(".size-limits.json.*.pending"))
+    with pytest.raises(KeyboardInterrupt) as raised:
+        run_cli(["--size-limits", "--project", "all", f"--{action}-allowlist", str(tmp_path)])
+    assert raised.value is interruption
+    for path in paths:
+        if action == "update":
+            assert path.read_bytes() == original
+        else:
+            assert not path.exists()
+        assert sorted(p.name for p in path.parent.glob(".size-limits.json.*")) == [
+            ".size-limits.json.lock"
+        ]
 
 
 def test_body_oserror_is_not_reported_as_lock_failure(tmp_path: Path) -> None:
@@ -685,11 +692,47 @@ def test_interrupted_compensation_retains_unrestored_backup(
         real_replace(src, dst)
 
     monkeypatch.setattr(os, "replace", replace)
-    with pytest.raises(KeyboardInterrupt):
-        run_cli(["--size-limits", "--project", "all", "--update-allowlist", str(tmp_path)])
+    code, out, err = run_cli(
+        ["--size-limits", "--project", "all", "--update-allowlist", str(tmp_path)]
+    )
+    assert code == 2
+    assert out == ""
+    assert "injected second replace failure" in err
+    assert "compensation failed" in err and "KeyboardInterrupt" in err
     assert paths[0].read_bytes() != original
     backups = list(paths[0].parent.glob(".size-limits.json.*.backup"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
+    assert str(backups[0]) in err
     assert paths[1].read_bytes() == original
     assert not list(paths[1].parent.glob(".size-limits.json.*.backup"))
+
+
+def test_publication_interrupt_keeps_named_backup_on_failed_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    _two_projects(tmp_path)
+    paths = [tmp_path / name / "size-limits.json" for name in ("one", "two")]
+    original = b'{ "functions": {"src/big.py::big": 20} }\n'
+    for path in paths:
+        path.write_bytes(original)
+    real_replace = os.replace
+    interruption = KeyboardInterrupt("injected interrupt")
+
+    def replace(src: str | Path, dst: str | Path) -> None:
+        if Path(src).suffix == ".backup":
+            raise OSError("recovery failed")
+        real_replace(src, dst)
+        raise interruption
+
+    monkeypatch.setattr(os, "replace", replace)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        run_cli(["--size-limits", "--project", "all", "--update-allowlist", str(tmp_path)])
+    assert raised.value is interruption
+    backups = list(paths[0].parent.glob(".size-limits.json.*.backup"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert str(backups[0]) in " ".join(raised.value.__notes__)
+    assert paths[1].read_bytes() == original

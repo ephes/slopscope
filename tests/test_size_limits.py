@@ -569,3 +569,15 @@ def test_class_imports_are_not_visible_in_method_bodies(tmp_path: Path) -> None:
     functions = measure(tmp_path)["functions"]
     assert "src/app.py::Example.genuine" not in functions
     assert functions["src/app.py::Example.method.large"] == 4
+
+
+def test_allowlist_lock_refuses_without_no_follow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows lacks O_NOFOLLOW; allowlist mutation is refused there, like source analysis.
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    with (
+        pytest.raises(size_limits.SizeLimitsError, match="O_NOFOLLOW"),
+        size_limits._allowlist_lock(tmp_path / "allowlist.toml"),
+    ):
+        pass

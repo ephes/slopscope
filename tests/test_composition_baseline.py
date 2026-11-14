@@ -848,3 +848,40 @@ def test_duplicate_analysis_failure_preserves_snapshot(
         assert snapshot.read_bytes() == b"previous snapshot"
     else:
         assert not snapshot.exists()
+
+
+@pytest.mark.parametrize("field", ["total", "extension"])
+def test_baseline_integer_decode_failure_preserves_snapshot(tmp_path: Path, field: str) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_bytes(b"previous snapshot")
+    baseline.write_text('{"' + field + '": {"code": ' + "9" * 5000 + "}}")
+    code, out, err = run_cli(
+        [str(repository), "--composition", "--baseline", str(baseline), "--snapshot", str(snapshot)]
+    )
+    assert code == 2
+    assert out == ""
+    assert "numeric" in err
+    assert len(err) < len(str(baseline)) + 150
+    assert snapshot.read_bytes() == b"previous snapshot"
+
+
+@pytest.mark.parametrize("limit", ["MAX_DUPLICATE_OUTPUT_ITEMS", "MAX_DUPLICATE_WORK"])
+def test_duplicate_budget_preserves_prior_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str
+) -> None:
+    repository = make_repository(tmp_path)
+    write(repository, "src/copy.py", (repository / "src/app.py").read_text())
+    write(repository, "pyproject.toml", "[tool.slopscope.composition]\nmin_duplicate_tokens = 1\n")
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_bytes(b"previous snapshot")
+    allowlist = repository / "size-limits.json"
+    allowlist.write_bytes(b"previous allowlist")
+    monkeypatch.setattr(composition_duplication, limit, 1, raising=False)
+    code, out, err = run_cli([str(repository), "--composition", "--snapshot", str(snapshot)])
+    assert code == 2
+    assert out == ""
+    assert "incomplete analysis" in err and "duplicate" in err
+    assert snapshot.read_bytes() == b"previous snapshot"
+    assert allowlist.read_bytes() == b"previous allowlist"

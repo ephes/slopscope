@@ -117,6 +117,9 @@ def aggregate_source_tests(
 ) -> SourceTestSummary:
     """Aggregate source and test totals from file rows."""
 
+    source_dirs = tuple(source_dirs)
+    test_dirs = tuple(test_dirs)
+
     source_files = 0
     source_code = 0
     test_files = 0
@@ -148,6 +151,10 @@ def aggregate_areas(
 ) -> tuple[AreaRow, ...]:
     """Aggregate repository area totals from file rows."""
 
+    source_dirs = tuple(source_dirs)
+    test_dirs = tuple(test_dirs)
+    named_areas = tuple(named_areas)
+
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
         area = classify_area(
@@ -171,6 +178,10 @@ def aggregate_directories(
     nested_bucket_dirs: Iterable[str] = DEFAULT_NESTED_BUCKET_DIRS,
 ) -> tuple[DirectoryRow, ...]:
     """Aggregate directory bucket totals from file rows."""
+
+    source_dirs = tuple(source_dirs)
+    test_dirs = tuple(test_dirs)
+    nested_bucket_dirs = tuple(nested_bucket_dirs)
 
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
@@ -199,6 +210,11 @@ def build_file_aggregate_report(
     nested_bucket_dirs: Iterable[str] = DEFAULT_NESTED_BUCKET_DIRS,
 ) -> FileAggregateReport:
     """Build all internal aggregate sections from file rows."""
+
+    source_dirs = tuple(source_dirs)
+    test_dirs = tuple(test_dirs)
+    named_areas = tuple(named_areas)
+    nested_bucket_dirs = tuple(nested_bucket_dirs)
 
     rows = tuple(file_rows)
     return FileAggregateReport(

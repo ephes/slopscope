@@ -191,3 +191,45 @@ def test_lock_failure_is_a_cli_error(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "could not lock allowlist" in err.getvalue()
     assert out.getvalue() == ""
     assert not (tmp_path / "size-limits.json").exists()
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_lock_refuses_linked_entries(tmp_path: Path, link: str) -> None:
+    import os
+
+    target = tmp_path / "size-limits.json"
+    external = tmp_path / "external.lock"
+    external.write_bytes(b"sentinel")
+    lock = tmp_path / ".size-limits.json.lock"
+    if link == "symlink":
+        lock.symlink_to(external)
+    else:
+        os.link(external, lock)
+    with (
+        pytest.raises(size_limits.SizeLimitsError),
+        size_limits.allowlist_locks([target], action=size_limits.SEED),
+    ):
+        pytest.fail("linked lock admitted")
+    assert external.read_bytes() == b"sentinel"
+    assert not target.exists()
+
+
+def test_lock_replacement_while_waiting_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fcntl
+
+    target = tmp_path / "size-limits.json"
+    lock = tmp_path / ".size-limits.json.lock"
+    moved = tmp_path / "old.lock"
+
+    def replaced_waiter(descriptor: int, operation: int) -> None:
+        lock.rename(moved)
+        lock.symlink_to(moved)
+
+    monkeypatch.setattr(fcntl, "flock", replaced_waiter)
+    with (
+        pytest.raises(size_limits.SizeLimitsError),
+        size_limits.allowlist_locks([target], action=size_limits.SEED),
+    ):
+        pytest.fail("replaced lock admitted")
