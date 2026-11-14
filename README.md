@@ -192,6 +192,7 @@ and 128 MiB of raw source bytes per report, using binary reads of at most 64 KiB
 limits include invalid UTF-8 bytes; decoding still ignores errors, CR/LF/CRLF count as line endings,
 and a final unterminated decoded line counts once. One overflow-probe byte may be read. Oversized
 or growing inputs return exit code 2 with an incomplete-analysis error and no report or total.
+These limits are not configurable: exclude large generated or data files, or use the cloc engine.
 
 Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
 2,000,000 retained code tokens, and 500,000 potential duplicate anchors (code line starts within

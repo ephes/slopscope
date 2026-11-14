@@ -324,11 +324,15 @@ def count_physical_lines(
                 chunk = handle.read(min(PHYSICAL_READ_CHUNK, allowance + 1))
                 source_bytes += len(chunk)
                 if source_bytes > MAX_PHYSICAL_SOURCE_BYTES:
-                    raise CountingError(f"incomplete analysis: source byte limit exceeded: {path}")
+                    affected = repr(str(path))[:240]
+                    raise CountingError(
+                        f"incomplete analysis: source byte limit exceeded: {affected}"
+                    )
                 if budget is not None:
                     if len(chunk) > budget.remaining:
+                        affected = repr(str(path))[:240]
                         raise CountingError(
-                            f"incomplete analysis: total source byte limit exceeded: {path}"
+                            f"incomplete analysis: total source byte limit exceeded: {affected}"
                         )
                     budget.remaining -= len(chunk)
                 text = decoder.decode(chunk, final=not chunk)

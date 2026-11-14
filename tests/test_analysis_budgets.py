@@ -247,3 +247,19 @@ def test_partial_failed_read_still_consumes_composition_budget(
     with pytest.raises(composition.CompositionAnalysisError, match="I/O error"):
         composition.analyze_file(tmp_path, "app.py", budget=budget)
     assert budget.source_bytes == 6
+
+
+@pytest.mark.parametrize("total", [False, True])
+def test_physical_limit_diagnostic_escapes_and_bounds_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, total: bool
+) -> None:
+    path = tmp_path / "d" / ("evil\n\x1b[31m" + "n" * 230 + ".py")
+    path.parent.mkdir()
+    path.write_bytes(b"x = 1\n")
+    monkeypatch.setattr(fallback, "MAX_PHYSICAL_SOURCE_BYTES", 100 if total else 3)
+    budget = fallback.PhysicalByteBudget(remaining=3) if total else None
+    with pytest.raises(fallback.CountingError) as error:
+        fallback.count_physical_lines(path, budget=budget)
+    message = str(error.value)
+    assert "\n" not in message and "\x1b" not in message
+    assert "\\n" in message and len(message) < 320

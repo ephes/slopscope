@@ -24,6 +24,9 @@ from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
     COMPOSITION_CONSTRUCTS,
+    DEFAULT_MAX_TOTAL_ANCHORS,
+    DEFAULT_MAX_TOTAL_SOURCE_BYTES,
+    DEFAULT_MAX_TOTAL_TOKENS,
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
@@ -43,9 +46,6 @@ SCHEMA_VERSION = 4
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"
 DEFAULT_MAX_SOURCE_BYTES = 16 * 1024 * 1024
-DEFAULT_MAX_TOTAL_SOURCE_BYTES = 128 * 1024 * 1024
-DEFAULT_MAX_TOTAL_TOKENS = 2_000_000
-DEFAULT_MAX_TOTAL_ANCHORS = 500_000
 SOURCE_TEST_KINDS = ("source", "tests", "other")
 
 BLANK = "blank"
