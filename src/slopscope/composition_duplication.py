@@ -178,6 +178,8 @@ def find_duplicates(
         for position in range(len(ids) - min_tokens + 1):
             if position and lines[position] == lines[position - 1]:
                 continue
+            # Charge the window copy, byte conversion, and hash before doing that work.
+            budget.reserve(work=min_tokens)
             anchor = len(anchor_position)
             anchor_segment.append(segment_index)
             anchor_position.append(position)

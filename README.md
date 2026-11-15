@@ -314,7 +314,8 @@ Duplicate extension compares overlap positions only within each token segment an
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
 incomplete and preserves any snapshot. Each project also has fixed whole-analysis ceilings of
 1,000,000 cumulative metadata entries (blocks, occurrences, line intervals, and coverage memberships)
-and 10,000,000 duplicate comparison/traversal work units. Admission happens before expansion;
+and 10,000,000 duplicate work units, including token words copied/hashed for anchor windows
+and comparison/traversal work. Admission happens before expansion;
 exhaustion exits 2 with an incomplete-analysis diagnostic and no report or snapshot. Exact-limit
 analyses retain the same output.
 
@@ -348,6 +349,9 @@ units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offend
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
 one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
 including duplicates with identical values; refused inputs leave existing outputs unchanged.
+Baseline reads compare opened-descriptor generation metadata before and after the bounded read;
+in-place changes are refused before comparison. Atomic pathname replacement remains supported:
+the reader uses its already opened generation.
 Baseline integer-decoder resource failures, including oversized integers in extension fields,
 return exit code 2 with a bounded diagnostic and preserve prior snapshots.
 Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,

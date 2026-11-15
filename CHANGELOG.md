@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Charge duplicate anchor window copying/hashing before the work, under the existing work ceiling.
+- Refuse baselines changed in place during their bounded read, while retaining atomic-replacement reads.
+
 - Apply shared composition source-byte, token, and anchor budgets to size-limits measurement,
   configurable through the existing composition settings. Exhaustion returns exit code 2
   without a partial report or allowlist write; exact-limit measurements are unchanged.

@@ -308,3 +308,23 @@ def test_duplicate_expansion_has_a_whole_analysis_budget(
         composition_duplication.find_duplicates(files, min_tokens=1)
     monkeypatch.setattr(composition_duplication, limit, 10_000_000)
     assert composition_duplication.find_duplicates(files, min_tokens=1) == expected
+
+
+def test_anchor_hashing_is_charged_before_copying(monkeypatch: pytest.MonkeyPatch) -> None:
+    from array import array
+
+    segment = composition_duplication.Segment(array("i", range(100)), array("i", range(100)))
+    hashed_words = 0
+
+    def counted_hash(value: bytes) -> int:
+        nonlocal hashed_words
+        hashed_words += len(value) // segment.ids.itemsize
+        return hash(value)
+
+    monkeypatch.setattr(composition_duplication, "hash", counted_hash, raising=False)
+    monkeypatch.setattr(composition_duplication, "MAX_DUPLICATE_WORK", 100)
+    with pytest.raises(composition_duplication.BudgetExceeded, match="duplicate work"):
+        composition_duplication.find_duplicates([[segment]], min_tokens=50)
+    assert hashed_words == 100
+    monkeypatch.setattr(composition_duplication, "MAX_DUPLICATE_WORK", 51 * 50)
+    assert composition_duplication.find_duplicates([[segment]], min_tokens=50).blocks == ()

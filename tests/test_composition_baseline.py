@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 import pytest
 
@@ -885,3 +885,79 @@ def test_duplicate_budget_preserves_prior_outputs(
     assert "incomplete analysis" in err and "duplicate" in err
     assert snapshot.read_bytes() == b"previous snapshot"
     assert allowlist.read_bytes() == b"previous allowlist"
+
+
+@pytest.mark.parametrize("replace_path", [False, True])
+def test_baseline_read_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_path: bool
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    snapshot.write_bytes(b"last good snapshot")
+    original = baseline.read_bytes()
+    code = json.loads(original)["total"]["code"]
+    replacement = original.replace(f'"code": {code}'.encode(), f'"code": {code - 1}'.encode(), 1)
+    assert len(replacement) == len(original) and replacement != original
+    real_fdopen = os.fdopen
+    injected = False
+
+    def fdopen(fd: int, mode: str) -> BinaryIO:
+        nonlocal injected
+        handle = cast(BinaryIO, real_fdopen(fd, mode))
+        if (os.fstat(fd).st_dev, os.fstat(fd).st_ino) != (
+            baseline.stat().st_dev,
+            baseline.stat().st_ino,
+        ):
+            return handle
+        read = handle.read
+
+        def changing_read(size: int) -> bytes:
+            nonlocal injected
+            assert size == composition_baseline.MAX_BASELINE_BYTES + 1
+            prefix = read(10)
+            before = baseline.stat()
+            if replace_path:
+                other = tmp_path / "replacement.json"
+                other.write_bytes(replacement)
+                other.replace(baseline)
+            else:
+                baseline.write_bytes(replacement)
+                os.utime(baseline, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+            injected = True
+            return prefix + read(size - 10)
+
+        monkeypatch.setattr(handle, "read", changing_read)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    code, out, err = run_cli(options + ["--baseline", str(baseline), "--snapshot", str(snapshot)])
+    assert injected
+    if replace_path:
+        assert code == 0, err
+        assert json.loads(out)["baseline"]["comparable"]
+    else:
+        assert code == 2
+        assert out == ""
+        assert "changed while reading" in err
+        assert snapshot.read_bytes() == b"last good snapshot"
+
+
+def test_anchor_hash_work_overflow_preserves_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = make_repository(tmp_path)
+    write(repository, "src/app.py", "".join(f"unique_{i} = {i}\n" for i in range(100)))
+    write(
+        repository, "pyproject.toml", "[tool.slopscope.composition]\nmin_duplicate_tokens = 150\n"
+    )
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_bytes(b"last good snapshot")
+    monkeypatch.setattr(composition_duplication, "MAX_DUPLICATE_WORK", 100)
+    code, out, err = run_cli([str(repository), "--composition", "--snapshot", str(snapshot)])
+    assert code == 2
+    assert out == ""
+    assert "duplicate work limit" in err
+    assert snapshot.read_bytes() == b"last good snapshot"
