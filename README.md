@@ -325,6 +325,13 @@ file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapsho
 Snapshot publication uses the resolved destination approved during preflight and rechecks its file
 and parent-directory identity before replacement. A changed target is refused, preserving existing
 outputs, including when a snapshot symlink is retargeted during analysis or writing.
+Writers serialize verification and replacement under a persistent sibling `.NAME.lock` kernel lock.
+The lock must be a single-link regular file, opened without following symlinks and rechecked after
+waiting; do not remove it while writers may be active. A writer whose preflight generation has
+already been replaced refuses publication. Snapshot locking requires POSIX `flock` and `O_NOFOLLOW`.
+Snapshot bytes (including preserved mode) are fsynced before replacement, then the parent directory
+is fsynced before success. A directory-sync failure exits 2 with "published; durability unconfirmed":
+the new snapshot is visible and is not rolled back. Precommit failures preserve the prior snapshot.
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.

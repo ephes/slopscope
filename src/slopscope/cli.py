@@ -10,7 +10,7 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -653,6 +653,9 @@ def _run_composition(
                 composition_render.render_composition_json(rendered_report),
                 destination=snapshot_destination,
             )
+        except _SnapshotDurabilityError as exc:
+            print(f"slopscope: {exc}", file=err)
+            return 2
         except OSError as exc:
             print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
             return 2
@@ -730,14 +733,55 @@ def _verify_snapshot_destination(path: Path, destination: _SnapshotDestination) 
         raise OSError(f"snapshot target changed after preflight: {path}")
 
 
+class _SnapshotDurabilityError(OSError):
+    """Replacement committed, but directory synchronization did not confirm durability."""
+
+
+@contextlib.contextmanager
+def _snapshot_lock(target: Path) -> Iterator[None]:
+    # Never unlink: waiters must all acquire the same kernel lock inode.
+    lock = target.with_name(f".{target.name}.lock")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("snapshot locks require O_NOFOLLOW")
+    parent_identity = _snapshot_identity(target.parent)
+    descriptor = os.open(
+        lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), 0o600
+    )
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise OSError("snapshot lock must be a single-link regular file")
+        import fcntl
+
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        info, named = os.fstat(descriptor), lock.lstat()
+        if (
+            _snapshot_identity(target.parent) != parent_identity
+            or not stat.S_ISREG(named.st_mode)
+            or named.st_nlink != 1
+            or info.st_nlink != 1
+            or (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino)
+        ):
+            raise OSError("snapshot lock changed while waiting")
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination) -> None:
-    """Publish serialized JSON without truncating a previous snapshot."""
+    """Publish under a stable kernel lock, then synchronize the directory entry."""
     content = text.encode("utf-8")
     if len(content) > composition_baseline.MAX_BASELINE_BYTES:
         raise OSError(f"snapshot {path} exceeds {composition_baseline.MAX_BASELINE_BYTES} bytes")
+    with _snapshot_lock(destination.target):
+        _publish_snapshot(path, content, destination=destination)
+
+
+def _publish_snapshot(path: Path, content: bytes, *, destination: _SnapshotDestination) -> None:
     _verify_snapshot_destination(path, destination)
     target = destination.target
     temporary: Path | None = None
+    directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         try:
             metadata = target.stat()
@@ -753,13 +797,20 @@ def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination)
             temporary = Path(handle.name)
             handle.write(content)
             handle.flush()
-            os.fsync(handle.fileno())
             if mode is not None:
                 os.chmod(temporary, mode)
+            os.fsync(handle.fileno())
         _verify_snapshot_destination(path, destination)
         os.replace(temporary, target)
         temporary = None
+        try:
+            os.fsync(directory)
+        except OSError as exc:
+            raise _SnapshotDurabilityError(
+                f"snapshot {path} published; durability unconfirmed: {exc}"
+            ) from exc
     finally:
+        os.close(directory)
         if temporary is not None:
             with contextlib.suppress(OSError):
                 temporary.unlink(missing_ok=True)

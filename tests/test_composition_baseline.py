@@ -535,7 +535,7 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     assert "could not write snapshot" in err
     assert snapshot.read_bytes() == previous
     assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
-    assert list(tmp_path.glob(".before.json.*")) == []
+    assert not [p for p in tmp_path.glob(".before.json.*") if p.suffix != ".lock"]
 
 
 def test_snapshot_atomic_replace_preserves_symlink_and_permissions(tmp_path: Path) -> None:
@@ -552,7 +552,7 @@ def test_snapshot_atomic_replace_preserves_symlink_and_permissions(tmp_path: Pat
     assert snapshot.is_symlink()
     assert json.loads(target.read_text())["report_type"] == "composition"
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
-    assert list(tmp_path.glob(".target.json.*")) == []
+    assert not [p for p in tmp_path.glob(".target.json.*") if p.suffix != ".lock"]
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO fixture")
@@ -567,7 +567,7 @@ def test_snapshot_refuses_fifo_without_replacing_it(tmp_path: Path) -> None:
     assert out == ""
     assert "snapshot destination must be a regular file" in err
     assert stat.S_ISFIFO(snapshot.stat().st_mode)
-    assert list(tmp_path.glob(".snapshot.fifo.*")) == []
+    assert not [p for p in tmp_path.glob(".snapshot.fifo.*") if p.suffix != ".lock"]
 
 
 def test_snapshot_symlink_loop_exits_2(tmp_path: Path) -> None:
@@ -705,7 +705,7 @@ def test_incomplete_analysis_preserves_snapshot(
         assert not snapshot.exists()
     else:
         assert snapshot.read_bytes() == previous
-    assert list(tmp_path.glob(".report.json.*")) == []
+    assert not [p for p in tmp_path.glob(".report.json.*") if p.suffix != ".lock"]
 
     bad_file.write_text("import json\n", encoding="utf-8")
     code, out, err = run_cli(options + ["--snapshot", str(snapshot)])

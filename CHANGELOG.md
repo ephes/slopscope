@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Serialize snapshot writers with an admitted persistent sibling kernel lock; stale preflight
+  generations cannot overwrite a newer publication. Requires POSIX flock and no-follow opening.
+- Synchronize the snapshot parent directory after replacement; report visible publication with
+  unconfirmed durability separately from failures that preserve the prior snapshot.
+
 - Charge duplicate anchor window copying/hashing before the work, under the existing work ceiling.
 - Refuse baselines changed in place during their bounded read, while retaining atomic-replacement reads.
 
