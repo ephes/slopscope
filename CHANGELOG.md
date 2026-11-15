@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject ambiguous cloc CSV headers before consuming records, retaining individual files/filename
+  summary aliases and metadata columns.
+- Validate normalized cloc file identities before filtering/aggregation in reports and profiles;
+  duplicate aliases and paths outside the selected root refuse the complete report.
+
 - Serialize snapshot writers with an admitted persistent sibling kernel lock; stale preflight
   generations cannot overwrite a newer publication. Requires POSIX flock and no-follow opening.
 - Synchronize the snapshot parent directory after replacement; report visible publication with

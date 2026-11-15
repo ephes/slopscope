@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -194,3 +194,20 @@ def test_parse_file_summary_csv_preserves_filename(filename: str) -> None:
     assert cloc.parse_file_summary_csv(output.getvalue()) == [
         FileRow(language="Python", path=filename, blank=1, comment=2, code=3)
     ]
+
+
+@pytest.mark.parametrize(
+    "columns,record",
+    [
+        ("language,filename,blank,comment,code,code", "Python,1,0,0,999,1"),
+        ("language,filename,filename,blank,comment,code", "Python,999,1,0,0,1"),
+        ("language,filename,blank,comment,code, Code ", "Python,1,0,0,999,1"),
+        ("language,filename,files,blank,comment,code", "Python,999,1,0,0,1"),
+    ],
+)
+@pytest.mark.parametrize("parser", [cloc.parse_language_summary_csv, cloc.parse_file_summary_csv])
+def test_csv_rejects_ambiguous_headers(
+    columns: str, record: str, parser: Callable[[str], object]
+) -> None:
+    with pytest.raises(cloc.ClocParseError, match="columns"):
+        parser(columns + "\n" + record + "\n")

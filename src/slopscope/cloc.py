@@ -94,10 +94,17 @@ class ClocParseError(ValueError):
 def _csv_rows(output: str) -> list[dict[str, str | None]]:
     reader = csv.DictReader(io.StringIO(output, newline=""), strict=True)
     try:
-        if reader.fieldnames is not None and not {"language", "blank", "comment", "code"}.issubset(
-            reader.fieldnames
-        ):
-            raise ClocParseError("invalid cloc CSV: missing required columns")
+        headers = reader.fieldnames
+        if headers is not None:
+            required = {"language", "blank", "comment", "code"}
+            if not required.issubset(headers) or not {"filename", "files"}.intersection(headers):
+                raise ClocParseError("invalid cloc CSV: missing required columns")
+            normalized = [header.strip().casefold() for header in headers]
+            known = required | {"filename", "files"}
+            if any(normalized.count(name) > 1 for name in known) or (
+                "filename" in normalized and "files" in normalized
+            ):
+                raise ClocParseError("invalid cloc CSV: ambiguous columns")
         return list(reader)
     except csv.Error as exc:
         raise ClocParseError(f"invalid cloc CSV near line {reader.line_num}: parser error") from exc
@@ -115,14 +122,29 @@ def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     return rows
 
 
-def parse_file_summary_csv(output: str) -> list[FileRow]:
+def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[FileRow]:
     """Parse a complete cloc file report, excluding only recognized summary rows."""
 
     rows: list[FileRow] = []
+    seen: set[str] = set()
+    resolved_root = root.resolve() if root is not None else None
     for index, row in enumerate(_csv_rows(output), start=2):
         try:
             parsed = _parse_file_row(row)
-        except ValueError as exc:
+            if parsed is not None:
+                identity = Path(os.path.normpath(parsed.path))
+                if resolved_root is not None:
+                    identity = (resolved_root / identity).resolve().relative_to(resolved_root)
+                elif not identity.is_absolute() and ".." in identity.parts:
+                    raise ValueError("file outside root")
+                normalized = identity.as_posix()
+                if normalized in seen or normalized == ".":
+                    raise ValueError("duplicate or empty file identity")
+                seen.add(normalized)
+                parsed = FileRow(
+                    parsed.language, normalized, parsed.blank, parsed.comment, parsed.code
+                )
+        except (ValueError, OSError, RuntimeError) as exc:
             raise ClocParseError(
                 f"invalid cloc CSV row {index}: file identity or counters"
             ) from exc

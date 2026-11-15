@@ -1085,7 +1085,7 @@ def _build_cloc_report(
         return file_result.returncode
 
     file_rows = _filter_file_rows(
-        cloc.parse_file_summary_csv(file_result.stdout),
+        cloc.parse_file_summary_csv(file_result.stdout, root=path),
         path=path,
         slopscope_config=slopscope_config,
     )

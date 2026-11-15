@@ -99,6 +99,11 @@ The subprocess text decoder normalizes carriage returns to newlines, so carriage
 are not preserved end to end.
 Malformed cloc records, missing or invalid nonnegative counters, and CSV parser failures
 return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
+Required CSV headers must be unique (including case/whitespace variants); the language-summary
+`files` and `filename` aliases are accepted individually, never together. Extra metadata columns remain supported.
+File rows are normalized and admitted before filtering: repeated identities, absolute/relative aliases,
+and paths outside the selected root (including parent-relative paths and resolved links) refuse the whole
+report, including profiles. No conflicting counters are merged or silently omitted.
 Empty CSV reports and the file report's `SUM` row remain supported by the parser.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
