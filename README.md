@@ -102,8 +102,9 @@ return exit code 2 with a bounded row/category diagnostic, without publishing pa
 Required CSV headers must be unique (including case/whitespace variants); the language-summary
 `files` and `filename` aliases are accepted individually, never together. Extra metadata columns remain supported.
 File rows are normalized and admitted before filtering: repeated identities, absolute/relative aliases,
-and paths outside the selected root (including parent-relative paths and resolved links) refuse the whole
-report, including profiles. No conflicting counters are merged or silently omitted.
+and paths outside the selected root (including `..` components and linked parent directories that
+leave it) refuse the whole report, including profiles. Only parent directories are resolved: a file
+symlink is counted under its own path, as cloc counts it, even when its target lies outside the root. No conflicting counters are merged or silently omitted.
 CSV parsing streams records under a fixed 100,000-data-record ceiling (including `SUM`, excluding
 the header), independently of the capture-byte ceiling. The first excess record refuses the whole
 report before domain conversion; exact-limit input remains supported. This applies to both parser

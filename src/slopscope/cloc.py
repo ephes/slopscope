@@ -139,7 +139,15 @@ def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[Fil
             if parsed is not None:
                 identity = Path(parsed.path)
                 if resolved_root is not None:
-                    identity = (resolved_root / identity).resolve().relative_to(resolved_root)
+                    # Resolve only the parent: a file symlink keeps its own name and
+                    # counts like cloc counts it, while parent-relative paths and
+                    # linked directories that leave the root are refused.
+                    if ".." in identity.parts or not identity.name:
+                        raise ValueError("file outside root")
+                    candidate = resolved_root / identity
+                    identity = (candidate.parent.resolve() / candidate.name).relative_to(
+                        resolved_root
+                    )
                 else:
                     identity = Path(os.path.normpath(parsed.path))
                     if not identity.is_absolute() and ".." in identity.parts:

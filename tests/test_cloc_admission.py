@@ -74,6 +74,23 @@ def test_cli_refuses_invalid_file_identities(
 
 
 @pytest.mark.parametrize("profile", [False, True])
+@pytest.mark.parametrize("target", ["inside", "outside"])
+def test_cli_counts_file_symlinks_under_their_own_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: bool, target: str
+) -> None:
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "lib").mkdir()
+    shared = (project / "lib" if target == "inside" else tmp_path) / "shared.py"
+    shared.write_text("x = 1\n")
+    (project / "src" / "config.py").symlink_to(shared)
+    result, out, err = invoke(project, monkeypatch, csv_files(["src/config.py"]), profile=profile)
+    assert result == 0, err
+    rows = cloc.parse_file_summary_csv(csv_files(["src/config.py"]), root=project)
+    assert [row.path for row in rows] == ["src/config.py"]
+
+
+@pytest.mark.parametrize("profile", [False, True])
 def test_cli_retains_unusual_valid_file_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: bool
 ) -> None:
