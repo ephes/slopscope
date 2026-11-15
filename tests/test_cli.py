@@ -538,7 +538,7 @@ path = "backend"
     )
 
     assert exit_code == 0
-    assert language_calls == [frontend.resolve(), backend.resolve()]
+    assert language_calls == []
     assert file_calls == [frontend.resolve(), backend.resolve()]
     assert json.loads(stdout.getvalue())["engine"] == "cloc"
     assert stderr.getvalue() == ""
@@ -677,25 +677,17 @@ path = "backend"
         encoding="utf-8",
     )
 
-    def fake_run_language_summary(path: Path | str) -> cloc.ClocResult:
+    def fake_run_file_summary(path: Path | str) -> cloc.ClocResult:
         if Path(path).name == "backend":
             return cloc.ClocResult(returncode=7, stdout="", stderr="cloc exploded\n")
         return cloc.ClocResult(
             returncode=0,
-            stdout="language,filename,blank,comment,code\nPython,1,0,0,10\nSUM,1,0,0,10\n",
+            stdout="language,filename,blank,comment,code\nPython,src/app.py,0,0,10\n",
             stderr="",
         )
 
     monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", lambda: True)
-    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
-    monkeypatch.setattr(
-        "slopscope.cli.cloc.run_file_summary",
-        lambda _path: cloc.ClocResult(
-            returncode=0,
-            stdout="language,filename,blank,comment,code\nPython,src/app.py,0,0,10\n",
-            stderr="",
-        ),
-    )
+    monkeypatch.setattr("slopscope.cli.cloc.run_file_summary", fake_run_file_summary)
     stdout = io.StringIO()
     stderr = io.StringIO()
 
@@ -1034,15 +1026,11 @@ def test_cli_surfaces_cloc_failure_stderr(monkeypatch: pytest.MonkeyPatch) -> No
     def fake_is_cloc_available() -> bool:
         return True
 
-    def fake_run_language_summary(_path: Path | str) -> cloc.ClocResult:
+    def fake_run_file_summary(_path: Path | str) -> cloc.ClocResult:
         return cloc.ClocResult(returncode=7, stdout="", stderr="cloc exploded\n")
 
     monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", fake_is_cloc_available)
-    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
-    monkeypatch.setattr(
-        "slopscope.cli.cloc.run_file_summary",
-        lambda _path: cloc.ClocResult(returncode=0, stdout="", stderr=""),
-    )
+    monkeypatch.setattr("slopscope.cli.cloc.run_file_summary", fake_run_file_summary)
     stdout = io.StringIO()
     stderr = io.StringIO()
 
@@ -1057,7 +1045,7 @@ def test_cli_fails_when_cloc_returns_no_usable_rows(monkeypatch: pytest.MonkeyPa
     def fake_is_cloc_available() -> bool:
         return True
 
-    def fake_run_language_summary(_path: Path | str) -> cloc.ClocResult:
+    def fake_run_file_summary(_path: Path | str) -> cloc.ClocResult:
         return cloc.ClocResult(
             returncode=0,
             stdout="language,filename,blank,comment,code\n",
@@ -1065,7 +1053,7 @@ def test_cli_fails_when_cloc_returns_no_usable_rows(monkeypatch: pytest.MonkeyPa
         )
 
     monkeypatch.setattr("slopscope.cli.cloc.is_cloc_available", fake_is_cloc_available)
-    monkeypatch.setattr("slopscope.cli.cloc.run_language_summary", fake_run_language_summary)
+    monkeypatch.setattr("slopscope.cli.cloc.run_file_summary", fake_run_file_summary)
     stdout = io.StringIO()
     stderr = io.StringIO()
 
@@ -1073,7 +1061,7 @@ def test_cli_fails_when_cloc_returns_no_usable_rows(monkeypatch: pytest.MonkeyPa
 
     assert exit_code == 1
     assert stdout.getvalue() == ""
-    assert "no usable language rows" in stderr.getvalue()
+    assert "no usable file rows" in stderr.getvalue()
 
 
 def test_language_summary_rendering_uses_report_rows() -> None:
@@ -1370,7 +1358,7 @@ def test_cli_no_color_uses_plain_human_output(monkeypatch: pytest.MonkeyPatch) -
     assert stderr.getvalue() == ""
 
 
-def test_cli_cloc_path_invokes_language_and_file_summaries(
+def test_cli_cloc_path_invokes_only_file_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
@@ -1407,7 +1395,7 @@ def test_cli_cloc_path_invokes_language_and_file_summaries(
     )
 
     assert exit_code == 0
-    assert calls == ["language", "file"]
+    assert calls == ["file"]
     assert json.loads(stdout.getvalue())["area_rows"] == [{"name": "src", "files": 1, "code": 10}]
     assert stderr.getvalue() == ""
 
@@ -1502,7 +1490,7 @@ def test_cli_cloc_file_summary_failure_is_clear(monkeypatch: pytest.MonkeyPatch)
     assert stderr.getvalue() == "file summary exploded\n"
 
 
-def test_cli_cloc_empty_file_rows_render_empty_aggregate_sections(
+def test_cli_cloc_empty_file_rows_refuse_a_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_is_cloc_available() -> bool:
@@ -1534,9 +1522,9 @@ def test_cli_cloc_empty_file_rows_render_empty_aggregate_sections(
         stderr=stderr,
     )
 
-    assert exit_code == 0
-    assert "(no file-level rows)" in stdout.getvalue()
-    assert stderr.getvalue() == ""
+    assert exit_code == 1
+    assert stdout.getvalue() == ""
+    assert "no usable file rows" in stderr.getvalue()
 
 
 def test_cli_grouped_profile_plain_output(

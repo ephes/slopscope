@@ -125,7 +125,7 @@ def test_snapshot_symlink_retarget_after_preflight_is_refused(
     assert protected.read_bytes() == previous
     assert original_target.read_bytes() == b"old snapshot"
     assert snapshot.is_symlink()
-    assert list(tmp_path.glob(".target.json.*")) == []
+    assert set(tmp_path.glob(".target.json.*")) <= {tmp_path / ".target.json.lock"}
 
 
 @pytest.mark.parametrize("replace_parent", [False, True])

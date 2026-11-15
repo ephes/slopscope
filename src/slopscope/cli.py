@@ -1067,32 +1067,18 @@ def _build_cloc_report(
     err: TextIO,
     slopscope_config: config_module.SlopscopeConfig,
 ) -> RepositoryReport | int:
-    language_result = cloc.run_language_summary(path.resolve())
-    if language_result.returncode != 0:
-        message = language_result.stderr.strip() or "cloc failed without stderr output"
-        print(message, file=err)
-        return language_result.returncode
-
-    raw_language_rows = tuple(cloc.parse_language_summary_csv(language_result.stdout))
-    if not raw_language_rows:
-        print("slopscope: cloc returned no usable language rows", file=err)
-        return 1
-
     file_result = cloc.run_file_summary(path.resolve())
     if file_result.returncode != 0:
         message = file_result.stderr.strip() or "cloc file summary failed without stderr output"
         print(message, file=err)
         return file_result.returncode
 
-    file_rows = _filter_file_rows(
-        cloc.parse_file_summary_csv(file_result.stdout, root=path),
-        path=path,
-        slopscope_config=slopscope_config,
-    )
-    if slopscope_config.exclude_dirs or slopscope_config.include_globs:
-        language_rows = _language_rows_from_file_rows(file_rows)
-    else:
-        language_rows = _filter_language_rows(raw_language_rows, slopscope_config)
+    raw_file_rows = cloc.parse_file_summary_csv(file_result.stdout, root=path)
+    if not raw_file_rows:
+        print("slopscope: cloc returned no usable file rows", file=err)
+        return 1
+    file_rows = _filter_file_rows(raw_file_rows, path=path, slopscope_config=slopscope_config)
+    language_rows = _language_rows_from_file_rows(file_rows)
 
     language_report = LanguageSummaryReport.from_rows(
         engine="cloc",
@@ -1150,21 +1136,6 @@ def _normalize_file_row(row: FileRow, *, root: Path) -> FileRow:
         comment=row.comment,
         code=row.code,
     )
-
-
-def _filter_language_rows(
-    language_rows: Sequence[LanguageRow],
-    slopscope_config: config_module.SlopscopeConfig,
-) -> tuple[LanguageRow, ...]:
-    if not slopscope_config.include_languages and not slopscope_config.exclude_languages:
-        return tuple(language_rows)
-
-    rows = tuple(
-        row
-        for row in language_rows
-        if row.language != "SUM" and _language_is_included(row.language, slopscope_config)
-    )
-    return _language_rows_with_sum(rows)
 
 
 def _language_rows_from_file_rows(file_rows: Sequence[FileRow]) -> tuple[LanguageRow, ...]:

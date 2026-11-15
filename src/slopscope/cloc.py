@@ -7,15 +7,17 @@ import io
 import os
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope._capture import CaptureError, capture_process
+from slopscope.fallback import MAX_DISCOVERY_FILES
 from slopscope.report import FileRow, LanguageRow
 
 CLOC_TIMEOUT_SECONDS = 30
 MAX_CLOC_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_CLOC_CSV_ROWS = MAX_DISCOVERY_FILES
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,7 @@ class ClocParseError(ValueError):
     """A successful cloc process returned an unusable CSV report."""
 
 
-def _csv_rows(output: str) -> list[dict[str, str | None]]:
+def _csv_rows(output: str) -> Iterator[dict[str, str | None]]:
     reader = csv.DictReader(io.StringIO(output, newline=""), strict=True)
     try:
         headers = reader.fieldnames
@@ -105,7 +107,10 @@ def _csv_rows(output: str) -> list[dict[str, str | None]]:
                 "filename" in normalized and "files" in normalized
             ):
                 raise ClocParseError("invalid cloc CSV: ambiguous columns")
-        return list(reader)
+        for count, row in enumerate(reader, start=1):
+            if count > MAX_CLOC_CSV_ROWS:
+                raise ClocParseError(f"invalid cloc CSV: row limit {MAX_CLOC_CSV_ROWS} exceeded")
+            yield row
     except csv.Error as exc:
         raise ClocParseError(f"invalid cloc CSV near line {reader.line_num}: parser error") from exc
 
@@ -132,11 +137,13 @@ def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[Fil
         try:
             parsed = _parse_file_row(row)
             if parsed is not None:
-                identity = Path(os.path.normpath(parsed.path))
+                identity = Path(parsed.path)
                 if resolved_root is not None:
                     identity = (resolved_root / identity).resolve().relative_to(resolved_root)
-                elif not identity.is_absolute() and ".." in identity.parts:
-                    raise ValueError("file outside root")
+                else:
+                    identity = Path(os.path.normpath(parsed.path))
+                    if not identity.is_absolute() and ".." in identity.parts:
+                        raise ValueError("file outside root")
                 normalized = identity.as_posix()
                 if normalized in seen or normalized == ".":
                     raise ValueError("duplicate or empty file identity")

@@ -300,7 +300,8 @@ tokens, and list up to five locations each.
 
 In addition to token and anchor admission, each project has fixed duplicate-analysis budgets:
 1,000,000 cumulative metadata entries for blocks, occurrence memberships, line intervals, and
-anchor coverage memberships, plus 10,000,000 comparison/traversal work units. Verification,
+anchor coverage memberships, plus 10,000,000 work units. Each token word in an anchor
+window is charged before copying, byte conversion, and hashing. Verification,
 subgroup extension, and coverage scans share the work allowance across all groups. Entries
 are charged before retention, including subgroup results before materializing occurrences.
 These limits are not configurable and do not change counts or ordering below the ceiling.
@@ -450,7 +451,10 @@ Before analysis, snapshot destinations that alias selected Python files, the loa
 are rejected with exit code 2 and no report or writes. Resolved symlink paths and hardlinks are checked too, across
 all selected projects. A distinct snapshot inside the repository is allowed.
 The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
-Write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
+Precommit write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
+The snapshot file is fsynced before replacement, and its parent directory is fsynced afterward.
+A directory-fsync failure exits 2 without a terminal report and explicitly says "published; durability unconfirmed":
+the new snapshot is already visible and is not rolled back.
 Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
 Snapshot output has the same 16 MiB (16,777,216 bytes) ceiling as the baseline reader,
 including the entire multi-project envelope. The complete serialized UTF-8 bytes (formatting
@@ -461,6 +465,10 @@ A symlinked snapshot updates the resolved target approved during preflight. Publ
 that resolution and the destination and parent-directory identities before writing and again before
 replacement. A changed target, including a symlink retarget during analysis or writing, returns exit
 code 2 without a report and preserves existing outputs; temporary files are removed.
+Verification and replacement run under a persistent sibling `.NAME.lock` kernel lock, so a second writer
+with a superseded preflight generation is refused after waiting. Lock entries must be single-link regular
+files, opened with `O_NOFOLLOW` and checked against their descriptor after acquiring POSIX `flock`.
+Do not remove these lock files while writers may be active. Platforms without these APIs refuse publication.
 Destinations must be regular files or absent; devices, FIFOs,
 and directories are rejected. Atomic replacement requires a writable parent directory and a replaceable
 destination (single-file bind mounts are unsuitable). Ownership, ACLs, extended attributes, and hard-link
@@ -469,7 +477,10 @@ identity are not preserved. A read-only file can be replaced when its parent dir
 `--baseline PATH` loads an earlier snapshot and adds a comparison. Inputs must be regular files of at most
 16 MiB (16,777,216 bytes), including multi-project snapshots. The opened descriptor is checked before a bounded
 read; special files such as FIFOs are refused without waiting for a writer. Symlinks to regular files remain
-supported. Type or size refusals return exit code 2 without changing baseline or snapshot bytes.
+supported. Descriptor identity, size, and timestamps are compared after the read, before decoding or comparison;
+in-place changes return exit code 2 and preserve the prior snapshot. Atomic replacement of the pathname is
+supported: the reader continues using the opened inode (unlink-only ctime changes are allowed).
+Type or size refusals also return exit code 2 without changing baseline or snapshot bytes.
 
 Comparison rules:
 

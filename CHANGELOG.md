@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Stream cloc CSV records under a fixed 100,000-record ceiling independent of captured bytes;
+  overflow refuses complete reports/profiles before constructing excess domain rows.
+- Build every normal cloc report section, including language headlines and recomputed SUM,
+  from one validated file-summary capture instead of two potentially inconsistent invocations.
+
 - Reject ambiguous cloc CSV headers before consuming records, retaining individual files/filename
   summary aliases and metadata columns.
 - Validate normalized cloc file identities before filtering/aggregation in reports and profiles;

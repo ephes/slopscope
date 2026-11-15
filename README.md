@@ -104,6 +104,15 @@ Required CSV headers must be unique (including case/whitespace variants); the la
 File rows are normalized and admitted before filtering: repeated identities, absolute/relative aliases,
 and paths outside the selected root (including parent-relative paths and resolved links) refuse the whole
 report, including profiles. No conflicting counters are merged or silently omitted.
+CSV parsing streams records under a fixed 100,000-data-record ceiling (including `SUM`, excluding
+the header), independently of the capture-byte ceiling. The first excess record refuses the whole
+report before domain conversion; exact-limit input remains supported. This applies to both parser
+entry points, normal reports, and cloc-backed profiles.
+Normal cloc reports use one file-summary invocation: language headlines and `SUM`, source/test,
+area, and directory counts all project the same validated, filtered file rows. The CSV `SUM` counters
+are ignored and recomputed. This is one captured counting generation, not a filesystem snapshot:
+cloc may still observe edits during its own traversal. An empty file capture returns exit code 1
+without a report; filtering a nonempty capture down to zero rows still succeeds.
 Empty CSV reports and the file report's `SUM` row remain supported by the parser.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command

@@ -888,8 +888,9 @@ def test_duplicate_budget_preserves_prior_outputs(
 
 
 @pytest.mark.parametrize("replace_path", [False, True])
+@pytest.mark.parametrize("restore_mtime", [False, True])
 def test_baseline_read_generation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_path: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_path: bool, restore_mtime: bool
 ) -> None:
     repository = make_repository(tmp_path)
     baseline = tmp_path / "baseline.json"
@@ -925,7 +926,13 @@ def test_baseline_read_generation(
                 other.replace(baseline)
             else:
                 baseline.write_bytes(replacement)
-                os.utime(baseline, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+                os.utime(
+                    baseline,
+                    ns=(
+                        before.st_atime_ns,
+                        before.st_mtime_ns + (0 if restore_mtime else 1_000_000),
+                    ),
+                )
             injected = True
             return prefix + read(size - 10)
 

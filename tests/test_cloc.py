@@ -211,3 +211,29 @@ def test_csv_rejects_ambiguous_headers(
 ) -> None:
     with pytest.raises(cloc.ClocParseError, match="columns"):
         parser(columns + "\n" + record + "\n")
+
+
+@pytest.mark.parametrize("file_report", [False, True])
+def test_csv_record_budget_precedes_domain_conversion(
+    monkeypatch: pytest.MonkeyPatch, file_report: bool
+) -> None:
+    monkeypatch.setattr(cloc, "MAX_CLOC_CSV_ROWS", 3, raising=False)
+    parse = cloc.parse_file_summary_csv if file_report else cloc.parse_language_summary_csv
+    row_parser = "_parse_file_row" if file_report else "_parse_language_row"
+    original = getattr(cloc, row_parser)
+    admitted = 0
+
+    def counted(row: dict[str, str | None]) -> object:
+        nonlocal admitted
+        admitted += 1
+        return original(row)
+
+    monkeypatch.setattr(cloc, row_parser, counted)
+    header = "language,filename,blank,comment,code\n"
+    rows = "".join(f"Python,{i},0,0,1\n" for i in range(3))
+    assert len(parse(header + rows)) == 3
+    assert admitted == 3
+    admitted = 0
+    with pytest.raises(cloc.ClocParseError, match="row limit"):
+        parse(header + rows + "Python,excess,0,0,1\n" * 100)
+    assert admitted == 3
