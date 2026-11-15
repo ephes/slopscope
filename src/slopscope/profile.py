@@ -108,7 +108,7 @@ def _build_profile_file_rows(
         raise ProfileCountError(message, returncode=result.returncode)
 
     return _filter_cloc_file_rows(
-        cloc.parse_file_summary_csv(result.stdout),
+        cloc.parse_file_summary_csv(result.stdout, root=path),
         path=path,
         slopscope_config=slopscope_config,
         selected_profile=selected_profile,

@@ -8,6 +8,25 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Stream cloc CSV records under a fixed 100,000-record ceiling independent of captured bytes;
+  overflow refuses complete reports/profiles before constructing excess domain rows.
+- Build every normal cloc report section, including language headlines and recomputed SUM,
+  from one validated file-summary capture instead of two potentially inconsistent invocations.
+
+- Reject ambiguous cloc CSV headers before consuming records, retaining individual files/filename
+  summary aliases and metadata columns.
+- Validate normalized cloc file identities before filtering/aggregation in reports and profiles;
+  duplicate aliases and paths outside the selected root refuse the complete report. Only parent
+  directories are resolved, so file symlinks keep their own path.
+
+- Serialize snapshot writers with an admitted persistent sibling kernel lock; stale preflight
+  generations cannot overwrite a newer publication. Requires POSIX flock and no-follow opening.
+- Synchronize the snapshot parent directory after replacement; report visible publication with
+  unconfirmed durability separately from failures that preserve the prior snapshot.
+
+- Charge duplicate anchor window copying/hashing before the work, under the existing work ceiling.
+- Refuse baselines changed in place during their bounded read, while retaining atomic-replacement reads.
+
 - Apply shared composition source-byte, token, and anchor budgets to size-limits measurement,
   configurable through the existing composition settings. Exhaustion returns exit code 2
   without a partial report or allowlist write; exact-limit measurements are unchanged.

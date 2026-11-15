@@ -99,6 +99,21 @@ The subprocess text decoder normalizes carriage returns to newlines, so carriage
 are not preserved end to end.
 Malformed cloc records, missing or invalid nonnegative counters, and CSV parser failures
 return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
+Required CSV headers must be unique (including case/whitespace variants); the language-summary
+`files` and `filename` aliases are accepted individually, never together. Extra metadata columns remain supported.
+File rows are normalized and admitted before filtering: repeated identities, absolute/relative aliases,
+and paths outside the selected root (including `..` components and linked parent directories that
+leave it) refuse the whole report, including profiles. Only parent directories are resolved: a file
+symlink is counted under its own path, as cloc counts it, even when its target lies outside the root. No conflicting counters are merged or silently omitted.
+CSV parsing streams records under a fixed 100,000-data-record ceiling (including `SUM`, excluding
+the header), independently of the capture-byte ceiling. The first excess record refuses the whole
+report before domain conversion; exact-limit input remains supported. This applies to both parser
+entry points, normal reports, and cloc-backed profiles.
+Normal cloc reports use one file-summary invocation: language headlines and `SUM`, source/test,
+area, and directory counts all project the same validated, filtered file rows. The CSV `SUM` counters
+are ignored and recomputed. This is one captured counting generation, not a filesystem snapshot:
+cloc may still observe edits during its own traversal. An empty file capture returns exit code 1
+without a report; filtering a nonempty capture down to zero rows still succeeds.
 Empty CSV reports and the file report's `SUM` row remain supported by the parser.
 
 Rich is also optional. Human-readable output defaults to `--format rich`, but if Rich is not installed the command
@@ -314,7 +329,8 @@ Duplicate extension compares overlap positions only within each token segment an
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
 incomplete and preserves any snapshot. Each project also has fixed whole-analysis ceilings of
 1,000,000 cumulative metadata entries (blocks, occurrences, line intervals, and coverage memberships)
-and 10,000,000 duplicate comparison/traversal work units. Admission happens before expansion;
+and 10,000,000 duplicate work units, including token words copied/hashed for anchor windows
+and comparison/traversal work. Admission happens before expansion;
 exhaustion exits 2 with an incomplete-analysis diagnostic and no report or snapshot. Exact-limit
 analyses retain the same output.
 
@@ -324,6 +340,13 @@ file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapsho
 Snapshot publication uses the resolved destination approved during preflight and rechecks its file
 and parent-directory identity before replacement. A changed target is refused, preserving existing
 outputs, including when a snapshot symlink is retargeted during analysis or writing.
+Writers serialize verification and replacement under a persistent sibling `.NAME.lock` kernel lock.
+The lock must be a single-link regular file, opened without following symlinks and rechecked after
+waiting; do not remove it while writers may be active. A writer whose preflight generation has
+already been replaced refuses publication. Snapshot locking requires POSIX `flock` and `O_NOFOLLOW`.
+Snapshot bytes (including preserved mode) are fsynced before replacement, then the parent directory
+is fsynced before success. A directory-sync failure exits 2 with "published; durability unconfirmed":
+the new snapshot is visible and is not rolled back. Precommit failures preserve the prior snapshot.
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
@@ -348,6 +371,9 @@ units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offend
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
 one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
 including duplicates with identical values; refused inputs leave existing outputs unchanged.
+Baseline reads compare opened-descriptor generation metadata before and after the bounded read;
+in-place changes are refused before comparison. Atomic pathname replacement remains supported:
+the reader uses its already opened generation.
 Baseline integer-decoder resource failures, including oversized integers in extension fields,
 return exit code 2 with a bounded diagnostic and preserve prior snapshots.
 Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -194,3 +194,46 @@ def test_parse_file_summary_csv_preserves_filename(filename: str) -> None:
     assert cloc.parse_file_summary_csv(output.getvalue()) == [
         FileRow(language="Python", path=filename, blank=1, comment=2, code=3)
     ]
+
+
+@pytest.mark.parametrize(
+    "columns,record",
+    [
+        ("language,filename,blank,comment,code,code", "Python,1,0,0,999,1"),
+        ("language,filename,filename,blank,comment,code", "Python,999,1,0,0,1"),
+        ("language,filename,blank,comment,code, Code ", "Python,1,0,0,999,1"),
+        ("language,filename,files,blank,comment,code", "Python,999,1,0,0,1"),
+    ],
+)
+@pytest.mark.parametrize("parser", [cloc.parse_language_summary_csv, cloc.parse_file_summary_csv])
+def test_csv_rejects_ambiguous_headers(
+    columns: str, record: str, parser: Callable[[str], object]
+) -> None:
+    with pytest.raises(cloc.ClocParseError, match="columns"):
+        parser(columns + "\n" + record + "\n")
+
+
+@pytest.mark.parametrize("file_report", [False, True])
+def test_csv_record_budget_precedes_domain_conversion(
+    monkeypatch: pytest.MonkeyPatch, file_report: bool
+) -> None:
+    monkeypatch.setattr(cloc, "MAX_CLOC_CSV_ROWS", 3, raising=False)
+    parse = cloc.parse_file_summary_csv if file_report else cloc.parse_language_summary_csv
+    row_parser = "_parse_file_row" if file_report else "_parse_language_row"
+    original = getattr(cloc, row_parser)
+    admitted = 0
+
+    def counted(row: dict[str, str | None]) -> object:
+        nonlocal admitted
+        admitted += 1
+        return original(row)
+
+    monkeypatch.setattr(cloc, row_parser, counted)
+    header = "language,filename,blank,comment,code\n"
+    rows = "".join(f"Python,{i},0,0,1\n" for i in range(3))
+    assert len(parse(header + rows)) == 3
+    assert admitted == 3
+    admitted = 0
+    with pytest.raises(cloc.ClocParseError, match="row limit"):
+        parse(header + rows + "Python,excess,0,0,1\n" * 100)
+    assert admitted == 3
