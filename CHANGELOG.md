@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Unwind partial capture-reader startup: close unclaimed pipes once, let started readers
+  close their own pipes, and terminate/reap the child with bounded cleanup. Reader startup
+  failures now produce a fixed capture diagnostic and CLI exit 2 instead of a traceback;
+  interruptions and supervisor SIGTERM retain their exit behavior.
+
 - Bound macOS/Linux capture-group inspection by the cleanup deadline and a 65,536-entry
   ceiling, streaming Linux `/proc` with bounded stat reads. Incomplete listings remain
   unknown evidence, preserving final signalling before reap and refusing unconfirmed cleanup.

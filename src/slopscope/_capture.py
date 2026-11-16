@@ -43,8 +43,15 @@ def capture_process(
     lock = threading.Lock()
     changed = threading.Event()
     stopped = threading.Event()
+    owned_pipes: list[BinaryIO] = []
 
     def read_pipe(pipe: BinaryIO, target: bytearray) -> None:
+        with lock:
+            # A start interrupted before bootstrap can run after rollback. It must
+            # leave the pipe alone once the supervisor has reclaimed ownership.
+            if stopped.is_set():
+                return
+            owned_pipes.append(pipe)
         try:
             # read1 returns available pipe bytes without waiting to fill the chunk.
             read = pipe.read1 if isinstance(pipe, io.BufferedReader) else pipe.read
@@ -103,8 +110,15 @@ def capture_process(
         if previous_handler is not None:
             signal.signal(signal.SIGTERM, terminate)
         for thread in threads:
-            thread.start()
-            started.append(thread)
+            try:
+                thread.start()
+            except Exception as exc:
+                raise CaptureError(f"could not start {label} output readers") from exc
+            finally:
+                # ident survives thread exit and also identifies a reader whose start
+                # was interrupted after launch, so rollback can still join it.
+                if thread.ident is not None:
+                    started.append(thread)
         while any(thread.is_alive() for thread in started):
             with lock:
                 if failures:
@@ -154,6 +168,15 @@ def capture_process(
         if not retired:
             with contextlib.suppress(OSError):
                 process.kill()
+        with lock:
+            unowned_pipes = [
+                pipe for pipe in (process.stdout, process.stderr) if pipe not in owned_pipes
+            ]
+        for pipe in unowned_pipes:
+            # No reader claimed this pipe before rollback. A late reader checks
+            # stopped under the same lock and cannot touch the reclaimed pipe.
+            with contextlib.suppress(OSError):
+                pipe.close()
         # Bound reader cleanup too: a surviving descendant can retain a pipe. Never
         # close a pipe from this thread while its reader might hold the read lock.
         drain_deadline = time.monotonic() + 1
