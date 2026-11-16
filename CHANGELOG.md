@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Refuse allowlist evidence changed in place during bounded reading, including update planning
+  and recovery backups, by checking opened-file size, mtime, and ctime.
+
 - Stream cloc CSV records under a fixed 100,000-record ceiling independent of captured bytes;
   overflow refuses complete reports/profiles before constructing excess domain rows.
 - Build every normal cloc report section, including language headlines and recomputed SUM,

@@ -185,6 +185,13 @@ def _read_allowlist_bytes(
             content = handle.read(MAX_ALLOWLIST_BYTES + 1)
             if len(content) > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+            after = os.fstat(handle.fileno())
+            if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ):
+                raise SizeLimitsError(f"allowlist {path} changed during read")
         if destination is not None:
             _verify_destination(destination)
         return content

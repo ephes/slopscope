@@ -205,6 +205,11 @@ opening, `O_NOFOLLOW`, `O_DIRECTORY`, and `O_NONBLOCK`; platforms without these 
 analysis with a diagnostic. Windows lacks them, so `--composition` and `--size-limits` are unsupported
 on Windows and report every source as an incomplete-analysis failure. The selected root itself may be a symlink.
 
+Allowlist reads compare the opened file's size, mtime, and ctime before and after the bounded
+read. An in-place edit refuses reports, update planning, and recovery backup creation with
+exit code 2 before publication; existing destinations remain untouched. Unchanged files retain
+their exact identities and ceilings.
+
 Allowlist JSON integer-decoder resource failures, including in unused extension fields, return
 exit code 2 with a bounded diagnostic that omits raw values. Report, strict, seed, and update
 all preserve the refused allowlist bytes.
