@@ -115,9 +115,11 @@ def capture_process(
         if failures:
             raise failures[0]
         reserved = _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
-        if reserved or _group_has_other_members(process.pid):
-            # A leader reaped elsewhere no longer reserves the ID; surviving members
-            # (or an unlistable group) still do, so their retirement goes ahead.
+        # A leader reaped elsewhere no longer reserves the ID: from here on the failure
+        # path must not signal it. Only positively listed surviving members (which keep
+        # the group ID reserved) are still retired.
+        retired = not reserved
+        if reserved or _group_has_other_members(process.pid, unknown=False):
             cleanup_deadline = _retire_group(process, label=label)
         else:
             cleanup_deadline = time.monotonic() + _GROUP_KILL_SECONDS
@@ -214,11 +216,12 @@ def _wait_for_exit_kqueue(
     except OSError as exc:
         raise CaptureError(f"could not observe {label} process exit") from exc
     # kqueue cannot tell an unreaped zombie from a leader reaped elsewhere; libproc lists
-    # zombies, so an absent leader was reaped. An unlistable group keeps the usual path.
+    # zombies, so an absent leader was reaped. Unconfirmed presence fails closed: the
+    # identity is treated as released, never signalled, and its status is refused.
     try:
         return process.pid in _darwin_group_members(process.pid)
     except Exception:
-        return True
+        return False
 
 
 def _observe_exit_kqueue(
@@ -298,10 +301,11 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | No
 _PROC_PGRP_ONLY = 2  # <sys/proc_info.h>: proc_listpids filter by process group.
 
 
-def _group_has_other_members(pgid: int) -> bool:
-    """Whether a process besides the leader may still belong to group ``pgid``.
+def _group_has_other_members(pgid: int, *, unknown: bool = True) -> bool:
+    """Whether a process besides the leader still belongs to group ``pgid``.
 
-    Listing failures and unsupported platforms answer True, keeping the full TERM grace.
+    Listing failures and unsupported platforms answer ``unknown``: True by default,
+    keeping the full TERM grace.
     """
 
     try:
@@ -310,9 +314,9 @@ def _group_has_other_members(pgid: int) -> bool:
         elif sys.platform.startswith("linux"):
             members = _linux_group_members(pgid)
         else:
-            return True
+            return unknown
     except Exception:
-        return True
+        return unknown
     return any(pid != pgid for pid in members)
 
 

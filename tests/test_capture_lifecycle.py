@@ -100,7 +100,7 @@ def test_reused_group_is_only_probed_and_refused(
     process.wait.side_effect = reap
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=signal_group))
     # Fake PIDs: keep membership unknown so the probe semantics stay under test.
-    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid: True)
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid, **_: True)
     monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 0.01)
     monkeypatch.setattr(_capture, "_GROUP_KILL_SECONDS", 0.01)
@@ -377,6 +377,7 @@ def test_group_membership_is_unknown_when_listing_fails(monkeypatch: pytest.Monk
     for platform in ("darwin", "linux", "freebsd14"):
         monkeypatch.setattr(sys, "platform", platform)
         assert _capture._group_has_other_members(4242)
+        assert not _capture._group_has_other_members(4242, unknown=False)
 
 
 def test_linux_group_members_parse_proc_stat(tmp_path: Path) -> None:
@@ -550,3 +551,48 @@ def test_term_during_handler_restore_still_restores_and_exits(
         assert signal.getsignal(signal.SIGTERM) is previous
     finally:
         real_signal(signal.SIGTERM, original_handler)
+
+
+@pytest.mark.parametrize("interruption", ["term", "error"])
+def test_released_identity_is_not_killed_by_failure_cleanup(
+    monkeypatch: pytest.MonkeyPatch, interruption: str
+) -> None:
+    from unittest.mock import Mock
+
+    process = Mock(pid=12345, args=["synthetic"], stdout=io.BytesIO(), stderr=io.BytesIO())
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(return_value=False))
+    failure: BaseException = (
+        SystemExit(128 + signal.SIGTERM)
+        if interruption == "term"
+        else _capture.CaptureError("could not confirm synthetic process-group cleanup")
+    )
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid, **_: True)
+    monkeypatch.setattr(_capture, "_retire_group", Mock(side_effect=failure))
+    group_kill = Mock()
+    monkeypatch.setattr(os, "killpg", group_kill)
+    with pytest.raises(type(failure)):
+        _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    group_kill.assert_not_called()  # The reaped leader's ID is no longer ours to signal.
+    process.kill.assert_not_called()
+
+
+@pytest.mark.skipif(not hasattr(select, "kqueue"), reason="macOS kqueue observation")
+def test_kqueue_unconfirmed_leader_presence_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+    from unittest.mock import Mock
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        monkeypatch.setattr(
+            _capture, "_darwin_group_members", Mock(side_effect=OSError("listing failed"))
+        )
+        assert not _capture._wait_for_exit_kqueue(
+            process, deadline=time.monotonic() + 5, timeout=5, label="x"
+        )
+    finally:
+        process.communicate(timeout=5)
