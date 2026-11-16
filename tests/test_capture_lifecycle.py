@@ -194,11 +194,10 @@ def test_capture_restores_previous_sigterm_handler(
         "exit": SystemExit(9),
     }
 
-    def observe(*args: object, **kwargs: object) -> bool:
+    def observe(*args: object, **kwargs: object) -> None:
         assert signal.getsignal(signal.SIGTERM) is not previous_handler
         if outcome in errors:
             raise errors[outcome]
-        return True  # The exited leader still reserves its identity.
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
@@ -230,11 +229,10 @@ def test_repeated_sigterm_does_not_interrupt_cleanup(
         assert callable(handler)
         handler(signal.SIGTERM, None)
 
-    def observe(*args: object, **kwargs: object) -> bool:
+    def observe(*args: object, **kwargs: object) -> None:
         if during_cleanup:
             raise subprocess.TimeoutExpired("synthetic", 1)
         request_term()
-        return True
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     kill_group = Mock(side_effect=request_term)
@@ -301,15 +299,20 @@ def test_kqueue_observes_exit_without_reaping(
         waited = True
         return wait(timeout=timeout)
 
+    sent: list[int] = []
+
     def signal_group(pid: int, sig: int) -> None:
         if sig:
             assert not waited
+            sent.append(sig)
         killpg(pid, sig)
 
     monkeypatch.setattr(process, "wait", reap)
     monkeypatch.setattr(os, "killpg", signal_group)
     result = _capture.capture_process(process, timeout=3, max_bytes=100, label="synthetic")
     assert result.returncode == 0 and waited
+    # The kqueue fallback keeps the identity reserved through the final KILL attempt.
+    assert sent and sent[-1] == signal.SIGKILL
 
 
 @pytest.mark.skipif(
@@ -390,7 +393,7 @@ def test_linux_group_members_parse_proc_stat(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX auto-reap semantics")
 @pytest.mark.parametrize("observer", ["waitid", "kqueue"])
-def test_auto_reaped_leader_is_never_signalled(
+def test_auto_reaped_leader_still_retires_lingering_descendants(
     monkeypatch: pytest.MonkeyPatch, observer: str
 ) -> None:
     if observer == "kqueue":
@@ -399,27 +402,36 @@ def test_auto_reaped_leader_is_never_signalled(
         monkeypatch.delattr(os, "waitid", raising=False)
     elif not hasattr(os, "waitid"):
         pytest.skip("waitid unavailable")
-    killpg = os.killpg
-    sent: list[int] = []
-
-    def signal_group(pid: int, sig: int) -> None:
-        sent.append(sig)
-        killpg(pid, sig)
-
+    child = (
+        "import signal,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "print('ready', flush=True); time.sleep(30)"
+    )
+    # The wrapper exits only once its redirected child ignores TERM, so KILL must retire it.
+    wrapper = (
+        "import subprocess,sys; child = subprocess.Popen([sys.executable, '-c', "
+        f"{child!r}], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL); "
+        "child.stdout.readline()"
+    )
     previous = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     try:
         process = subprocess.Popen(
-            [sys.executable, "-c", "pass"],
+            [sys.executable, "-c", wrapper],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
         )
-        monkeypatch.setattr(os, "killpg", signal_group)
-        result = _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+        try:
+            result = _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+            # The kernel reaped the leader; its surviving member still reserved the group,
+            # so the capture retired it before returning.
+            with pytest.raises(ProcessLookupError):
+                os.killpg(process.pid, 0)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)  # Cleanup only if the test failed.
     finally:
         signal.signal(signal.SIGCHLD, previous)
     assert result.returncode == 0
-    assert sent and set(sent) == {0}  # Absence probes only; no TERM/KILL to a released identity.
 
 
 def test_unobservable_exit_is_bounded_capture_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,7 +460,7 @@ def test_ignored_sigterm_policy_is_left_unchanged(monkeypatch: pytest.MonkeyPatc
         stdout=io.BytesIO(b"result"),
         stderr=io.BytesIO(),
     )
-    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(return_value=True))
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
     previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
@@ -476,7 +488,7 @@ def test_term_during_handler_restore_still_restores_and_exits(
         stdout=io.BytesIO(b"result"),
         stderr=io.BytesIO(),
     )
-    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(return_value=True))
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
 
     def previous(signum: int, frame: object) -> None:

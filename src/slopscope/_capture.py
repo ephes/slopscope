@@ -114,12 +114,8 @@ def capture_process(
             changed.clear()
         if failures:
             raise failures[0]
-        if _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label):
-            cleanup_deadline = _retire_group(process, label=label)
-        else:
-            # The leader was reaped elsewhere (e.g. inherited SIGCHLD=SIG_IGN), so its
-            # identity is no longer reserved: never signal it, only confirm absence.
-            cleanup_deadline = time.monotonic() + _GROUP_TERM_SECONDS + _GROUP_KILL_SECONDS
+        _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
+        cleanup_deadline = _retire_group(process, label=label)
         retired = True
         process.wait(timeout=max(0, deadline - time.monotonic()))
         if cleanup_deadline is not None:
@@ -170,20 +166,22 @@ def capture_process(
 
 def _wait_for_exit(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> bool:
+) -> None:
     """Observe exit without releasing the POSIX leader's process/group identity.
 
-    Returns whether the exited leader still reserves its identity (stays unreaped).
+    A leader reaped elsewhere (e.g. inherited SIGCHLD=SIG_IGN) counts as exited. Its
+    remaining group members still reserve the group ID, so retirement still applies.
     """
 
     if os.name != "posix":
         process.wait(timeout=max(0, deadline - time.monotonic()))
-        return True
+        return
     waitid = getattr(os, "waitid", None)  # Some platform type stubs omit this public API.
     if waitid is None or not all(
         hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
     ):
-        return _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
+        _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
+        return
     try:
         while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
             remaining = deadline - time.monotonic()
@@ -191,15 +189,14 @@ def _wait_for_exit(
                 raise subprocess.TimeoutExpired(process.args, timeout)
             time.sleep(min(remaining, 0.01))
     except ChildProcessError:
-        return False  # Already reaped elsewhere: the identity is no longer ours.
+        return  # Already reaped elsewhere; Popen.wait reports this as exit status 0.
     except OSError as exc:
         raise CaptureError(f"could not observe {label} process exit") from exc
-    return True
 
 
 def _wait_for_exit_kqueue(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> bool:
+) -> None:
     """Older macOS Python exposes non-reaping process observation through kqueue."""
 
     if sys.platform != "darwin" or not hasattr(select, "kqueue"):
@@ -208,12 +205,6 @@ def _wait_for_exit_kqueue(
         _observe_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
     except OSError as exc:
         raise CaptureError(f"could not observe {label} process exit") from exc
-    # kqueue cannot tell an unreaped zombie from an auto-reaped leader; libproc lists
-    # zombies, so a missing leader means its identity is released. Unknown keeps it.
-    try:
-        return process.pid in _darwin_group_members(process.pid)
-    except Exception:
-        return True
 
 
 def _observe_exit_kqueue(
@@ -229,7 +220,8 @@ def _observe_exit_kqueue(
         events = queue.control([event], 1, max(0, deadline - time.monotonic()))
         if not events:
             raise subprocess.TimeoutExpired(process.args, timeout)
-        # Registration against an already exited, unreaped child reports ESRCH.
+        # Registration against an already exited child (unreaped, or reaped elsewhere)
+        # reports ESRCH.
         if events[0].flags & select.KQ_EV_ERROR and events[0].data != errno.ESRCH:
             raise CaptureError(f"could not observe {label} process exit")
 

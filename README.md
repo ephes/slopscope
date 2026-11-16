@@ -186,9 +186,10 @@ until the last TERM/KILL attempt, reserving its process-group identity. On macOS
 and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
 capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
 Where group membership cannot be listed, the full TERM grace applies. If the leader was
-already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`), its identity
-is no longer reserved: cleanup sends no TERM/KILL and only confirms absence. Failing exit
-observation is reported as a bounded capture error. After reaping,
+already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`), surviving
+group members still reserve the group ID, so the same TERM/KILL retirement applies and an
+already vanished group is simply confirmed absent. Failing exit observation is reported as a
+bounded capture error. After reaping,
 cleanup only checks absence with signal 0 (which sends no signal); it never sends another
 terminating signal to a potentially reused identity. macOS may refuse signals to a
 zombie-only group: this is accepted only when the subsequent absence check succeeds.
