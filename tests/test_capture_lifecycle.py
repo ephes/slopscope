@@ -596,3 +596,20 @@ def test_kqueue_unconfirmed_leader_presence_fails_closed(monkeypatch: pytest.Mon
         )
     finally:
         process.communicate(timeout=5)
+
+
+def test_released_group_gets_no_kill_after_members_exit_on_term(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    process = Mock(pid=12345)
+    group_kill = Mock()  # The group still answers signal 0 while its last member exits.
+    monkeypatch.setattr(os, "killpg", group_kill)
+    # Listed before TERM; empty right after delivery, and still empty before KILL.
+    membership = Mock(side_effect=[True, False, False])
+    monkeypatch.setattr(_capture, "_group_has_other_members", membership)
+    assert _capture._retire_group(process, label="synthetic", reserved=False) is not None
+    # The released, now empty group never sees KILL.
+    group_kill.assert_called_once_with(process.pid, signal.SIGTERM)
+    assert membership.call_count == 3

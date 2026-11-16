@@ -120,7 +120,7 @@ def capture_process(
         # the group ID reserved) are still retired.
         retired = not reserved
         if reserved or _group_has_other_members(process.pid, unknown=False):
-            cleanup_deadline = _retire_group(process, label=label)
+            cleanup_deadline = _retire_group(process, label=label, reserved=reserved)
         else:
             cleanup_deadline = time.monotonic() + _GROUP_KILL_SECONDS
         retired = True
@@ -243,8 +243,14 @@ def _observe_exit_kqueue(
             raise CaptureError(f"could not observe {label} process exit")
 
 
-def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | None:
-    """Signal redirected descendants while the unreaped leader reserves the group."""
+def _retire_group(
+    process: subprocess.Popen[bytes], *, label: str, reserved: bool = True
+) -> float | None:
+    """Signal redirected descendants while the unreaped leader reserves the group.
+
+    With a leader reaped elsewhere (``reserved=False``), only positively listed members
+    reserve the group ID, so every TERM/KILL send first requires such a listing.
+    """
 
     if os.name != "posix":
         # The wrapper may already be gone, so taskkill cannot always find its tree.
@@ -264,6 +270,12 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | No
             deadline = time.monotonic() + grace
             pending: int = sig
             while True:
+                if (
+                    pending
+                    and not reserved
+                    and not _group_has_other_members(process.pid, unknown=False)
+                ):
+                    return deadline  # Released and empty: nothing may be signalled.
                 try:
                     # Send ``sig`` until it is delivered, then probe with signal 0.
                     os.killpg(process.pid, pending)

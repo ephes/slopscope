@@ -190,10 +190,13 @@ already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`),
 status is lost and the capture fails with a bounded error instead of accepting status 0.
 Before failing, a group whose other members are positively listed (macOS libproc, Linux
 `/proc`) is retired with the same TERM/KILL sequence, because surviving members keep the group
-ID reserved. An empty or unlistable group only gets absence probes, and an interrupted or
-failed cleanup never signals the released ID. A residual race remains in this
-reaped-elsewhere case: if the last member exits between the listing and a signal and the ID is
-reused at once, that signal could reach the new group. The kqueue fallback detects a reaped
+ID reserved. Each TERM/KILL send then requires a fresh positive listing; an empty or unlistable group only
+gets absence probes, and once the reaped leader has been observed, an interrupted or failed
+cleanup never signals the released ID. Residual races remain in this reaped-elsewhere case: if
+the last member exits between a listing and a signal and the ID is reused at once, that signal
+could reach the new group; and if the leader is reaped before its exit is observed (while
+output is still being read) and the capture then fails or is interrupted, the failure cleanup
+still sends KILL to the group as before. The kqueue fallback detects a reaped
 leader through libproc and treats an unconfirmed leader as reaped (fail closed).
 Other exit-observation failures are also bounded capture errors. After reaping,
 cleanup only checks absence with signal 0 (which sends no signal); it never sends another
