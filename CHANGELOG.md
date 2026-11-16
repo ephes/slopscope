@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Escape nonprinting terminal controls in plain/Rich reports and CLI diagnostics, including
+  paths, project/profile labels, measured units, and errors. JSON and stored identities remain
+  exact; printable Unicode and literal Rich brackets remain readable.
+
 - Synchronize allowlist recovery, publication, restoration, parent creation, and backup-retirement
   directory entries. Post-replacement sync failures report uncertain durability and retain named
   recovery evidence without claiming rollback.

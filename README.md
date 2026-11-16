@@ -258,6 +258,14 @@ Human-readable output defaults to `--format rich`. Rich is optional: when it is 
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for
 structured output, or `--no-color` to force colorless human-readable output.
 
+Human reports and diagnostics display nonprinting characters in repository paths, project/profile
+labels, unit names, and errors as visible escapes: `\n`, `\r`, `\t`, `\xHH`, `\uHHHH`, or
+`\UHHHHHHHH`. This includes ESC/OSC/CSI controls, C1 controls, Unicode directional controls and
+line separators. Printable Unicode and literal brackets remain readable; Rich applies only its
+own table styling. Data cannot insert terminal commands or new report rows. JSON values, allowlist
+keys, snapshot identities, and filesystem paths retain their original characters. Use JSON for
+exact identities; a human display escape can also occur literally in a filename.
+
 By default, `slopscope` looks for `[tool.slopscope]` in `pyproject.toml` under the inspected path. Missing
 configuration keeps the built-in defaults. Use `--config PATH` to load a specific TOML file; missing files, invalid
 TOML, invalid UTF-8 encoding, and invalid field types fail with a clear `slopscope:` error and exit code 2.

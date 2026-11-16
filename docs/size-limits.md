@@ -256,7 +256,10 @@ need access. Cleanup is best effort if the filesystem also refuses temporary-fil
 
 ## Rendering checks
 
-Plain and Rich reports preserve literal unit paths and diagnostics, including bracketed filenames.
+Plain and Rich reports preserve printable unit paths and diagnostics, including bracketed filenames.
+Nonprinting characters are shown as visible escapes (`\n`, `\r`, `\t`, `\xHH`, `\uHHHH`,
+`\UHHHHHHHH`) so labels cannot execute terminal controls or insert report rows. JSON, stored
+allowlist keys, and filesystem identities keep the original characters.
 Rich uses explicit table styles rather than interpreting labels as markup. Without Rich, output
 falls back to plain text.
 
