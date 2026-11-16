@@ -75,3 +75,150 @@ def test_inplace_change_during_read_refuses_evidence(
     assert path.read_bytes() == after
     assert not list(tmp_path.glob("*.backup"))
     assert not list(tmp_path.glob("*.pending"))
+
+
+def test_publication_syncs_names_before_acknowledgement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat
+
+    path = tmp_path / "allowlist.json"
+    path.write_text("{}")
+    events: list[str] = []
+    real_sync, real_replace, real_unlink = os.fsync, os.replace, Path.unlink
+
+    def sync(fd: int) -> None:
+        events.append("directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+        real_sync(fd)
+
+    def replace(src: Path, dst: Path) -> None:
+        events.append("replace")
+        real_replace(src, dst)
+
+    def unlink(target: Path, missing_ok: bool = False) -> None:
+        if target.suffix == ".backup":
+            events.append("retire")
+        real_unlink(target, missing_ok=missing_ok)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    assert events[:7] == [
+        "file",
+        "file",
+        "directory",
+        "replace",
+        "directory",
+        "retire",
+        "directory",
+    ]
+    assert not list(tmp_path.glob("*.backup"))
+
+
+@pytest.mark.parametrize("phase", ["prepare", "publish", "retire"])
+def test_directory_sync_failure_preserves_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    import stat
+
+    path = tmp_path / "allowlist.json"
+    original = b'{"functions": {"old": 200}}'
+    path.write_bytes(original)
+    real_sync = os.fsync
+    directories = 0
+    fail_at = {"prepare": 1, "publish": 2, "retire": 3}[phase]
+
+    def sync(fd: int) -> None:
+        nonlocal directories
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            directories += 1
+            if directories >= fail_at:
+                raise OSError("injected directory sync failure")
+        real_sync(fd)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    with pytest.raises(size_limits.SizeLimitsError) as raised:
+        size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    if phase == "prepare":
+        assert path.read_bytes() == original
+        assert not list(tmp_path.glob("*.backup"))
+    else:
+        assert b'"new"' in path.read_bytes()
+        assert "durability unconfirmed" in str(raised.value)
+        backups = list(tmp_path.glob("*.backup"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == original
+        assert str(backups[0]) in str(raised.value)
+    assert not list(tmp_path.glob("*.pending"))
+
+
+def test_compensation_directory_sync_failure_retains_old_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat
+
+    paths = [tmp_path / name for name in ("a.json", "b.json")]
+    for path in paths:
+        path.write_text("{}")
+    real_replace, real_sync = os.replace, os.fsync
+    recovering = False
+
+    def replace(src: Path, dst: Path) -> None:
+        nonlocal recovering
+        if dst == paths[1]:
+            recovering = True
+            raise OSError("second replacement failed")
+        real_replace(src, dst)
+
+    def sync(fd: int) -> None:
+        if recovering and stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("recovery sync failed")
+        real_sync(fd)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(os, "fsync", sync)
+    with (
+        size_limits.allowlist_locks(paths, action=size_limits.UPDATE) as destinations,
+        pytest.raises(size_limits.SizeLimitsError, match="compensation failed") as raised,
+    ):
+        size_limits.publish_allowlists(
+            [(path, {"functions": {"new": 180}}) for path in paths], destinations=destinations
+        )
+    assert [path.read_text() for path in paths] == ["{}", "{}"]
+    backups = list(tmp_path.glob("*.backup"))
+    assert len(backups) == 1
+    assert backups[0].read_text() == "{}"
+    assert str(backups[0]) in str(raised.value)
+
+
+def test_seed_durably_creates_parent_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import stat
+
+    path = tmp_path / "new" / "nested" / "allowlist.json"
+    synced: list[int] = []
+    real_sync = os.fsync
+
+    def sync(fd: int) -> None:
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            synced.append(info.st_ino)
+        real_sync(fd)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    size_limits.write_allowlist(path, {})
+    assert tmp_path.stat().st_ino in synced
+    assert path.parent.parent.stat().st_ino in synced
+    assert path.parent.stat().st_ino in synced
+
+
+def test_missing_directory_sync_api_is_controlled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "allowlist.json"
+    path.write_bytes(b"{}")
+    monkeypatch.delattr(os, "O_DIRECTORY")
+    with pytest.raises(size_limits.SizeLimitsError, match="directory synchronization"):
+        size_limits.write_allowlist(path, {})
+    assert path.read_bytes() == b"{}"
+    assert list(tmp_path.iterdir()) == [path]

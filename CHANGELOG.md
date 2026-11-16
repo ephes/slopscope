@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Synchronize allowlist recovery, publication, restoration, parent creation, and backup-retirement
+  directory entries. Post-replacement sync failures report uncertain durability and retain named
+  recovery evidence without claiming rollback.
+
 - Refuse allowlist evidence changed in place during bounded reading, including update planning
   and recovery backups, by checking opened-file size, mtime, and ctime.
 

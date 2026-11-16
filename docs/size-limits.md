@@ -104,7 +104,9 @@ error and exit code 2 before any allowlist write. Duplicate keys are refused eve
 agree, with a bounded key diagnostic and object member index. Existing allowlist bytes are preserved.
 Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
 (16,777,216 bytes). The opened descriptor is checked before a bounded read; special files such as
-named pipes are refused without waiting for a writer.
+named pipes are refused without waiting for a writer. The opened size, mtime, and ctime must
+remain unchanged across the read; concurrent in-place edits refuse loading, update planning,
+and backup creation before any destination is replaced.
 Seed/update output uses the same 16 MiB ceiling, measured on the complete serialized UTF-8
 bytes including formatting and the final newline. Exact-limit output is accepted. Every
 project's payload is checked before staging any output or recovery backup; an oversized
@@ -158,13 +160,22 @@ concurrent swap in the short window between the final check and the rename is no
 Existing symlinks are supported and remain symlinks.
 
 Multi-project seed/update prepares and fsyncs every output and recovery backup before replacing
-any allowlist. A handled staging or replacement error returns exit code 2 with no report and
+any allowlist, then syncs each parent directory so recovery names are durable. New parent
+directory names are synced too. Every replacement and restoration is directory-synced before
+retiring recovery evidence; backup retirement is also synced before success. Directory-sync
+support is required for successful mutation. A handled staging or replacement error returns exit code 2 with no report and
 restores earlier replacements to their exact prior bytes and permissions (or removes newly
 seeded files), while all locks remain held. If compensation fails, the diagnostic names each
 failed restoration and its retained sibling `.<allowlist-name>.*.backup` file, or the newly
 seeded file to remove. Preserve that backup and restore it manually after resolving the error
 and coordinating with other writers. This is a handled-error guarantee, not a transaction
 across process death or power loss; an uncatchable interruption may leave a partially published set.
+If directory synchronization fails after replacement, the command reports "durability unconfirmed"
+(exit code 2), leaves visible publication in place, and retains named old-byte backups (or identifies
+new seeds to remove). A failed restoration sync retains a backup even if old bytes are visible again.
+If backup retirement cannot be settled, recovery evidence is recreated and named in the diagnostic;
+its durability may itself be unconfirmed. Coordinate with other writers before manual recovery.
+
 If publication or compensation is interrupted (for example by Ctrl-C), the sibling `.backup` file
 of every allowlist that was or may have been replaced and not yet restored is kept for manual recovery.
 
@@ -176,7 +187,8 @@ replacement while waiting are refused before analysis/publication. Platforms wit
 `O_NOFOLLOW` (including Windows) cannot mutate allowlists. Normal sibling locks remain on disk to serialize waiters.
 
 Catchable failures during staged multi-project publication, including `KeyboardInterrupt` and
-`SystemExit` immediately after a replacement, trigger reverse compensation. Prior bytes, modes,
+`SystemExit` immediately after a replacement, trigger reverse compensation, except during
+directory-sync uncertainty, which retains publication and recovery evidence as described above. Prior bytes, modes,
 or absence are restored under the existing identity checks before the original interruption
 propagates. Recovery failures do not replace the primary failure: named backup paths are retained
 in the diagnostic or exception notes for manual recovery. Compensation attempts continue for

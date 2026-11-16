@@ -388,9 +388,15 @@ all previous allowlists. Multi-project snapshots share one ceiling for the compl
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Lock entries are opened without following symlinks and must be single-link regular files;
 identity is rechecked after acquiring the lock. Multi-project publication stages all outputs first
-and restores earlier writes on catchable failures, including `KeyboardInterrupt` and `SystemExit`.
+and restores earlier writes on catchable replacement failures, including `KeyboardInterrupt` and `SystemExit`.
 The original interruption propagates after recovery; failed restoration retains a named recovery
-backup reported in exception notes. Process death is outside this guarantee.
+backup reported in exception notes. Recovery names are directory-synced before replacement; each
+replacement and restoration is directory-synced before recovery evidence is retired, and backup
+retirement is synced too. Newly created parent names are synced. A post-replacement directory-sync
+failure returns exit code 2 with "durability unconfirmed", leaves visible publication in place,
+and retains named backups for manual recovery rather than claiming a durable rollback. Filesystems
+that cannot sync directories cannot acknowledge mutation success. Process death can still leave a
+partially published multi-project set.
 See [Size Limits](docs/size-limits.md).
 
 ## Development
