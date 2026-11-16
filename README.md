@@ -175,10 +175,17 @@ filesystem fallback. Successful Git output remains NUL-delimited, preserving unu
 On POSIX, captured cloc and Git commands retire their owned process group after successful
 and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows
 0.2 seconds after TERM and 0.8 seconds after KILL; unconfirmed cleanup returns a bounded
-error instead of accepting the result. A transient permission error while signalling or
-probing the group is retried within the same deadline. Confirmed cleanup preserves the wrapper's return code
+error instead of accepting the result. Transient permission errors during TERM or absence
+probing are retried within the same deadline. Confirmed cleanup preserves the wrapper's return code
 and captured output. Descendants that leave the owned group are outside this guarantee;
 Windows tree termination remains best-effort.
+
+POSIX capture requires public `waitid`/`WNOWAIT` support. The exited leader stays unreaped
+until the last TERM/KILL attempt, reserving its process-group identity. After reaping,
+cleanup only checks absence with signal 0 (which sends no signal); it never sends another
+terminating signal to a potentially reused identity. macOS may refuse signals to a
+zombie-only group: this is accepted only when the subsequent absence check succeeds.
+An extant or uninspectable group still refuses the result within the cleanup deadline.
 
 Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
 stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.

@@ -174,7 +174,7 @@ def test_capture_failure_kills_tree_and_reaps_wrapper(
     }[failure]
     if failure != "overflow":
         exception = subprocess.TimeoutExpired("synthetic", 1) if failure == "timeout" else error()
-        process.wait.side_effect = [exception, 0]
+        monkeypatch.setattr(_capture, "_wait_for_exit", Mock(side_effect=exception))
     group_kill, tree_kill = Mock(), Mock()
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name=platform, killpg=group_kill))
     monkeypatch.setattr(subprocess, "run", tree_kill)
@@ -326,13 +326,14 @@ def test_unconfirmed_group_cleanup_is_bounded_domain_error(
         side_effect=PermissionError("private detail") if failure == "permission" else None
     )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 0.01)
     monkeypatch.setattr(_capture, "_GROUP_KILL_SECONDS", 0.01)
     with pytest.raises(
         _capture.CaptureError, match="could not confirm synthetic process-group cleanup"
     ):
         _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
-    assert process.wait.call_args.kwargs == {"timeout": 5}
+    process.kill.assert_not_called()  # A failed post-reap probe must never trigger signalling.
     assert group_kill.call_count < 20
 
 
@@ -351,11 +352,14 @@ def test_group_cleanup_retries_transient_probe_permission_error(
         stdout=io.BytesIO(b"output"),
         stderr=io.BytesIO(),
     )
-    group_kill = Mock(side_effect=[None, PermissionError("transient"), ProcessLookupError()])
+    group_kill = Mock(
+        side_effect=[None, PermissionError("transient"), ProcessLookupError(), ProcessLookupError()]
+    )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert result.returncode == 7 and result.stdout == b"output"
-    assert group_kill.call_count == 3
+    assert group_kill.call_count == 4  # One final harmless absence probe follows reap.
 
 
 def test_group_cleanup_retries_transient_signal_permission_error(
@@ -375,12 +379,16 @@ def test_group_cleanup_retries_transient_signal_permission_error(
     )
     # SIGTERM delivery is refused once (zombie-only group), then succeeds; the
     # group is gone at the next probe.
-    group_kill = Mock(side_effect=[PermissionError("transient"), None, ProcessLookupError()])
+    group_kill = Mock(
+        side_effect=[PermissionError("transient"), None, ProcessLookupError(), ProcessLookupError()]
+    )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert result.returncode == 0 and result.stdout == b"output"
     assert [call.args[1] for call in group_kill.call_args_list] == [
         signal.SIGTERM,
         signal.SIGTERM,
+        0,
         0,
     ]

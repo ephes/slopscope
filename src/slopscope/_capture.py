@@ -71,6 +71,7 @@ def capture_process(
     ]
     started: list[threading.Thread] = []
     deadline = time.monotonic() + timeout
+    retired = False
     try:
         for thread in threads:
             thread.start()
@@ -86,15 +87,19 @@ def capture_process(
             changed.clear()
         if failures:
             raise failures[0]
+        _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
+        cleanup_deadline = _retire_group(process, label=label)
+        retired = True
         process.wait(timeout=max(0, deadline - time.monotonic()))
-        _retire_group(process, label=label)
+        if cleanup_deadline is not None:
+            _confirm_group_exit(process, deadline=cleanup_deadline, label=label)
     except BaseException:
         stopped.set()
-        if os.name == "posix":
+        if not retired and os.name == "posix":
             # Kill the group even if the wrapper has exited but a child still owns its pipes.
             with contextlib.suppress(OSError):
                 os.killpg(process.pid, signal.SIGKILL)
-        else:
+        elif not retired:
             with contextlib.suppress(OSError, subprocess.SubprocessError):
                 subprocess.run(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
@@ -102,8 +107,9 @@ def capture_process(
                     check=False,
                     timeout=5,
                 )
-        with contextlib.suppress(OSError):
-            process.kill()
+        if not retired:
+            with contextlib.suppress(OSError):
+                process.kill()
         # Bound reader cleanup too: a surviving descendant can retain a pipe. Never
         # close a pipe from this thread while its reader might hold the read lock.
         drain_deadline = time.monotonic() + 1
@@ -119,8 +125,28 @@ def capture_process(
     )
 
 
-def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
-    """Retire redirected descendants too, even after their wrapper has exited."""
+def _wait_for_exit(
+    process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
+) -> None:
+    """Observe exit without releasing the POSIX leader's process/group identity."""
+
+    if os.name != "posix":
+        process.wait(timeout=max(0, deadline - time.monotonic()))
+        return
+    waitid = getattr(os, "waitid", None)  # Some platform type stubs omit this public API.
+    if waitid is None or not all(
+        hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    ):
+        raise CaptureError(f"{label} capture requires POSIX waitid with WNOWAIT")
+    while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(min(remaining, 0.01))
+
+
+def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | None:
+    """Signal redirected descendants while the unreaped leader reserves the group."""
 
     if os.name != "posix":
         # The wrapper may already be gone, so taskkill cannot always find its tree.
@@ -131,7 +157,7 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
                 check=False,
                 timeout=5,
             )
-        return
+        return None
     try:
         for sig, grace in (
             (signal.SIGTERM, _GROUP_TERM_SECONDS),
@@ -144,13 +170,22 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
                     # Send ``sig`` until it is delivered, then probe with signal 0.
                     os.killpg(process.pid, pending)
                 except ProcessLookupError:
-                    return
+                    return deadline
                 except PermissionError:
+                    if sig == signal.SIGKILL:
+                        # A zombie-only group can refuse KILL on macOS. Reap after
+                        # this final attempt and require confirmed absence below.
+                        return deadline
                     # A terminating/reparented group can be temporarily unsignalable or
                     # uninspectable (e.g. only zombies remain on macOS). Retry only
                     # within the same deadline; never infer success from EPERM.
                     pass
                 else:
+                    # The unreaped leader itself can keep signal-0 probes positive.
+                    # Successful final KILL delivery ends our signalling authority;
+                    # only then may the caller reap. Later probes send no signal.
+                    if sig == signal.SIGKILL:
+                        return deadline
                     pending = 0
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -158,4 +193,22 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> None:
                 time.sleep(min(remaining, 0.01))
     except OSError as exc:
         raise CaptureError(f"could not confirm {label} process-group cleanup") from exc
-    raise CaptureError(f"could not confirm {label} process-group cleanup")
+    return deadline
+
+
+def _confirm_group_exit(process: subprocess.Popen[bytes], *, deadline: float, label: str) -> None:
+    """Check absence after reap without ever signalling a reusable identity."""
+
+    while True:
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            pass
+        except OSError as exc:
+            raise CaptureError(f"could not confirm {label} process-group cleanup") from exc
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CaptureError(f"could not confirm {label} process-group cleanup")
+        time.sleep(min(remaining, 0.01))
