@@ -18,8 +18,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   are allowed; cleanup errors never trigger signals against a reusable process identity.
   On macOS and Linux the TERM grace ends once only the exited leader remains, so captures
   without lingering descendants do not pay the fixed 0.2-second wait. A leader already reaped
-  elsewhere (inherited SIGCHLD=SIG_IGN) no longer breaks capture: its surviving group is still
-  retired; other exit-observation failures are bounded capture errors.
+  elsewhere (inherited SIGCHLD=SIG_IGN) yields a bounded capture error instead of an invented
+  status 0, after retiring any surviving group members; other exit-observation failures are
+  bounded capture errors too.
 
 - Escape nonprinting terminal controls in plain/Rich reports and CLI diagnostics, including
   paths, project/profile labels, measured units, and errors. JSON and stored identities remain

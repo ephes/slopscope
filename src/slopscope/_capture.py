@@ -114,12 +114,20 @@ def capture_process(
             changed.clear()
         if failures:
             raise failures[0]
-        _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
-        cleanup_deadline = _retire_group(process, label=label)
+        reserved = _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
+        if reserved or _group_has_other_members(process.pid):
+            # A leader reaped elsewhere no longer reserves the ID; surviving members
+            # (or an unlistable group) still do, so their retirement goes ahead.
+            cleanup_deadline = _retire_group(process, label=label)
+        else:
+            cleanup_deadline = time.monotonic() + _GROUP_KILL_SECONDS
         retired = True
         process.wait(timeout=max(0, deadline - time.monotonic()))
         if cleanup_deadline is not None:
             _confirm_group_exit(process, deadline=cleanup_deadline, label=label)
+        if not reserved:
+            # Popen reports a reaped-elsewhere child as 0; the real status is lost.
+            raise CaptureError(f"could not observe {label} exit status")
     except BaseException:
         # First statement of the handler block: CPython runs Python signal handlers only at
         # eval-breaker checks, so a repeated TERM after this point is recorded, not raised.
@@ -166,22 +174,21 @@ def capture_process(
 
 def _wait_for_exit(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> None:
+) -> bool:
     """Observe exit without releasing the POSIX leader's process/group identity.
 
-    A leader reaped elsewhere (e.g. inherited SIGCHLD=SIG_IGN) counts as exited. Its
-    remaining group members still reserve the group ID, so retirement still applies.
+    Returns False when the leader was already reaped elsewhere (e.g. inherited
+    SIGCHLD=SIG_IGN): its identity and exit status are then no longer ours.
     """
 
     if os.name != "posix":
         process.wait(timeout=max(0, deadline - time.monotonic()))
-        return
+        return True
     waitid = getattr(os, "waitid", None)  # Some platform type stubs omit this public API.
     if waitid is None or not all(
         hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
     ):
-        _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
-        return
+        return _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
     try:
         while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
             remaining = deadline - time.monotonic()
@@ -189,14 +196,15 @@ def _wait_for_exit(
                 raise subprocess.TimeoutExpired(process.args, timeout)
             time.sleep(min(remaining, 0.01))
     except ChildProcessError:
-        return  # Already reaped elsewhere; Popen.wait reports this as exit status 0.
+        return False
     except OSError as exc:
         raise CaptureError(f"could not observe {label} process exit") from exc
+    return True
 
 
 def _wait_for_exit_kqueue(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> None:
+) -> bool:
     """Older macOS Python exposes non-reaping process observation through kqueue."""
 
     if sys.platform != "darwin" or not hasattr(select, "kqueue"):
@@ -205,6 +213,12 @@ def _wait_for_exit_kqueue(
         _observe_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
     except OSError as exc:
         raise CaptureError(f"could not observe {label} process exit") from exc
+    # kqueue cannot tell an unreaped zombie from a leader reaped elsewhere; libproc lists
+    # zombies, so an absent leader was reaped. An unlistable group keeps the usual path.
+    try:
+        return process.pid in _darwin_group_members(process.pid)
+    except Exception:
+        return True
 
 
 def _observe_exit_kqueue(

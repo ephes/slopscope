@@ -194,10 +194,11 @@ def test_capture_restores_previous_sigterm_handler(
         "exit": SystemExit(9),
     }
 
-    def observe(*args: object, **kwargs: object) -> None:
+    def observe(*args: object, **kwargs: object) -> bool:
         assert signal.getsignal(signal.SIGTERM) is not previous_handler
         if outcome in errors:
             raise errors[outcome]
+        return True  # The exited leader still reserves its identity.
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
@@ -229,10 +230,11 @@ def test_repeated_sigterm_does_not_interrupt_cleanup(
         assert callable(handler)
         handler(signal.SIGTERM, None)
 
-    def observe(*args: object, **kwargs: object) -> None:
+    def observe(*args: object, **kwargs: object) -> bool:
         if during_cleanup:
             raise subprocess.TimeoutExpired("synthetic", 1)
         request_term()
+        return True
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     kill_group = Mock(side_effect=request_term)
@@ -421,9 +423,10 @@ def test_auto_reaped_leader_still_retires_lingering_descendants(
             start_new_session=True,
         )
         try:
-            result = _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
-            # The kernel reaped the leader; its surviving member still reserved the group,
-            # so the capture retired it before returning.
+            # The kernel reaped the leader, so its real exit status is unknown: refuse it.
+            with pytest.raises(_capture.CaptureError, match="could not observe synthetic exit"):
+                _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+            # The surviving member still reserved the group, so it was retired first.
             with pytest.raises(ProcessLookupError):
                 os.killpg(process.pid, 0)
         finally:
@@ -431,7 +434,41 @@ def test_auto_reaped_leader_still_retires_lingering_descendants(
                 os.killpg(process.pid, signal.SIGKILL)  # Cleanup only if the test failed.
     finally:
         signal.signal(signal.SIGCHLD, previous)
-    assert result.returncode == 0
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX auto-reap semantics")
+@pytest.mark.parametrize("observer", ["waitid", "kqueue"])
+def test_auto_reaped_leader_without_members_is_never_signalled(
+    monkeypatch: pytest.MonkeyPatch, observer: str
+) -> None:
+    if observer == "kqueue":
+        if not hasattr(select, "kqueue"):
+            pytest.skip("macOS kqueue observation")
+        monkeypatch.delattr(os, "waitid", raising=False)
+    elif not hasattr(os, "waitid"):
+        pytest.skip("waitid unavailable")
+    killpg = os.killpg
+    sent: list[int] = []
+
+    def signal_group(pid: int, sig: int) -> None:
+        sent.append(sig)
+        killpg(pid, sig)
+
+    previous = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", "raise SystemExit(7)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        monkeypatch.setattr(os, "killpg", signal_group)
+        # Exit 7 is lost to the auto-reap; it must not turn into an accepted status 0.
+        with pytest.raises(_capture.CaptureError, match="could not observe synthetic exit"):
+            _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+    finally:
+        signal.signal(signal.SIGCHLD, previous)
+    assert set(sent) <= {0}  # The released identity only ever sees absence probes.
 
 
 def test_unobservable_exit_is_bounded_capture_error(monkeypatch: pytest.MonkeyPatch) -> None:
