@@ -8,6 +8,20 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Handle supervisor SIGTERM during POSIX main-thread Git/cloc capture through bounded
+  owned-tree cleanup, then exit 143. Restore the prior handler on all outcomes and keep
+  repeated TERM from interrupting cleanup; worker-thread captures and an ignored SIGTERM
+  leave signal policy alone.
+
+- Keep captured POSIX command leaders unreaped through the final process-group termination
+  attempt using public waitid/WNOWAIT or kqueue observation. After reap, only harmless absence probes
+  are allowed; post-reap cleanup errors never trigger signals against a reusable identity.
+  On macOS and Linux the TERM grace ends once only the exited leader remains, so captures
+  without lingering descendants do not pay the fixed 0.2-second wait. A leader already reaped
+  elsewhere (inherited SIGCHLD=SIG_IGN) yields a bounded capture error instead of an invented
+  status 0, after retiring positively listed surviving group members (never signalling an
+  observed released ID otherwise); other exit-observation failures are bounded capture errors.
+
 - Escape nonprinting terminal controls in plain/Rich reports and CLI diagnostics, including
   paths, project/profile labels, measured units, and errors. JSON and stored identities remain
   exact; printable Unicode and literal Rich brackets remain readable.

@@ -175,10 +175,41 @@ filesystem fallback. Successful Git output remains NUL-delimited, preserving unu
 On POSIX, captured cloc and Git commands retire their owned process group after successful
 and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows
 0.2 seconds after TERM and 0.8 seconds after KILL; unconfirmed cleanup returns a bounded
-error instead of accepting the result. A transient permission error while signalling or
-probing the group is retried within the same deadline. Confirmed cleanup preserves the wrapper's return code
+error instead of accepting the result. Transient permission errors during TERM or absence
+probing are retried within the same deadline. Confirmed cleanup preserves the wrapper's return code
 and captured output. Descendants that leave the owned group are outside this guarantee;
 Windows tree termination remains best-effort.
+
+POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process observation
+(including older macOS Python without `waitid`). The exited leader stays unreaped
+until the last TERM/KILL attempt, reserving its process-group identity. On macOS (libproc)
+and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
+capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
+Where group membership cannot be listed, the full TERM grace applies. If the leader was
+already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`), its exit
+status is lost and the capture fails with a bounded error instead of accepting status 0.
+Before failing, a group whose other members are positively listed (macOS libproc, Linux
+`/proc`) is retired with the same TERM/KILL sequence, because surviving members keep the group
+ID reserved. Each TERM/KILL send then requires a fresh positive listing; an empty or unlistable group only
+gets absence probes, and once the reaped leader has been observed, an interrupted or failed
+cleanup never signals the released ID. Residual races remain in this reaped-elsewhere case: if
+the last member exits between a listing and a signal and the ID is reused at once, that signal
+could reach the new group; and if the leader is reaped before its exit is observed (while
+output is still being read) and the capture then fails or is interrupted, the failure cleanup
+still sends KILL to the group as before. The kqueue fallback detects a reaped
+leader through libproc and treats an unconfirmed leader as reaped (fail closed).
+Other exit-observation failures are also bounded capture errors. After reaping,
+cleanup only checks absence with signal 0 (which sends no signal); it never sends another
+terminating signal to a potentially reused identity. macOS may refuse signals to a
+zombie-only group: this is accepted only when the subsequent absence check succeeds.
+An extant or uninspectable group still refuses the result within the cleanup deadline.
+
+During POSIX main-thread capture, supervisor SIGTERM runs the same bounded owned-tree
+cleanup and exits with status 143 (`128 + SIGTERM`), without accepting partial output.
+Repeated TERM during cleanup does not interrupt draining or reaping. The previous SIGTERM
+handler is restored on every outcome. An ignored SIGTERM (`SIG_IGN`) or a handler not
+installed from Python is left unchanged. Library captures in worker threads leave the
+application's signal handlers unchanged; Windows retains its existing signal policy.
 
 Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
 stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.

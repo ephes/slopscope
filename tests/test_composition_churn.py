@@ -336,7 +336,7 @@ def test_interrupted_git_kills_group_and_reaps(
     process.pid = 12345
     process.stdout = io.BytesIO()
     process.stderr = io.BytesIO()
-    process.wait.side_effect = [KeyboardInterrupt, 0]
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(side_effect=KeyboardInterrupt))
     group_kill = Mock()
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
@@ -441,7 +441,9 @@ def test_git_timeout_drain_propagates_interruption(
 
     process = Mock(pid=12345, stdout=io.BytesIO(), stderr=io.BytesIO())
     interrupted = interruption("interrupted drain")
-    process.wait.side_effect = [subprocess.TimeoutExpired("git", 30), 0]
+    monkeypatch.setattr(
+        _capture, "_wait_for_exit", Mock(side_effect=subprocess.TimeoutExpired("git", 30))
+    )
 
     def interrupt_join(self: threading.Thread, timeout: float | None = None) -> None:
         raise interrupted
