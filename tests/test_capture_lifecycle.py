@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import select
@@ -98,6 +99,8 @@ def test_reused_group_is_only_probed_and_refused(
 
     process.wait.side_effect = reap
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=signal_group))
+    # Fake PIDs: keep membership unknown so the probe semantics stay under test.
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid: True)
     monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 0.01)
     monkeypatch.setattr(_capture, "_GROUP_KILL_SECONDS", 0.01)
@@ -305,3 +308,79 @@ def test_kqueue_observes_exit_without_reaping(
     monkeypatch.setattr(os, "killpg", signal_group)
     result = _capture.capture_process(process, timeout=3, max_bytes=100, label="synthetic")
     assert result.returncode == 0 and waited
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" or sys.platform.startswith("linux")),
+    reason="group membership listing is implemented for macOS and Linux",
+)
+def test_leader_only_group_skips_term_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 5.0)
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    started = time.monotonic()
+    result = _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+    assert result.returncode == 0
+    assert time.monotonic() - started < 2.5
+
+
+@pytest.mark.skipif(
+    not (sys.platform == "darwin" or sys.platform.startswith("linux")),
+    reason="group membership listing is implemented for macOS and Linux",
+)
+def test_group_membership_reports_redirected_descendant_until_it_exits() -> None:
+    import time
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import subprocess,sys; subprocess.Popen([sys.executable, '-c', "
+            "'import time; time.sleep(30)'], stdout=subprocess.DEVNULL, "
+            "stderr=subprocess.DEVNULL)",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        process.communicate(timeout=10)
+        assert _capture._group_has_other_members(process.pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while _capture._group_has_other_members(process.pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert not _capture._group_has_other_members(process.pid)
+
+
+def test_group_membership_is_unknown_when_listing_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    failing = Mock(side_effect=OSError("listing failed"))
+    monkeypatch.setattr(_capture, "_darwin_group_members", failing)
+    monkeypatch.setattr(_capture, "_linux_group_members", failing)
+    for platform in ("darwin", "linux", "freebsd14"):
+        monkeypatch.setattr(sys, "platform", platform)
+        assert _capture._group_has_other_members(4242)
+
+
+def test_linux_group_members_parse_proc_stat(tmp_path: Path) -> None:
+    entries = {
+        "100": b"100 (leader) Z 1 100 100 0",
+        "101": b"101 (odd ) name) S 1 100 100 0",
+        "102": b"102 (other) S 1 555 555 0",
+        "self": b"ignored",
+    }
+    for name, stat in entries.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "stat").write_bytes(stat)
+    (tmp_path / "103").mkdir()  # Exited between listing and reading.
+    assert sorted(_capture._linux_group_members(100, str(tmp_path))) == [100, 101]

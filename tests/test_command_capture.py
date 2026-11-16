@@ -326,6 +326,8 @@ def test_unconfirmed_group_cleanup_is_bounded_domain_error(
         side_effect=PermissionError("private detail") if failure == "permission" else None
     )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    # Fake PIDs: keep membership unknown so the probe semantics stay under test.
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid: True)
     monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     monkeypatch.setattr(_capture, "_GROUP_TERM_SECONDS", 0.01)
     monkeypatch.setattr(_capture, "_GROUP_KILL_SECONDS", 0.01)
@@ -356,6 +358,8 @@ def test_group_cleanup_retries_transient_probe_permission_error(
         side_effect=[None, PermissionError("transient"), ProcessLookupError(), ProcessLookupError()]
     )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    # Fake PIDs: keep membership unknown so the probe semantics stay under test.
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid: True)
     monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert result.returncode == 7 and result.stdout == b"output"
@@ -383,6 +387,8 @@ def test_group_cleanup_retries_transient_signal_permission_error(
         side_effect=[PermissionError("transient"), None, ProcessLookupError(), ProcessLookupError()]
     )
     monkeypatch.setattr(_capture, "os", SimpleNamespace(name="posix", killpg=group_kill))
+    # Fake PIDs: keep membership unknown so the probe semantics stay under test.
+    monkeypatch.setattr(_capture, "_group_has_other_members", lambda pgid: True)
     monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
     assert result.returncode == 0 and result.stdout == b"output"

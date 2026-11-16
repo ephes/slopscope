@@ -182,7 +182,10 @@ Windows tree termination remains best-effort.
 
 POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process observation
 (including older macOS Python without `waitid`). The exited leader stays unreaped
-until the last TERM/KILL attempt, reserving its process-group identity. After reaping,
+until the last TERM/KILL attempt, reserving its process-group identity. On macOS (libproc)
+and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
+capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
+Where group membership cannot be listed, the full TERM grace applies. After reaping,
 cleanup only checks absence with signal 0 (which sends no signal); it never sends another
 terminating signal to a potentially reused identity. macOS may refuse signals to a
 zombie-only group: this is accepted only when the subsequent absence check succeeds.

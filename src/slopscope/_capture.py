@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import errno
+import functools
 import io
 import os
 import select
@@ -13,7 +15,7 @@ import sys
 import threading
 import time
 from types import FrameType
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 _CAPTURE_CHUNK_BYTES = 64 * 1024
 _GROUP_TERM_SECONDS = 0.2
@@ -89,8 +91,12 @@ def capture_process(
     # Python permits handler installation only in the main thread. CLI captures
     # own this scoped handler; library calls in other threads leave it untouched.
     handle_sigterm = os.name == "posix" and threading.current_thread() is threading.main_thread()
-    previous_handler = signal.signal(signal.SIGTERM, terminate) if handle_sigterm else None
+    # Read the prior handler first and install inside ``try``: a TERM arriving right after
+    # installation then still reaches owned-tree cleanup and the handler restore below.
+    previous_handler = signal.getsignal(signal.SIGTERM) if handle_sigterm else None
     try:
+        if previous_handler is not None:
+            signal.signal(signal.SIGTERM, terminate)
         for thread in threads:
             thread.start()
             started.append(thread)
@@ -112,6 +118,8 @@ def capture_process(
         if cleanup_deadline is not None:
             _confirm_group_exit(process, deadline=cleanup_deadline, label=label)
     except BaseException:
+        # First statement of the handler block: CPython runs Python signal handlers only at
+        # eval-breaker checks, so a repeated TERM after this point is recorded, not raised.
         cleaning = True
         stopped.set()
         if not retired and os.name == "posix":
@@ -236,6 +244,10 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | No
                     if sig == signal.SIGKILL:
                         return deadline
                     pending = 0
+                if sig == signal.SIGTERM and not _group_has_other_members(process.pid):
+                    # Only the exited, unreaped leader remains: no member can use the TERM
+                    # grace. The KILL attempt below still runs before the caller reaps.
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
@@ -243,6 +255,70 @@ def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | No
     except OSError as exc:
         raise CaptureError(f"could not confirm {label} process-group cleanup") from exc
     return deadline
+
+
+_PROC_PGRP_ONLY = 2  # <sys/proc_info.h>: proc_listpids filter by process group.
+
+
+def _group_has_other_members(pgid: int) -> bool:
+    """Whether a process besides the leader may still belong to group ``pgid``.
+
+    Listing failures and unsupported platforms answer True, keeping the full TERM grace.
+    """
+
+    try:
+        if sys.platform == "darwin":
+            members = _darwin_group_members(pgid)
+        elif sys.platform.startswith("linux"):
+            members = _linux_group_members(pgid)
+        else:
+            return True
+    except Exception:
+        return True
+    return any(pid != pgid for pid in members)
+
+
+@functools.cache
+def _darwin_proc_listpids() -> Any:
+    import ctypes.util
+
+    library = ctypes.util.find_library("proc")
+    if library is None:
+        raise OSError("libproc is unavailable")
+    proc_listpids = ctypes.CDLL(library, use_errno=True).proc_listpids
+    proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+    proc_listpids.restype = ctypes.c_int
+    return proc_listpids
+
+
+def _darwin_group_members(pgid: int) -> list[int]:
+    proc_listpids = _darwin_proc_listpids()
+    capacity = 64
+    while True:
+        buffer = (ctypes.c_int * capacity)()
+        filled = proc_listpids(_PROC_PGRP_ONLY, pgid, buffer, ctypes.sizeof(buffer))
+        if filled < 0:
+            raise OSError(ctypes.get_errno(), "proc_listpids failed")
+        count = filled // ctypes.sizeof(ctypes.c_int)
+        if count < capacity:
+            return [pid for pid in buffer[:count] if pid > 0]
+        capacity *= 2  # A full buffer may be truncated; list again with more room.
+
+
+def _linux_group_members(pgid: int, proc_root: str = "/proc") -> list[int]:
+    members = []
+    for entry in os.listdir(proc_root):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc_root, entry, "stat"), "rb") as stat:
+                data = stat.read()
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # Exited (and reaped) since the directory listing.
+        # Fields after the parenthesized command name: state, ppid, pgrp, ...
+        if int(data[data.rindex(b")") + 2 :].split()[2]) == pgid:
+            members.append(int(entry))
+    return members
 
 
 def _confirm_group_exit(process: subprocess.Popen[bytes], *, deadline: float, label: str) -> None:
