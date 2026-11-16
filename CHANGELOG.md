@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound macOS/Linux capture-group inspection by the cleanup deadline and a 65,536-entry
+  ceiling, streaming Linux `/proc` with bounded stat reads. Incomplete listings remain
+  unknown evidence, preserving final signalling before reap and refusing unconfirmed cleanup.
+
 - Handle supervisor SIGTERM during POSIX main-thread Git/cloc capture through bounded
   owned-tree cleanup, then exit 143. Restore the prior handler on all outcomes and keep
   repeated TERM from interrupting cleanup; worker-thread captures and an ignored SIGTERM

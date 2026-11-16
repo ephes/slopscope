@@ -20,6 +20,8 @@ from typing import Any, BinaryIO
 _CAPTURE_CHUNK_BYTES = 64 * 1024
 _GROUP_TERM_SECONDS = 0.2
 _GROUP_KILL_SECONDS = 0.8
+_MAX_GROUP_INSPECTION_ENTRIES = 65_536
+_MAX_PROC_STAT_BYTES = 4096
 
 
 class CaptureError(RuntimeError):
@@ -119,7 +121,9 @@ def capture_process(
         # path must not signal it. Only positively listed surviving members (which keep
         # the group ID reserved) are still retired.
         retired = not reserved
-        if reserved or _group_has_other_members(process.pid, unknown=False):
+        if reserved or _group_has_other_members(
+            process.pid, deadline=time.monotonic() + _GROUP_TERM_SECONDS, unknown=False
+        ):
             cleanup_deadline = _retire_group(process, label=label, reserved=reserved)
         else:
             cleanup_deadline = time.monotonic() + _GROUP_KILL_SECONDS
@@ -219,7 +223,7 @@ def _wait_for_exit_kqueue(
     # zombies, so an absent leader was reaped. Unconfirmed presence fails closed: the
     # identity is treated as released, never signalled, and its status is refused.
     try:
-        return process.pid in _darwin_group_members(process.pid)
+        return process.pid in _darwin_group_members(process.pid, deadline=deadline)
     except Exception:
         return False
 
@@ -273,7 +277,7 @@ def _retire_group(
                 if (
                     pending
                     and not reserved
-                    and not _group_has_other_members(process.pid, unknown=False)
+                    and not _group_has_other_members(process.pid, deadline=deadline, unknown=False)
                 ):
                     return deadline  # Released and empty: nothing may be signalled.
                 try:
@@ -297,7 +301,9 @@ def _retire_group(
                     if sig == signal.SIGKILL:
                         return deadline
                     pending = 0
-                if sig == signal.SIGTERM and not _group_has_other_members(process.pid):
+                if sig == signal.SIGTERM and not _group_has_other_members(
+                    process.pid, deadline=deadline
+                ):
                     # Only the exited, unreaped leader remains: no member can use the TERM
                     # grace. The KILL attempt below still runs before the caller reaps.
                     break
@@ -313,18 +319,20 @@ def _retire_group(
 _PROC_PGRP_ONLY = 2  # <sys/proc_info.h>: proc_listpids filter by process group.
 
 
-def _group_has_other_members(pgid: int, *, unknown: bool = True) -> bool:
+def _group_has_other_members(
+    pgid: int, *, deadline: float | None = None, unknown: bool = True
+) -> bool:
     """Whether a process besides the leader still belongs to group ``pgid``.
 
-    Listing failures and unsupported platforms answer ``unknown``: True by default,
-    keeping the full TERM grace.
+    Failed, truncated, expired and unsupported inspections answer ``unknown``:
+    True keeps the TERM grace; False refuses authority to signal a released ID.
     """
 
     try:
         if sys.platform == "darwin":
-            members = _darwin_group_members(pgid)
+            members = _darwin_group_members(pgid, deadline=deadline)
         elif sys.platform.startswith("linux"):
-            members = _linux_group_members(pgid)
+            members = _linux_group_members(pgid, deadline=deadline)
         else:
             return unknown
     except Exception:
@@ -345,33 +353,59 @@ def _darwin_proc_listpids() -> Any:
     return proc_listpids
 
 
-def _darwin_group_members(pgid: int) -> list[int]:
+def _inspection_time_remaining(deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise OSError("process-group inspection deadline exceeded")
+
+
+def _darwin_group_members(pgid: int, *, deadline: float | None = None) -> list[int]:
+    if deadline is None:
+        deadline = time.monotonic() + _GROUP_TERM_SECONDS
+    _inspection_time_remaining(deadline)
     proc_listpids = _darwin_proc_listpids()
-    capacity = 64
+    capacity = min(64, _MAX_GROUP_INSPECTION_ENTRIES)
     while True:
+        _inspection_time_remaining(deadline)
         buffer = (ctypes.c_int * capacity)()
         filled = proc_listpids(_PROC_PGRP_ONLY, pgid, buffer, ctypes.sizeof(buffer))
+        _inspection_time_remaining(deadline)
         if filled < 0:
             raise OSError(ctypes.get_errno(), "proc_listpids failed")
         count = filled // ctypes.sizeof(ctypes.c_int)
         if count < capacity:
             return [pid for pid in buffer[:count] if pid > 0]
-        capacity *= 2  # A full buffer may be truncated; list again with more room.
+        if capacity >= _MAX_GROUP_INSPECTION_ENTRIES:
+            raise OSError("process-group inspection entry limit exceeded")
+        # A full buffer may be truncated, including at the ceiling: never return it.
+        capacity = min(capacity * 2, _MAX_GROUP_INSPECTION_ENTRIES)
 
 
-def _linux_group_members(pgid: int, proc_root: str = "/proc") -> list[int]:
+def _linux_group_members(
+    pgid: int, proc_root: str = "/proc", *, deadline: float | None = None
+) -> list[int]:
+    if deadline is None:
+        deadline = time.monotonic() + _GROUP_TERM_SECONDS
+    _inspection_time_remaining(deadline)
     members = []
-    for entry in os.listdir(proc_root):
-        if not entry.isdigit():
-            continue
-        try:
-            with open(os.path.join(proc_root, entry, "stat"), "rb") as stat:
-                data = stat.read()
-        except (FileNotFoundError, ProcessLookupError):
-            continue  # Exited (and reaped) since the directory listing.
-        # Fields after the parenthesized command name: state, ppid, pgrp, ...
-        if int(data[data.rindex(b")") + 2 :].split()[2]) == pgid:
-            members.append(int(entry))
+    with os.scandir(proc_root) as entries:
+        for index, entry in enumerate(entries):
+            _inspection_time_remaining(deadline)
+            if index >= _MAX_GROUP_INSPECTION_ENTRIES:
+                raise OSError("process-group inspection entry limit exceeded")
+            if not entry.name.isdigit():
+                continue
+            try:
+                with open(os.path.join(proc_root, entry.name, "stat"), "rb") as stat:
+                    data = stat.read(_MAX_PROC_STAT_BYTES + 1)
+            except (FileNotFoundError, ProcessLookupError):
+                continue  # Exited (and reaped) since the directory listing.
+            _inspection_time_remaining(deadline)
+            if len(data) > _MAX_PROC_STAT_BYTES:
+                raise OSError("process-group inspection stat byte limit exceeded")
+            # Fields after the parenthesized command name: state, ppid, pgrp, ...
+            if int(data[data.rindex(b")") + 2 :].split()[2]) == pgid:
+                members.append(int(entry.name))
+    _inspection_time_remaining(deadline)
     return members
 
 

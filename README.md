@@ -185,7 +185,14 @@ POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process obser
 until the last TERM/KILL attempt, reserving its process-group identity. On macOS (libproc)
 and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
 capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
-Where group membership cannot be listed, the full TERM grace applies. If the leader was
+Membership inspection shares the current cleanup deadline and retains at most 65,536 entries.
+macOS libproc buffers stop growing at that ceiling; Linux streams at most 65,536 `/proc`
+directory entries (plus one overflow probe) and reads at most 4 KiB per process stat file
+(plus one overflow byte). Deadlines are checked between bounded OS calls; a single OS call
+itself cannot be interrupted. Expired, oversized, truncated, failed, or unsupported listings
+are unknown evidence, never proof of absence or permission to signal a released identity.
+Where membership is unknown, the remaining TERM grace applies; the final safe KILL attempt
+still precedes reaping the reserved leader. If the leader was
 already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`), its exit
 status is lost and the capture fails with a bounded error instead of accepting status 0.
 Before failing, a group whose other members are positively listed (macOS libproc, Linux
