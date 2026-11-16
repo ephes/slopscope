@@ -180,12 +180,19 @@ probing are retried within the same deadline. Confirmed cleanup preserves the wr
 and captured output. Descendants that leave the owned group are outside this guarantee;
 Windows tree termination remains best-effort.
 
-POSIX capture requires public `waitid`/`WNOWAIT` support. The exited leader stays unreaped
+POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process observation
+(including older macOS Python without `waitid`). The exited leader stays unreaped
 until the last TERM/KILL attempt, reserving its process-group identity. After reaping,
 cleanup only checks absence with signal 0 (which sends no signal); it never sends another
 terminating signal to a potentially reused identity. macOS may refuse signals to a
 zombie-only group: this is accepted only when the subsequent absence check succeeds.
 An extant or uninspectable group still refuses the result within the cleanup deadline.
+
+During POSIX main-thread capture, supervisor SIGTERM runs the same bounded owned-tree
+cleanup and exits with status 143 (`128 + SIGTERM`), without accepting partial output.
+Repeated TERM during cleanup does not interrupt draining or reaping. The previous SIGTERM
+handler is restored on every outcome. Library captures in worker threads leave the
+application's signal handlers unchanged; Windows retains its existing signal policy.
 
 Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
 stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.

@@ -217,6 +217,7 @@ def test_reader_exception_never_publishes_partial_output(
     monkeypatch.setattr(
         _capture, "os", SimpleNamespace(name="posix", killpg=Mock(side_effect=ProcessLookupError))
     )
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock())
     result = churn.collect_churn(tmp_path, excluded_paths=(), today=date(2026, 3, 20))
     assert result.status == "skipped"
     assert result.reason == "could not read git output"

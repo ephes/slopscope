@@ -8,8 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Handle supervisor SIGTERM during POSIX main-thread Git/cloc capture through bounded
+  owned-tree cleanup, then exit 143. Restore the prior handler on all outcomes and keep
+  repeated TERM from interrupting cleanup; worker-thread captures leave signal policy alone.
+
 - Keep captured POSIX command leaders unreaped through the final process-group termination
-  attempt using public waitid/WNOWAIT observation. After reap, only harmless absence probes
+  attempt using public waitid/WNOWAIT or kqueue observation. After reap, only harmless absence probes
   are allowed; cleanup errors never trigger signals against a reusable process identity.
 
 - Escape nonprinting terminal controls in plain/Rich reports and CLI diagnostics, including

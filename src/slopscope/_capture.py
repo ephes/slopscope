@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import os
+import select
 import signal
 import subprocess
+import sys
 import threading
 import time
+from types import FrameType
 from typing import BinaryIO
 
 _CAPTURE_CHUNK_BYTES = 64 * 1024
@@ -72,6 +76,20 @@ def capture_process(
     started: list[threading.Thread] = []
     deadline = time.monotonic() + timeout
     retired = False
+    cleaning = False
+    termination_requested: int | None = None
+
+    def terminate(signum: int, frame: FrameType | None) -> None:
+        nonlocal cleaning, termination_requested
+        termination_requested = signum
+        if not cleaning:
+            cleaning = True
+            raise SystemExit(128 + signum)
+
+    # Python permits handler installation only in the main thread. CLI captures
+    # own this scoped handler; library calls in other threads leave it untouched.
+    handle_sigterm = os.name == "posix" and threading.current_thread() is threading.main_thread()
+    previous_handler = signal.signal(signal.SIGTERM, terminate) if handle_sigterm else None
     try:
         for thread in threads:
             thread.start()
@@ -94,6 +112,7 @@ def capture_process(
         if cleanup_deadline is not None:
             _confirm_group_exit(process, deadline=cleanup_deadline, label=label)
     except BaseException:
+        cleaning = True
         stopped.set()
         if not retired and os.name == "posix":
             # Kill the group even if the wrapper has exited but a child still owns its pipes.
@@ -120,6 +139,13 @@ def capture_process(
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=5)
         raise
+    finally:
+        if previous_handler is not None:
+            signal.signal(signal.SIGTERM, previous_handler)
+        if termination_requested is not None:
+            # A repeated TERM during cleanup records intent without interrupting
+            # escalation, draining, or reap, including cleanup of another failure.
+            raise SystemExit(128 + termination_requested)
     return subprocess.CompletedProcess(
         process.args, process.returncode, bytes(buffers[0]), bytes(buffers[1])
     )
@@ -137,12 +163,35 @@ def _wait_for_exit(
     if waitid is None or not all(
         hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
     ):
-        raise CaptureError(f"{label} capture requires POSIX waitid with WNOWAIT")
+        _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
+        return
     while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise subprocess.TimeoutExpired(process.args, timeout)
         time.sleep(min(remaining, 0.01))
+
+
+def _wait_for_exit_kqueue(
+    process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
+) -> None:
+    """Older macOS Python exposes non-reaping process observation through kqueue."""
+
+    if sys.platform != "darwin" or not hasattr(select, "kqueue"):
+        raise CaptureError(f"{label} capture requires waitid/WNOWAIT or kqueue process observation")
+    with contextlib.closing(select.kqueue()) as queue:
+        event = select.kevent(
+            process.pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        events = queue.control([event], 1, max(0, deadline - time.monotonic()))
+        if not events:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        # Registration against an already exited, unreaped child reports ESRCH.
+        if events[0].flags & select.KQ_EV_ERROR and events[0].data != errno.ESRCH:
+            raise CaptureError(f"could not observe {label} process exit")
 
 
 def _retire_group(process: subprocess.Popen[bytes], *, label: str) -> float | None:
