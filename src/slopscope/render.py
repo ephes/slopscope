@@ -7,6 +7,7 @@ import io
 import json
 from typing import Any, Literal
 
+from slopscope._display import display_text
 from slopscope.report import (
     AreaRow,
     DirectoryRow,
@@ -55,7 +56,7 @@ def render_plain(report: RenderableReport) -> str:
 
     lines = [
         "Slopscope Report",
-        f"Path: {report.path}",
+        f"Path: {display_text(report.path)}",
         f"Engine: {_engine_label(report.engine)}",
         "",
     ]
@@ -151,6 +152,8 @@ def render_rich(report: RenderableReport, *, color: bool = True) -> str:
         color_system="standard",
         width=100,
         legacy_windows=False,
+        markup=False,
+        emoji=False,
     )
 
     if isinstance(report, MultiProjectReport):
@@ -167,19 +170,23 @@ def render_rich(report: RenderableReport, *, color: bool = True) -> str:
             _print_rich_skipped_projects(console, table_class, report.skipped_projects)
         for project_report in report.projects:
             console.print()
-            console.print(text_class(f"Project: {project_report.name}", style="bold blue"))
-            console.print(text_class(f"Path: {project_report.report.path}", style="dim"))
+            console.print(
+                text_class(f"Project: {display_text(project_report.name)}", style="bold blue")
+            )
+            console.print(
+                text_class(f"Path: {display_text(project_report.report.path)}", style="dim")
+            )
             _print_rich_repository_sections(console, table_class, project_report.report)
         return buffer.getvalue()
 
-    console.print(text_class(f"Path: {report.path}", style="dim"))
+    console.print(text_class(f"Path: {display_text(report.path)}", style="dim"))
     if isinstance(report, ProfileTotalReport):
-        console.print(text_class(f"Profile: {report.profile}", style="dim"))
+        console.print(text_class(f"Profile: {display_text(report.profile)}", style="dim"))
         console.print(text_class(f"Total: {report.total}", style="green"))
         return buffer.getvalue()
     if isinstance(report, GroupedProfileReport):
-        console.print(text_class(f"Profile: {report.profile}", style="dim"))
-        console.print(text_class(f"Group: {report.group_by}", style="dim"))
+        console.print(text_class(f"Profile: {display_text(report.profile)}", style="dim"))
+        console.print(text_class(f"Group: {display_text(report.group_by)}", style="dim"))
         console.print(text_class(f"Top: {_top_label(report.top)}", style="dim"))
         console.print(text_class(f"Total: {report.total}", style="green"))
         console.print()
@@ -196,9 +203,9 @@ def render_profile_total_plain(report: ProfileTotalReport) -> str:
     return "\n".join(
         [
             "Slopscope Profile",
-            f"Path: {report.path}",
+            f"Path: {display_text(report.path)}",
             f"Engine: {_engine_label(report.engine)}",
-            f"Profile: {report.profile}",
+            f"Profile: {display_text(report.profile)}",
             f"Total: {report.total}",
             "",
         ]
@@ -210,10 +217,10 @@ def render_grouped_profile_plain(report: GroupedProfileReport) -> str:
 
     lines = [
         "Slopscope Profile",
-        f"Path: {report.path}",
+        f"Path: {display_text(report.path)}",
         f"Engine: {_engine_label(report.engine)}",
-        f"Profile: {report.profile}",
-        f"Group: {report.group_by}",
+        f"Profile: {display_text(report.profile)}",
+        f"Group: {display_text(report.group_by)}",
         f"Top: {_top_label(report.top)}",
         f"Total: {report.total}",
         "",
@@ -241,7 +248,7 @@ def render_multi_project_plain(report: MultiProjectReport) -> str:
         lines.append("(no project reports)")
     for project_report in report.projects:
         lines.append("")
-        lines.append(f"Project: {project_report.name}")
+        lines.append(f"Project: {display_text(project_report.name)}")
         lines.append(render_plain(project_report.report).rstrip())
     lines.append("")
     return "\n".join(lines)
@@ -259,7 +266,8 @@ def _render_language_summary(rows: tuple[LanguageRow, ...]) -> list[str]:
 
     for row in rows:
         lines.append(
-            f"{row.language:<16} {row.files:>5} {row.blank:>8} {row.comment:>8} {row.code:>8}"
+            f"{display_text(row.language):<16} {row.files:>5} {row.blank:>8} "
+            f"{row.comment:>8} {row.code:>8}"
         )
     return lines
 
@@ -297,7 +305,7 @@ def _render_named_rows(
         return lines
 
     for row in rows:
-        lines.append(f"{row.name:<24} {row.files:>5} {row.code:>8}")
+        lines.append(f"{display_text(row.name):<24} {row.files:>5} {row.code:>8}")
     return lines
 
 
@@ -312,7 +320,7 @@ def _render_grouped_rows(rows: tuple[GroupedRow, ...]) -> list[str]:
         return lines
 
     for row in rows:
-        lines.append(f"{row.name:<24} {row.files:>5} {row.code:>8}")
+        lines.append(f"{display_text(row.name):<24} {row.files:>5} {row.code:>8}")
     return lines
 
 
@@ -329,10 +337,10 @@ def _render_project_snapshot(rows: tuple[ProjectSnapshotRow, ...]) -> list[str]:
     for row in rows:
         total = row.source_code + row.test_code
         lines.append(
-            f"{row.name:<16} {row.files:>5} {row.code:>8} "
+            f"{display_text(row.name):<16} {row.files:>5} {row.code:>8} "
             f"{row.source_code:>8} {row.test_code:>8} {_percent(row.test_code, total):>10}"
         )
-        lines.append(f"  Path: {row.path}")
+        lines.append(f"  Path: {display_text(row.path)}")
         lines.append(f"  Engine: {_engine_label(row.engine)}")
     return lines
 
@@ -344,7 +352,9 @@ def _render_skipped_projects(rows: tuple[SkippedProject, ...]) -> list[str]:
         "-----------------------------------------------------------------",
     ]
     for row in rows:
-        lines.append(f"{row.name:<16} {row.reason:<32} {row.path}")
+        lines.append(
+            f"{display_text(row.name):<16} {display_text(row.reason):<32} {display_text(row.path)}"
+        )
     return lines
 
 
@@ -361,7 +371,7 @@ def _percent(value: int, total: int) -> str:
 def _engine_label(engine: str) -> str:
     if engine == "python":
         return "python (physical lines)"
-    return engine
+    return display_text(engine)
 
 
 def _language_row_to_dict(row: LanguageRow) -> dict[str, int | str]:
@@ -441,7 +451,7 @@ def _print_rich_language_summary(
     if rows:
         for row in rows:
             table.add_row(
-                row.language,
+                display_text(row.language),
                 str(row.files),
                 str(row.blank),
                 str(row.comment),
@@ -491,7 +501,7 @@ def _print_rich_project_snapshot(
         for row in rows:
             total = row.source_code + row.test_code
             table.add_row(
-                row.name,
+                display_text(row.name),
                 str(row.files),
                 str(row.code),
                 str(row.source_code),
@@ -515,7 +525,7 @@ def _print_rich_skipped_projects(
     table.add_column("Path")
 
     for row in rows:
-        table.add_row(row.name, row.reason, str(row.path))
+        table.add_row(display_text(row.name), display_text(row.reason), display_text(row.path))
 
     console.print(table)
 
@@ -560,7 +570,7 @@ def _print_rich_named_rows(
 
     if rows:
         for row in rows:
-            table.add_row(row.name, str(row.files), str(row.code))
+            table.add_row(display_text(row.name), str(row.files), str(row.code))
     else:
         table.add_row("(no file-level rows)", "", "")
 
@@ -579,7 +589,7 @@ def _print_rich_grouped_rows(
 
     if rows:
         for row in rows:
-            table.add_row(row.name, str(row.files), str(row.code))
+            table.add_row(display_text(row.name), str(row.files), str(row.code))
     else:
         table.add_row("(no grouped rows)", "", "")
 

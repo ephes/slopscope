@@ -6,6 +6,7 @@ import io
 import json
 from typing import Any
 
+from slopscope._display import display_text
 from slopscope.render import OutputFormat, _load_rich
 from slopscope.report import (
     SIZE_LIMIT_KINDS,
@@ -142,7 +143,12 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
                 "Dropped Allowlist Entries",
                 ("Kind", "Was", "Reason", "Unit"),
                 [
-                    (_KIND_LABELS[entry.kind], _size(entry.recorded), entry.reason or "", entry.key)
+                    (
+                        _KIND_LABELS[entry.kind],
+                        _size(entry.recorded),
+                        display_text(entry.reason or ""),
+                        display_text(entry.key),
+                    )
                     for entry in report.dropped
                 ],
             )
@@ -163,7 +169,7 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
                         _size(entry.recorded),
                         _size(entry.size),
                         _delta(entry.delta),
-                        entry.key,
+                        display_text(entry.key),
                     )
                     for entry in report.grown
                 ],
@@ -177,7 +183,7 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
                         _size(entry.recorded),
                         _size(entry.size),
                         _delta(entry.delta),
-                        entry.key,
+                        display_text(entry.key),
                     )
                     for entry in report.shrunk
                 ],
@@ -190,8 +196,8 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
                         _KIND_LABELS[entry.kind],
                         _size(entry.recorded),
                         _size(entry.size),
-                        entry.reason or "",
-                        entry.key,
+                        display_text(entry.reason or ""),
+                        display_text(entry.key),
                     )
                     for entry in report.stale
                 ],
@@ -202,7 +208,7 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
 
 
 def _row(entry: SizeLimitEntry, first: int | None, second: int | None) -> tuple[str, ...]:
-    return (_KIND_LABELS[entry.kind], _size(first), _size(second), entry.key)
+    return (_KIND_LABELS[entry.kind], _size(first), _size(second), display_text(entry.key))
 
 
 def _header_lines(report: SizeLimitsReport) -> list[str]:
@@ -214,11 +220,11 @@ def _header_lines(report: SizeLimitsReport) -> list[str]:
         f"{count} {_KIND_PLURALS[kind]}"
         for kind, count in zip(SIZE_LIMIT_KINDS, report.units, strict=True)
     )
-    allowlist = str(report.allowlist_path)
+    allowlist = display_text(report.allowlist_path)
     if not report.allowlist_existed and report.action != SEED:
         allowlist += " (not found; nothing is allowlisted)"
     return [
-        f"Path: {report.path}",
+        f"Path: {display_text(report.path)}",
         f"Limits: {limits}",
         f"Allowlist: {allowlist}",
         f"Measured: {measured}",
@@ -238,13 +244,16 @@ def render_size_limits_plain(report: RenderableSizeLimitsReport) -> str:
     if isinstance(report, MultiProjectSizeLimitsReport):
         lines = ["Slopscope Size Limits (projects)", ""]
         for skipped in report.skipped_projects:
-            lines.append(f"Skipped project {skipped.name}: {skipped.reason} ({skipped.path})")
+            lines.append(
+                f"Skipped project {display_text(skipped.name)}: "
+                f"{display_text(skipped.reason)} ({display_text(skipped.path)})"
+            )
         if report.skipped_projects:
             lines.append("")
         if not report.projects:
             lines.append("(no project reports)")
         for project in report.projects:
-            lines.append(f"Project: {project.name}")
+            lines.append(f"Project: {display_text(project.name)}")
             lines.append(render_size_limits_plain(project.report).rstrip())
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
@@ -276,7 +285,10 @@ def render_size_limits_plain(report: RenderableSizeLimitsReport) -> str:
     if report.failures:
         lines.append("Failures (units in these files were not measured)")
         lines.append("-" * 60)
-        lines.extend(f"{failure.path}: {failure.error}" for failure in report.failures)
+        lines.extend(
+            f"{display_text(failure.path)}: {display_text(failure.error)}"
+            for failure in report.failures
+        )
         lines.append("")
     lines.append(_summary(report))
     lines.append(RENAME_NOTE)
@@ -310,13 +322,14 @@ def render_size_limits_rich(report: RenderableSizeLimitsReport, *, color: bool =
         for skipped in report.skipped_projects:
             console.print(
                 text_class(
-                    f"Skipped project {skipped.name}: {skipped.reason} ({skipped.path})",
+                    f"Skipped project {display_text(skipped.name)}: "
+                    f"{display_text(skipped.reason)} ({display_text(skipped.path)})",
                     style="yellow",
                 )
             )
         for project in report.projects:
             console.print()
-            console.print(text_class(f"Project: {project.name}", style="bold blue"))
+            console.print(text_class(f"Project: {display_text(project.name)}", style="bold blue"))
             _print_rich_report(console, table_class, text_class, project.report)
         return buffer.getvalue()
 
@@ -357,7 +370,7 @@ def _print_rich_report(
         table.add_column("Path", style="cyan")
         table.add_column("Error")
         for failure in report.failures:
-            table.add_row(failure.path, failure.error)
+            table.add_row(display_text(failure.path), display_text(failure.error))
         console.print(table)
     console.print()
     console.print(text_class(_summary(report), style="red" if report.check_failed else "green"))

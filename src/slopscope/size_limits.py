@@ -185,6 +185,13 @@ def _read_allowlist_bytes(
             content = handle.read(MAX_ALLOWLIST_BYTES + 1)
             if len(content) > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+            after = os.fstat(handle.fileno())
+            if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ):
+                raise SizeLimitsError(f"allowlist {path} changed during read")
         if destination is not None:
             _verify_destination(destination)
         return content
@@ -235,6 +242,30 @@ def load_allowlist(path: Path, *, destination: AllowlistDestination | None = Non
     return allowlist
 
 
+def _sync_directory(path: Path) -> None:
+    if not hasattr(os, "O_DIRECTORY"):
+        raise SizeLimitsError(
+            "allowlist publication requires directory synchronization (O_DIRECTORY)"
+        )
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _ensure_parent(parent: Path) -> None:
+    missing: list[Path] = []
+    current = parent
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    # Persist new ancestor names before publishing anything below them.
+    for directory in reversed(missing):
+        _sync_directory(directory.parent)
+
+
 def write_allowlist(
     path: Path,
     allowlist: Mapping[str, Mapping[str, int]],
@@ -250,7 +281,7 @@ def write_allowlist(
         if destination is None:
             _serialize_allowlist(path, allowlist)  # Admit before creating a missing parent.
             target = _resolve(path)
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_parent(target.parent)
             destination = _destination(path, target)
         publish_allowlists([(path, allowlist)], destinations={path: destination})
     except OSError as exc:
@@ -264,6 +295,7 @@ class _PreparedAllowlist:
     backup: Path | None
     installed_identity: tuple[int, int] | None = None
     keep_backup: bool = False
+    prior: bytes | None = None
 
 
 def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str) -> Path:
@@ -286,6 +318,16 @@ def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str)
         raise
 
 
+def _retain_backup(item: _PreparedAllowlist) -> None:
+    """Recreate evidence if an uncertain restore/retirement already consumed its name."""
+
+    if item.prior is not None and (item.backup is None or not item.backup.exists()):
+        item.backup = _stage_bytes(
+            item.destination.target, item.prior, item.destination.mode, suffix=".backup"
+        )
+        _sync_directory(item.destination.target.parent)
+
+
 def _serialize_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> bytes:
     data = {kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS}
     content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
@@ -301,14 +343,16 @@ def publish_allowlists(
 ) -> None:
     """Stage the set, then replace; compensate handled errors under the caller's locks.
 
-    This does not provide a transaction across process death. Failed compensation retains
-    a named sibling backup for manual recovery.
+    This does not provide a transaction across process death. Directory-sync uncertainty
+    leaves visible publication in place and retains recovery evidence. Failed compensation
+    also retains a named sibling backup for manual recovery.
     """
 
     # Admit the whole batch before staging any output or recovery copy.
     contents = [(path, _serialize_allowlist(path, data)) for path, data in updates]
     prepared: list[_PreparedAllowlist] = []
     replaced: list[_PreparedAllowlist] = []
+    durability_uncertain = False
     try:
         for path, content in contents:
             destination = destinations[path]
@@ -319,13 +363,15 @@ def publish_allowlists(
             item = _PreparedAllowlist(destination, temporary, None)
             prepared.append(item)
             prior = _read_allowlist_bytes(path, destination)
+            item.prior = prior
             if prior is not None:
                 item.backup = _stage_bytes(
                     destination.target, prior, destination.mode, suffix=".backup"
                 )
-        # No replacements before every project has a durable output and recovery copy.
+        # Persist recovery names before replacing any destination.
         for item in prepared:
             _verify_destination(item.destination)
+            _sync_directory(item.destination.target.parent)
         for item in prepared:
             _verify_destination(item.destination)
             item.installed_identity = _identity(item.temporary)
@@ -334,6 +380,16 @@ def publish_allowlists(
             item.keep_backup = True
             replaced.append(item)  # Include an interrupted rename whose outcome is uncertain.
             os.replace(item.temporary, item.destination.target)
+            durability_uncertain = True
+            _sync_directory(item.destination.target.parent)
+            durability_uncertain = False
+        # All target names are durable before any recovery evidence is retired.
+        durability_uncertain = True
+        for item in prepared:
+            if item.backup is not None:
+                item.backup.unlink()
+                _sync_directory(item.destination.target.parent)
+        durability_uncertain = False
         for item in prepared:
             item.keep_backup = False
     except BaseException as exc:
@@ -345,6 +401,8 @@ def publish_allowlists(
             item.keep_backup = True
             destination = item.destination
             try:
+                if durability_uncertain:
+                    raise SizeLimitsError("publication visible; durability unconfirmed")
                 # A rename may have been interrupted before it changed the target.
                 if _identity(destination.target) == destination.identity:
                     _verify_destination(destination)
@@ -358,8 +416,13 @@ def publish_allowlists(
                     destination.target.unlink()
                 else:
                     os.replace(item.backup, destination.target)
+                _sync_directory(destination.target.parent)
                 item.keep_backup = False
             except BaseException as recovery:
+                try:
+                    _retain_backup(item)
+                except BaseException as retention:
+                    recovery_errors.append(f"could not settle recovery evidence: {retention}")
                 evidence = (
                     f"restore from {item.backup}"
                     if item.backup is not None
@@ -368,7 +431,12 @@ def publish_allowlists(
                 recovery_errors.append(
                     f"{destination.path}: {type(recovery).__name__}: {recovery}; {evidence}"
                 )
-        details = "; compensation failed: " + "; ".join(recovery_errors) if recovery_errors else ""
+        label = (
+            "durability unconfirmed; recovery retained"
+            if durability_uncertain
+            else "compensation failed"
+        )
+        details = f"; {label}: " + "; ".join(recovery_errors) if recovery_errors else ""
         if isinstance(exc, OSError | SizeLimitsError):
             raise SizeLimitsError(f"could not publish allowlists: {exc}{details}") from exc
         if details:
@@ -396,7 +464,7 @@ def allowlist_locks(
             targets = {path: _resolve(path) for path in paths}
             parents = {}
             for target in sorted(set(targets.values())):
-                target.parent.mkdir(parents=True, exist_ok=True)
+                _ensure_parent(target.parent)
                 parents[target] = _identity(target.parent)
                 stack.enter_context(_allowlist_lock(target))
             destinations = {}

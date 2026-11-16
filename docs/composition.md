@@ -571,7 +571,10 @@ In JSON, `churn` is `null` without `--churn`. Otherwise it holds `ref` (the requ
 
 ## Rendering checks
 
-Plain and Rich reports preserve literal paths and diagnostics, including bracketed filenames.
+Plain and Rich reports preserve printable paths and diagnostics, including bracketed filenames.
+Nonprinting characters in paths, project labels, unit names, and diagnostics appear as visible
+escapes (`\n`, `\r`, `\t`, `\xHH`, `\uHHHH`, `\UHHHHHHHH`), preventing terminal
+commands and inserted report rows. JSON and snapshot identities keep the exact original values.
 Rich retains explicit table styles; it does not interpret labels as markup. The dependency-free
 plain fallback remains available. Human duplicate tables list at most five locations per block,
 then state how many more were omitted; JSON retains every occurrence. Monthly churn shows signed

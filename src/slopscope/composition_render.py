@@ -6,6 +6,7 @@ import io
 import json
 from typing import Any
 
+from slopscope._display import display_text
 from slopscope.composition_baseline import changed_metrics
 from slopscope.render import OutputFormat, _load_rich, _percent
 from slopscope.report import (
@@ -85,7 +86,7 @@ def render_composition_plain(report: RenderableCompositionReport) -> str:
 
     lines = [
         "Slopscope Composition",
-        f"Path: {report.path}",
+        f"Path: {display_text(report.path)}",
         f"Analyzer: {_analyzer_label(report.analyzer_version, report.python_version)}",
         f"Files: {report.total.files} analyzed, {len(report.failures)} failed",
         "",
@@ -160,7 +161,7 @@ def render_composition_rich(report: RenderableCompositionReport, *, color: bool 
             _print_rich_skipped_projects(console, table_class, report.skipped_projects)
         for project in report.projects:
             console.print()
-            console.print(text_class(f"Project: {project.name}", style="bold blue"))
+            console.print(text_class(f"Project: {display_text(project.name)}", style="bold blue"))
             _print_rich_report(console, table_class, text_class, project.report)
         return buffer.getvalue()
 
@@ -292,12 +293,15 @@ def _churn_to_dict(churn: CompositionChurn) -> dict[str, Any]:
 
 
 def _churn_title(churn: CompositionChurn) -> str:
-    return f"Monthly Churn (Python lines on {churn.ref}, first-parent, since {churn.since})"
+    return (
+        f"Monthly Churn (Python lines on {display_text(churn.ref)}, "
+        f"first-parent, since {display_text(churn.since)})"
+    )
 
 
 def _plain_churn(churn: CompositionChurn) -> list[str]:
     if churn.status != "ok":
-        return ["Monthly Churn", f"(skipped: {churn.reason})"]
+        return ["Monthly Churn", f"(skipped: {display_text(churn.reason)})"]
     header = (
         f"{'Month':<8} {'Added':>9} {'Removed':>9} {'Net':>9} "
         f"{'Source Net':>10} {'Tests Net':>10} {'Other Net':>10}"
@@ -306,7 +310,8 @@ def _plain_churn(churn: CompositionChurn) -> list[str]:
     for row in churn.rows:
         source, tests, other = row.net
         lines.append(
-            f"{row.month:<8} {sum(row.added):>9} {sum(row.removed):>9} {sum(row.net):>+9} "
+            f"{display_text(row.month):<8} {sum(row.added):>9} {sum(row.removed):>9} "
+            f"{sum(row.net):>+9} "
             f"{source:>+10} {tests:>+10} {other:>+10}"
         )
     return lines
@@ -350,16 +355,16 @@ def _comparison_rows(comparison: CompositionComparison) -> list[tuple[str, str, 
 
 
 def _comparison_header(comparison: CompositionComparison) -> list[str]:
-    lines = [f"Baseline: {comparison.path}"]
+    lines = [f"Baseline: {display_text(comparison.path)}"]
     if not comparison.comparable:
         lines.append("Warning: not directly comparable with this baseline; see the warnings below.")
-    lines.extend(f"Warning: {warning}" for warning in comparison.warnings)
+    lines.extend(f"Warning: {display_text(warning)}" for warning in comparison.warnings)
     return lines
 
 
 def _plain_comparison(comparison: CompositionComparison) -> list[str]:
     header = f"{'Metric':<30} {'Current':>9}" + "".join(
-        f" {'Δ ' + scope.name.capitalize():>10}" for scope in comparison.scopes
+        f" {'Δ ' + display_text(scope.name).capitalize():>10}" for scope in comparison.scopes
     )
     lines = ["Changes Since Baseline", *_comparison_header(comparison), header, "-" * len(header)]
     for metric, current, deltas in _comparison_rows(comparison):
@@ -396,7 +401,7 @@ def _skipped_project_to_dict(row: SkippedProject) -> dict[str, str]:
 
 
 def _analyzer_label(version: int, python_version: str) -> str:
-    return f"composition v{version} (Python {python_version} ast)"
+    return f"composition v{version} (Python {display_text(python_version)} ast)"
 
 
 def _ratio(counts: CompositionCounts) -> str:
@@ -412,7 +417,7 @@ def _plain_categories(report: CompositionReport) -> list[str]:
     columns = _category_columns(report)
     total_physical = report.total.counts.physical
     header = f"{'Category':<16} {'Total':>9} {'Share':>7}" + "".join(
-        f" {column.name.capitalize():>9}" for column in columns[1:]
+        f" {display_text(column.name).capitalize():>9}" for column in columns[1:]
     )
     rule = "-" * len(header)
     lines = ["Line Categories", header, rule]
@@ -457,7 +462,7 @@ def _plain_tags(report: CompositionReport) -> list[str]:
     columns = _category_columns(report)[1:]
     total_code = report.total.counts.code
     header = f"{'Tag':<16} {'Lines':>9} {'Share':>7}" + "".join(
-        f" {column.name.capitalize():>9}" for column in columns
+        f" {display_text(column.name).capitalize():>9}" for column in columns
     )
     lines = ["Semantic Tags (code lines; tags overlap)", header, "-" * len(header)]
     for name, total, values in _tag_rows(report):
@@ -473,7 +478,7 @@ def _plain_constructs(rows: tuple[CompositionAggregate, ...]) -> list[str]:
     lines = ["Constructs", header, "-" * len(header)]
     for row in rows:
         lines.append(
-            f"{row.name:<16}"
+            f"{display_text(row.name):<16}"
             + "".join(f" {row.counts.construct(name):>18}" for name in COMPOSITION_CONSTRUCTS)
         )
     return lines
@@ -513,7 +518,7 @@ def _plain_statements(
     for row in rows:
         counts = row.counts
         lines.append(
-            f"{row.name:<16} {row.files:>5} {counts.physical:>9} {counts.code:>9} "
+            f"{display_text(row.name):<16} {row.files:>5} {counts.physical:>9} {counts.code:>9} "
             f"{counts.statements:>10} {_ratio(counts):>9} {counts.continuation_lines:>12} "
             f"{_percent(counts.continuation_lines, counts.code):>7}"
         )
@@ -528,7 +533,7 @@ def _plain_modules(rows: tuple[CompositionFileRow, ...]) -> list[str]:
     for row in rows:
         lines.append(
             f"{row.counts.code:>8} {row.counts.physical:>9} {row.counts.statements:>10} "
-            f"{row.kind:<6} {row.path}"
+            f"{row.kind:<6} {display_text(row.path)}"
         )
     return lines
 
@@ -540,7 +545,8 @@ def _plain_classes(rows: tuple[CompositionClassRow, ...]) -> list[str]:
         lines.append("(no classes)")
     for row in rows:
         lines.append(
-            f"{row.lines:>8} {row.methods:>7} {row.kind:<6} {row.qualified_name} (line {row.line})"
+            f"{row.lines:>8} {row.methods:>7} {row.kind:<6} "
+            f"{display_text(row.qualified_name)} (line {row.line})"
         )
     return lines
 
@@ -551,7 +557,9 @@ def _plain_functions(rows: tuple[CompositionFunctionRow, ...]) -> list[str]:
     if not rows:
         lines.append("(no functions)")
     for row in rows:
-        lines.append(f"{row.lines:>8} {row.kind:<6} {row.qualified_name} (line {row.line})")
+        lines.append(
+            f"{row.lines:>8} {row.kind:<6} {display_text(row.qualified_name)} (line {row.line})"
+        )
     return lines
 
 
@@ -560,7 +568,7 @@ _MAX_LISTED_OCCURRENCES = 5
 
 def _occurrence_labels(block: CompositionDuplicateBlock) -> list[str]:
     labels = [
-        f"{occurrence.path}:{occurrence.start_line}-{occurrence.end_line}"
+        f"{display_text(occurrence.path)}:{occurrence.start_line}-{occurrence.end_line}"
         for occurrence in block.occurrences[:_MAX_LISTED_OCCURRENCES]
     ]
     hidden = len(block.occurrences) - _MAX_LISTED_OCCURRENCES
@@ -583,7 +591,7 @@ def _plain_duplication(report: CompositionReport) -> list[str]:
     for row in _duplication_rows(report):
         counts = row.counts
         lines.append(
-            f"{row.name:<16} {counts.code:>9} {counts.duplicated_lines:>10} "
+            f"{display_text(row.name):<16} {counts.code:>9} {counts.duplicated_lines:>10} "
             f"{_percent(counts.duplicated_lines, counts.code):>7}"
         )
     lines.append("")
@@ -602,7 +610,7 @@ def _plain_duplication(report: CompositionReport) -> list[str]:
 def _plain_failures(failures: tuple[CompositionFailure, ...]) -> list[str]:
     lines = ["Failures", "-" * 60]
     for failure in failures:
-        lines.append(f"{failure.path}: {failure.error}")
+        lines.append(f"{display_text(failure.path)}: {display_text(failure.error)}")
     return lines
 
 
@@ -619,14 +627,17 @@ def _render_multi_project_plain(report: MultiProjectCompositionReport) -> str:
         lines.append(f"{'Project':<16} {'Reason':<32} Path")
         lines.append("-" * 65)
         for skipped in report.skipped_projects:
-            lines.append(f"{skipped.name:<16} {skipped.reason:<32} {skipped.path}")
+            lines.append(
+                f"{display_text(skipped.name):<16} {display_text(skipped.reason):<32} "
+                f"{display_text(skipped.path)}"
+            )
     lines.append("")
     lines.append("Per-Project Reports")
     if not report.projects:
         lines.append("(no project reports)")
     for project in report.projects:
         lines.append("")
-        lines.append(f"Project: {project.name}")
+        lines.append(f"Project: {display_text(project.name)}")
         lines.append(render_composition_plain(project.report).rstrip())
     lines.append("")
     return "\n".join(lines)
@@ -643,11 +654,11 @@ def _plain_project_snapshot(report: MultiProjectCompositionReport) -> list[str]:
     for project in report.projects:
         total = project.report.total
         lines.append(
-            f"{project.name:<16} {total.files:>5} {total.counts.physical:>9} "
+            f"{display_text(project.name):<16} {total.files:>5} {total.counts.physical:>9} "
             f"{total.counts.code:>9} {total.counts.statements:>10} {_ratio(total.counts):>9} "
             f"{len(project.report.failures):>8}"
         )
-        lines.append(f"  Path: {project.report.path}")
+        lines.append(f"  Path: {display_text(project.report.path)}")
     return lines
 
 
@@ -657,7 +668,7 @@ def _print_rich_report(
     text_class: Any,
     report: CompositionReport,
 ) -> None:
-    console.print(text_class(f"Path: {report.path}", style="dim"))
+    console.print(text_class(f"Path: {display_text(report.path)}", style="dim"))
     console.print(
         text_class(
             f"Analyzer: {_analyzer_label(report.analyzer_version, report.python_version)}",
@@ -704,7 +715,7 @@ def _print_rich_report(
         table.add_column("Path", style="cyan")
         table.add_column("Error")
         for failure in report.failures:
-            table.add_row(failure.path, failure.error)
+            table.add_row(display_text(failure.path), display_text(failure.error))
         console.print(table)
 
 
@@ -716,7 +727,7 @@ def _print_rich_categories(console: Any, table_class: Any, report: CompositionRe
     table.add_column("Total", justify="right", style="green")
     table.add_column("Share", justify="right")
     for column in columns[1:]:
-        table.add_column(column.name.capitalize(), justify="right", style="green")
+        table.add_column(display_text(column.name).capitalize(), justify="right", style="green")
     for name in COMPOSITION_CATEGORIES:
         value = report.total.counts.category(name)
         table.add_row(
@@ -749,7 +760,7 @@ def _print_rich_comparison(
     table.add_column("Metric", style="cyan")
     table.add_column("Current", justify="right", style="green")
     for scope in comparison.scopes:
-        table.add_column(f"Δ {scope.name.capitalize()}", justify="right")
+        table.add_column(f"Δ {display_text(scope.name).capitalize()}", justify="right")
     for metric, current, deltas in _comparison_rows(comparison):
         table.add_row(metric, current, *deltas)
     console.print(table)
@@ -763,7 +774,7 @@ def _print_rich_tags(console: Any, table_class: Any, report: CompositionReport) 
     table.add_column("Lines", justify="right", style="green")
     table.add_column("Share", justify="right")
     for column in columns:
-        table.add_column(column.name.capitalize(), justify="right", style="green")
+        table.add_column(display_text(column.name).capitalize(), justify="right", style="green")
     for name, total, values in _tag_rows(report):
         table.add_row(name, str(total), _percent(total, total_code), *(str(v) for v in values))
     console.print(table)
@@ -780,7 +791,8 @@ def _print_rich_constructs(
         table.add_column(name, justify="right", style="magenta")
     for row in rows:
         table.add_row(
-            row.name, *(str(row.counts.construct(name)) for name in COMPOSITION_CONSTRUCTS)
+            display_text(row.name),
+            *(str(row.counts.construct(name)) for name in COMPOSITION_CONSTRUCTS),
         )
     console.print(table)
 
@@ -824,7 +836,7 @@ def _print_rich_statements(
     for row in rows:
         counts = row.counts
         table.add_row(
-            row.name,
+            display_text(row.name),
             str(row.files),
             str(counts.physical),
             str(counts.code),
@@ -851,7 +863,7 @@ def _print_rich_modules(
         table.add_row("(no analyzed files)", "", "", "", "")
     for row in rows:
         table.add_row(
-            row.path,
+            display_text(row.path),
             row.kind,
             str(row.counts.code),
             str(row.counts.physical),
@@ -874,7 +886,13 @@ def _print_rich_classes(
     if not rows:
         table.add_row("(no classes)", "", "", "", "")
     for row in rows:
-        table.add_row(row.qualified_name, str(row.line), row.kind, str(row.lines), str(row.methods))
+        table.add_row(
+            display_text(row.qualified_name),
+            str(row.line),
+            row.kind,
+            str(row.lines),
+            str(row.methods),
+        )
     console.print(table)
 
 
@@ -891,7 +909,7 @@ def _print_rich_functions(
     if not rows:
         table.add_row("(no functions)", "", "", "")
     for row in rows:
-        table.add_row(row.qualified_name, str(row.line), row.kind, str(row.lines))
+        table.add_row(display_text(row.qualified_name), str(row.line), row.kind, str(row.lines))
     console.print(table)
 
 
@@ -902,7 +920,9 @@ def _print_rich_churn(
     churn: CompositionChurn,
 ) -> None:
     if churn.status != "ok":
-        console.print(text_class(f"Monthly Churn skipped: {churn.reason}", style="yellow"))
+        console.print(
+            text_class(f"Monthly Churn skipped: {display_text(churn.reason)}", style="yellow")
+        )
         return
     table = table_class(title=_churn_title(churn), title_style="bold blue")
     table.add_column("Month", style="cyan")
@@ -911,7 +931,7 @@ def _print_rich_churn(
     for row in churn.rows:
         source, tests, other = row.net
         table.add_row(
-            row.month,
+            display_text(row.month),
             str(sum(row.added)),
             str(sum(row.removed)),
             f"{sum(row.net):+d}",
@@ -934,7 +954,7 @@ def _print_rich_duplication(console: Any, table_class: Any, report: CompositionR
     for row in _duplication_rows(report):
         counts = row.counts
         table.add_row(
-            row.name,
+            display_text(row.name),
             str(counts.code),
             str(counts.duplicated_lines),
             _percent(counts.duplicated_lines, counts.code),
@@ -976,7 +996,7 @@ def _print_rich_project_snapshot(
     for project in report.projects:
         total = project.report.total
         table.add_row(
-            project.name,
+            display_text(project.name),
             str(total.files),
             str(total.counts.physical),
             str(total.counts.code),
@@ -997,5 +1017,5 @@ def _print_rich_skipped_projects(
     table.add_column("Reason")
     table.add_column("Path")
     for row in rows:
-        table.add_row(row.name, row.reason, str(row.path))
+        table.add_row(display_text(row.name), display_text(row.reason), display_text(row.path))
     console.print(table)

@@ -12,7 +12,7 @@ import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Never, TextIO
 
 from slopscope import (
     classify,
@@ -32,6 +32,7 @@ from slopscope import (
 )
 from slopscope import config as config_module
 from slopscope import project as project_module
+from slopscope._display import display_text
 from slopscope.report import (
     CompositionProjectReport,
     CompositionReport,
@@ -67,8 +68,13 @@ _COMPOSITION_CONFLICTS = (
 )
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> Never:
+        super().error(display_text(message))
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="slopscope",
         description="Print a repository line-count report.",
     )
@@ -196,7 +202,7 @@ def run(
     try:
         return _run(argv, stdout=stdout, stderr=stderr)
     except (fallback.GitDiscoveryError, fallback.CountingError, cloc.ClocParseError) as exc:
-        print(f"slopscope: {exc}", file=stderr if stderr is not None else sys.stderr)
+        print(display_text(f"slopscope: {exc}"), file=stderr if stderr is not None else sys.stderr)
         return 2
 
 
@@ -214,7 +220,10 @@ def _run(
     _validate_composition_options(parser, args)
     selected_path = Path(args.path)
     if args.project is None and not selected_path.is_dir():
-        print(f"slopscope: repository root is not a directory: {selected_path}", file=err)
+        print(
+            display_text(f"slopscope: repository root is not a directory: {selected_path}"),
+            file=err,
+        )
         return 2
 
     try:
@@ -223,7 +232,7 @@ def _run(
             explicit_config_path=args.config,
         )
     except config_module.ConfigError as exc:
-        print(f"slopscope: {exc}", file=err)
+        print(display_text(f"slopscope: {exc}"), file=err)
         return 2
 
     if args.size_limits:
@@ -382,8 +391,10 @@ def _run_size_limits(
             )
             for skipped_project in skipped_projects:
                 print(
-                    f"slopscope: skipping optional project {skipped_project.name}: "
-                    f"{skipped_project.path} not found",
+                    display_text(
+                        f"slopscope: skipping optional project {skipped_project.name}: "
+                        f"{skipped_project.path} not found"
+                    ),
                     file=err,
                 )
             allowlists = {
@@ -434,13 +445,15 @@ def _run_size_limits(
                 projects=tuple(project_reports), skipped_projects=skipped_projects
             )
     except (project_module.ProjectError, size_limits.SizeLimitsError) as exc:
-        print(f"slopscope: {exc}", file=err)
+        print(display_text(f"slopscope: {exc}"), file=err)
         return 2
 
     for report in reports:
         for failure in report.failures:
             print(
-                f"slopscope: could not analyze {report.path / failure.path}: {failure.error}",
+                display_text(
+                    f"slopscope: could not analyze {report.path / failure.path}: {failure.error}"
+                ),
                 file=err,
             )
     out.write(
@@ -537,7 +550,7 @@ def _run_composition(
                 schema_version=composition.SCHEMA_VERSION,
             )
         except composition_baseline.BaselineError as exc:
-            print(f"slopscope: {exc}", file=err)
+            print(display_text(f"slopscope: {exc}"), file=err)
             return 2
 
     roots = [path]
@@ -548,7 +561,7 @@ def _run_composition(
                 selected_projects
             )
         except project_module.ProjectError as exc:
-            print(f"slopscope: {exc}", file=err)
+            print(display_text(f"slopscope: {exc}"), file=err)
             return 2
 
         roots = [project.path for project in existing_projects]
@@ -566,7 +579,10 @@ def _run_composition(
                 snapshot_path, roots, slopscope_config, config_path, baseline_path
             )
         except OSError as exc:
-            print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
+            print(
+                display_text(f"slopscope: could not write snapshot {snapshot_path}: {exc}"),
+                file=err,
+            )
             return 2
 
     rendered_report: CompositionReport | MultiProjectCompositionReport
@@ -578,7 +594,9 @@ def _run_composition(
             report = _with_baseline(report, baseline, baseline_path, err, label=None)
         for failure in report.failures:
             print(
-                f"slopscope: could not analyze {path / failure.path}: {failure.error}",
+                display_text(
+                    f"slopscope: could not analyze {path / failure.path}: {failure.error}"
+                ),
                 file=err,
             )
         failed = bool(report.failures)
@@ -586,8 +604,10 @@ def _run_composition(
     else:
         for skipped_project in skipped_projects:
             print(
-                f"slopscope: skipping optional project {skipped_project.name}: "
-                f"{skipped_project.path} not found",
+                display_text(
+                    f"slopscope: skipping optional project {skipped_project.name}: "
+                    f"{skipped_project.path} not found"
+                ),
                 file=err,
             )
 
@@ -610,7 +630,7 @@ def _run_composition(
                 project_baseline = baseline_projects.get(configured_project.name)
                 if project_baseline is None:
                     reason = f"project {configured_project.name} is not in the baseline"
-                    print(f"slopscope: warning: {reason}", file=err)
+                    print(display_text(f"slopscope: warning: {reason}"), file=err)
                     report = dataclasses.replace(
                         report,
                         baseline=composition_baseline.missing_baseline(
@@ -627,8 +647,10 @@ def _run_composition(
                     )
             for failure in report.failures:
                 print(
-                    f"slopscope: project {configured_project.name}: could not analyze "
-                    f"{configured_project.path / failure.path}: {failure.error}",
+                    display_text(
+                        f"slopscope: project {configured_project.name}: could not analyze "
+                        f"{configured_project.path / failure.path}: {failure.error}"
+                    ),
                     file=err,
                 )
             failed = failed or bool(report.failures)
@@ -654,10 +676,13 @@ def _run_composition(
                 destination=snapshot_destination,
             )
         except _SnapshotDurabilityError as exc:
-            print(f"slopscope: {exc}", file=err)
+            print(display_text(f"slopscope: {exc}"), file=err)
             return 2
         except OSError as exc:
-            print(f"slopscope: could not write snapshot {snapshot_path}: {exc}", file=err)
+            print(
+                display_text(f"slopscope: could not write snapshot {snapshot_path}: {exc}"),
+                file=err,
+            )
             return 2
 
     out.write(
@@ -836,7 +861,7 @@ def _with_churn(
     )
     if churn.status != "ok":
         prefix = "slopscope: " if label is None else f"slopscope: project {label}: "
-        print(f"{prefix}skipping churn: {churn.reason}", file=err)
+        print(display_text(f"{prefix}skipping churn: {churn.reason}"), file=err)
     return dataclasses.replace(report, churn=churn)
 
 
@@ -851,7 +876,7 @@ def _with_baseline(
     comparison = composition_baseline.compare(report, baseline, path=baseline_path)
     prefix = "slopscope: warning: " if label is None else f"slopscope: warning: project {label}: "
     for warning in comparison.warnings:
-        print(f"{prefix}{warning}", file=err)
+        print(display_text(f"{prefix}{warning}"), file=err)
     return dataclasses.replace(report, baseline=comparison)
 
 
@@ -890,7 +915,10 @@ def _select_engine(requested_engine: str, err: TextIO) -> str | int:
 
     cloc_available = cloc.is_cloc_available()
     if requested_engine == "cloc" and not cloc_available:
-        print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
+        print(
+            "slopscope: cloc engine requested, but cloc was not found on PATH",
+            file=err,
+        )
         return 2
 
     if requested_engine == "auto" and not cloc_available:
@@ -912,13 +940,15 @@ def _run_projects(
             selected_projects
         )
     except project_module.ProjectError as exc:
-        print(f"slopscope: {exc}", file=err)
+        print(display_text(f"slopscope: {exc}"), file=err)
         return 2
 
     for skipped_project in skipped_projects:
         print(
-            f"slopscope: skipping optional project {skipped_project.name}: "
-            f"{skipped_project.path} not found",
+            display_text(
+                f"slopscope: skipping optional project {skipped_project.name}: "
+                f"{skipped_project.path} not found"
+            ),
             file=err,
         )
 
@@ -931,7 +961,7 @@ def _run_projects(
             slopscope_config=slopscope_config,
         )
         if isinstance(report, int):
-            print(f"slopscope: project {configured_project.name} failed", file=err)
+            print(display_text(f"slopscope: project {configured_project.name} failed"), file=err)
             return report
         project_reports.append(ProjectReport(name=configured_project.name, report=report))
 
@@ -973,14 +1003,17 @@ def _run_profile(
     try:
         selected_profile = profile.find_profile(slopscope_config, args.profile)
     except profile.ProfileError as exc:
-        print(f"slopscope: {exc}", file=err)
+        print(display_text(f"slopscope: {exc}"), file=err)
         return 2
 
     if selected_profile.physical_lines or args.engine == "python":
         profile_engine = "python"
     elif args.engine == "cloc":
         if not cloc.is_cloc_available():
-            print("slopscope: cloc engine requested, but cloc was not found on PATH", file=err)
+            print(
+                "slopscope: cloc engine requested, but cloc was not found on PATH",
+                file=err,
+            )
             return 2
         profile_engine = "cloc"
     elif cloc.is_cloc_available():
@@ -997,10 +1030,10 @@ def _run_profile(
             top=args.top,
         )
     except profile.ProfileError as exc:
-        print(f"slopscope: {exc}", file=err)
+        print(display_text(f"slopscope: {exc}"), file=err)
         return 2
     except profile.ProfileCountError as exc:
-        print(str(exc), file=err)
+        print(display_text(exc), file=err)
         return exc.returncode
 
     if args.total_only:
@@ -1070,7 +1103,7 @@ def _build_cloc_report(
     file_result = cloc.run_file_summary(path.resolve())
     if file_result.returncode != 0:
         message = file_result.stderr.strip() or "cloc file summary failed without stderr output"
-        print(message, file=err)
+        print(display_text(message), file=err)
         return file_result.returncode
 
     raw_file_rows = cloc.parse_file_summary_csv(file_result.stdout, root=path)

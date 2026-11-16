@@ -8,6 +8,17 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Escape nonprinting terminal controls in plain/Rich reports and CLI diagnostics, including
+  paths, project/profile labels, measured units, and errors. JSON and stored identities remain
+  exact; printable Unicode and literal Rich brackets remain readable.
+
+- Synchronize allowlist recovery, publication, restoration, parent creation, and backup-retirement
+  directory entries. Post-replacement sync failures report uncertain durability and retain named
+  recovery evidence without claiming rollback.
+
+- Refuse allowlist evidence changed in place during bounded reading, including update planning
+  and recovery backups, by checking opened-file size, mtime, and ctime.
+
 - Stream cloc CSV records under a fixed 100,000-record ceiling independent of captured bytes;
   overflow refuses complete reports/profiles before constructing excess domain rows.
 - Build every normal cloc report section, including language headlines and recomputed SUM,

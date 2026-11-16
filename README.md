@@ -205,6 +205,11 @@ opening, `O_NOFOLLOW`, `O_DIRECTORY`, and `O_NONBLOCK`; platforms without these 
 analysis with a diagnostic. Windows lacks them, so `--composition` and `--size-limits` are unsupported
 on Windows and report every source as an incomplete-analysis failure. The selected root itself may be a symlink.
 
+Allowlist reads compare the opened file's size, mtime, and ctime before and after the bounded
+read. An in-place edit refuses reports, update planning, and recovery backup creation with
+exit code 2 before publication; existing destinations remain untouched. Unchanged files retain
+their exact identities and ceilings.
+
 Allowlist JSON integer-decoder resource failures, including in unused extension fields, return
 exit code 2 with a bounded diagnostic that omits raw values. Report, strict, seed, and update
 all preserve the refused allowlist bytes.
@@ -252,6 +257,14 @@ Deliberately excluded directories remain pruned.
 Human-readable output defaults to `--format rich`. Rich is optional: when it is not importable, `slopscope` falls
 back to the plain renderer. Use `--format plain` for deterministic dependency-free text, `--format json` for
 structured output, or `--no-color` to force colorless human-readable output.
+
+Human reports and diagnostics display nonprinting characters in repository paths, project/profile
+labels, unit names, and errors as visible escapes: `\n`, `\r`, `\t`, `\xHH`, `\uHHHH`, or
+`\UHHHHHHHH`. This includes ESC/OSC/CSI controls, C1 controls, Unicode directional controls and
+line separators. Printable Unicode and literal brackets remain readable; Rich applies only its
+own table styling. Data cannot insert terminal commands or new report rows. JSON values, allowlist
+keys, snapshot identities, and filesystem paths retain their original characters. Use JSON for
+exact identities; a human display escape can also occur literally in a filename.
 
 By default, `slopscope` looks for `[tool.slopscope]` in `pyproject.toml` under the inspected path. Missing
 configuration keeps the built-in defaults. Use `--config PATH` to load a specific TOML file; missing files, invalid
@@ -383,9 +396,15 @@ all previous allowlists. Multi-project snapshots share one ceiling for the compl
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Lock entries are opened without following symlinks and must be single-link regular files;
 identity is rechecked after acquiring the lock. Multi-project publication stages all outputs first
-and restores earlier writes on catchable failures, including `KeyboardInterrupt` and `SystemExit`.
+and restores earlier writes on catchable replacement failures, including `KeyboardInterrupt` and `SystemExit`.
 The original interruption propagates after recovery; failed restoration retains a named recovery
-backup reported in exception notes. Process death is outside this guarantee.
+backup reported in exception notes. Recovery names are directory-synced before replacement; each
+replacement and restoration is directory-synced before recovery evidence is retired, and backup
+retirement is synced too. Newly created parent names are synced. A post-replacement directory-sync
+failure returns exit code 2 with "durability unconfirmed", leaves visible publication in place,
+and retains named backups for manual recovery rather than claiming a durable rollback. Filesystems
+that cannot sync directories cannot acknowledge mutation success. Process death can still leave a
+partially published multi-project set.
 See [Size Limits](docs/size-limits.md).
 
 ## Development
