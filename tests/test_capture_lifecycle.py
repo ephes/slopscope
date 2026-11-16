@@ -194,10 +194,11 @@ def test_capture_restores_previous_sigterm_handler(
         "exit": SystemExit(9),
     }
 
-    def observe(*args: object, **kwargs: object) -> None:
+    def observe(*args: object, **kwargs: object) -> bool:
         assert signal.getsignal(signal.SIGTERM) is not previous_handler
         if outcome in errors:
             raise errors[outcome]
+        return True  # The exited leader still reserves its identity.
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
@@ -229,10 +230,11 @@ def test_repeated_sigterm_does_not_interrupt_cleanup(
         assert callable(handler)
         handler(signal.SIGTERM, None)
 
-    def observe(*args: object, **kwargs: object) -> None:
+    def observe(*args: object, **kwargs: object) -> bool:
         if during_cleanup:
             raise subprocess.TimeoutExpired("synthetic", 1)
         request_term()
+        return True
 
     monkeypatch.setattr(_capture, "_wait_for_exit", observe)
     kill_group = Mock(side_effect=request_term)
@@ -384,3 +386,118 @@ def test_linux_group_members_parse_proc_stat(tmp_path: Path) -> None:
         (tmp_path / name / "stat").write_bytes(stat)
     (tmp_path / "103").mkdir()  # Exited between listing and reading.
     assert sorted(_capture._linux_group_members(100, str(tmp_path))) == [100, 101]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX auto-reap semantics")
+@pytest.mark.parametrize("observer", ["waitid", "kqueue"])
+def test_auto_reaped_leader_is_never_signalled(
+    monkeypatch: pytest.MonkeyPatch, observer: str
+) -> None:
+    if observer == "kqueue":
+        if not hasattr(select, "kqueue"):
+            pytest.skip("macOS kqueue observation")
+        monkeypatch.delattr(os, "waitid", raising=False)
+    elif not hasattr(os, "waitid"):
+        pytest.skip("waitid unavailable")
+    killpg = os.killpg
+    sent: list[int] = []
+
+    def signal_group(pid: int, sig: int) -> None:
+        sent.append(sig)
+        killpg(pid, sig)
+
+    previous = signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    try:
+        process = subprocess.Popen(
+            [sys.executable, "-c", "pass"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        monkeypatch.setattr(os, "killpg", signal_group)
+        result = _capture.capture_process(process, timeout=10, max_bytes=100, label="synthetic")
+    finally:
+        signal.signal(signal.SIGCHLD, previous)
+    assert result.returncode == 0
+    assert sent and set(sent) == {0}  # Absence probes only; no TERM/KILL to a released identity.
+
+
+def test_unobservable_exit_is_bounded_capture_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import errno
+    from unittest.mock import Mock
+
+    if not hasattr(os, "waitid"):
+        pytest.skip("waitid unavailable")
+    process = Mock(pid=12345, args=["synthetic"], stdout=io.BytesIO(), stderr=io.BytesIO())
+    monkeypatch.setattr(os, "waitid", Mock(side_effect=OSError(errno.EINVAL, "invalid")))
+    group_kill = Mock()
+    monkeypatch.setattr(os, "killpg", group_kill)
+    with pytest.raises(_capture.CaptureError, match="could not observe synthetic process exit"):
+        _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+    # The leader was never reaped, so the failure cleanup may still kill its group.
+    group_kill.assert_called_once_with(process.pid, signal.SIGKILL)
+
+
+def test_ignored_sigterm_policy_is_left_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=0,
+        stdout=io.BytesIO(b"result"),
+        stderr=io.BytesIO(),
+    )
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(return_value=True))
+    monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
+    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        install = Mock(side_effect=AssertionError("ignored SIGTERM was overridden"))
+        monkeypatch.setattr(signal, "signal", install)
+        result = _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+        monkeypatch.undo()
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert result.returncode == 0 and result.stdout == b"result"
+    install.assert_not_called()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX scoped SIGTERM handling")
+def test_term_during_handler_restore_still_restores_and_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import Mock
+
+    process = Mock(
+        pid=12345,
+        args=["synthetic"],
+        returncode=0,
+        stdout=io.BytesIO(b"result"),
+        stderr=io.BytesIO(),
+    )
+    monkeypatch.setattr(_capture, "_wait_for_exit", Mock(return_value=True))
+    monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
+
+    def previous(signum: int, frame: object) -> None:
+        raise AssertionError("unexpected")
+
+    original_handler = signal.signal(signal.SIGTERM, previous)
+    real_signal = signal.signal
+
+    def install(signum: int, handler: object) -> object:
+        if handler is previous:
+            # Simulate TERM landing at the eval-breaker check of the restore call.
+            current = signal.getsignal(signal.SIGTERM)
+            assert callable(current)
+            current(signal.SIGTERM, None)
+        return real_signal(signum, handler)  # type: ignore[arg-type]
+
+    try:
+        monkeypatch.setattr(signal, "signal", install)
+        with pytest.raises(SystemExit) as raised:
+            _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+        assert raised.value.code == 128 + signal.SIGTERM
+        assert signal.getsignal(signal.SIGTERM) is previous
+    finally:
+        real_signal(signal.SIGTERM, original_handler)

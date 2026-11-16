@@ -93,7 +93,10 @@ def capture_process(
     handle_sigterm = os.name == "posix" and threading.current_thread() is threading.main_thread()
     # Read the prior handler first and install inside ``try``: a TERM arriving right after
     # installation then still reaches owned-tree cleanup and the handler restore below.
+    # A deliberately ignored SIGTERM (or a non-Python handler) stays as it is.
     previous_handler = signal.getsignal(signal.SIGTERM) if handle_sigterm else None
+    if previous_handler is signal.SIG_IGN:
+        previous_handler = None
     try:
         if previous_handler is not None:
             signal.signal(signal.SIGTERM, terminate)
@@ -111,8 +114,12 @@ def capture_process(
             changed.clear()
         if failures:
             raise failures[0]
-        _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label)
-        cleanup_deadline = _retire_group(process, label=label)
+        if _wait_for_exit(process, deadline=deadline, timeout=timeout, label=label):
+            cleanup_deadline = _retire_group(process, label=label)
+        else:
+            # The leader was reaped elsewhere (e.g. inherited SIGCHLD=SIG_IGN), so its
+            # identity is no longer reserved: never signal it, only confirm absence.
+            cleanup_deadline = time.monotonic() + _GROUP_TERM_SECONDS + _GROUP_KILL_SECONDS
         retired = True
         process.wait(timeout=max(0, deadline - time.monotonic()))
         if cleanup_deadline is not None:
@@ -148,6 +155,8 @@ def capture_process(
                 process.wait(timeout=5)
         raise
     finally:
+        # A TERM arriving while the handler is restored is recorded and re-raised below.
+        cleaning = True
         if previous_handler is not None:
             signal.signal(signal.SIGTERM, previous_handler)
         if termination_requested is not None:
@@ -161,32 +170,55 @@ def capture_process(
 
 def _wait_for_exit(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> None:
-    """Observe exit without releasing the POSIX leader's process/group identity."""
+) -> bool:
+    """Observe exit without releasing the POSIX leader's process/group identity.
+
+    Returns whether the exited leader still reserves its identity (stays unreaped).
+    """
 
     if os.name != "posix":
         process.wait(timeout=max(0, deadline - time.monotonic()))
-        return
+        return True
     waitid = getattr(os, "waitid", None)  # Some platform type stubs omit this public API.
     if waitid is None or not all(
         hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
     ):
-        _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
-        return
-    while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(process.args, timeout)
-        time.sleep(min(remaining, 0.01))
+        return _wait_for_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
+    try:
+        while waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            time.sleep(min(remaining, 0.01))
+    except ChildProcessError:
+        return False  # Already reaped elsewhere: the identity is no longer ours.
+    except OSError as exc:
+        raise CaptureError(f"could not observe {label} process exit") from exc
+    return True
 
 
 def _wait_for_exit_kqueue(
     process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
-) -> None:
+) -> bool:
     """Older macOS Python exposes non-reaping process observation through kqueue."""
 
     if sys.platform != "darwin" or not hasattr(select, "kqueue"):
         raise CaptureError(f"{label} capture requires waitid/WNOWAIT or kqueue process observation")
+    try:
+        _observe_exit_kqueue(process, deadline=deadline, timeout=timeout, label=label)
+    except OSError as exc:
+        raise CaptureError(f"could not observe {label} process exit") from exc
+    # kqueue cannot tell an unreaped zombie from an auto-reaped leader; libproc lists
+    # zombies, so a missing leader means its identity is released. Unknown keeps it.
+    try:
+        return process.pid in _darwin_group_members(process.pid)
+    except Exception:
+        return True
+
+
+def _observe_exit_kqueue(
+    process: subprocess.Popen[bytes], *, deadline: float, timeout: float, label: str
+) -> None:
     with contextlib.closing(select.kqueue()) as queue:
         event = select.kevent(
             process.pid,
