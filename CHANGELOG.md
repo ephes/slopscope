@@ -8,6 +8,16 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Resolve fixture decorators and test bases through lexical bindings. Rebound names and child
+  imports no longer create false fixtures/tests; local unittest inheritance refuses ambiguous
+  or modified class names. Test-placement detector version 2 warns on older baselines; pytest
+  naming rules and JSON schema version 4 are unchanged.
+
+- Preserve typing overload exemptions after list/set/dict/generator comprehensions whose
+  iteration targets shadow the decorator only inside the comprehension. Real enclosing-scope
+  assignments and deletions remain conservative; analyzer metadata advances to version 3
+  (package and JSON schema versions are unchanged).
+
 - Unwind partial capture-reader startup: close unclaimed pipes once, let started readers
   close their own pipes, and terminate/reap the child with bounded cleanup. Reader startup
   failures now produce a fixed capture diagnostic and CLI exit 2 instead of a traceback;

@@ -214,8 +214,8 @@ Instance logger fields may be shared between direct undecorated methods of the s
 the same receiver name; other classes do not inherit that evidence. Rebinding a field invalidates
 that shared evidence. This is static analysis: call side effects, inheritance, decorated methods,
 and runtime mutation across scopes are not inferred. Version 2 can reduce semantic counts;
-baselines with older detector versions are marked non-comparable. Test placement and the
-compatibility wording marker retain their existing rules.
+baselines with older detector versions are marked non-comparable. The compatibility wording
+marker retains its existing rules.
 
 A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
 signature of a `def`, bases of a `class`, the condition of an `if` or `while`, the target and iterable of a `for`, the
@@ -250,6 +250,14 @@ Per file and aggregated:
 
 For files classified as tests, every code line is placed in exactly one bucket, so the buckets add up to the test
 files' code lines. Other files are not placed and report zero for every bucket.
+
+Test-placement detector version 2 resolves fixture decorators and imported test bases in their
+lexical scope, using the same conservative rebinding rules as semantic tags. Child imports do
+not leak, and class-local imports can supply method decorators. Rebinding, deletion, conflicting
+imports, and star imports invalidate fixture/base names throughout their scope. Local unittest
+inheritance requires a unique class name with no other binding or mutation in module scope;
+assignment aliases and decorated local base classes are not inferred. Older placement detector
+versions are marked non-comparable when loading a baseline. Pytest naming rules are unchanged.
 
 | Placement | Code lines |
 |---|---|
@@ -353,13 +361,13 @@ file to keep a snapshot.
 {
   "report_type": "composition",
   "schema_version": 4,
-  "analyzer": {"name": "slopscope.composition", "version": 2, "python_version": "3.13.1"},
+  "analyzer": {"name": "slopscope.composition", "version": 3, "python_version": "3.13.1"},
   "detectors": [
     {"name": "qt", "kind": "tag", "version": 2},
     {"name": "logging", "kind": "tag", "version": 2},
     {"name": "data_shape", "kind": "tag", "version": 2},
     {"name": "compat", "kind": "marker", "version": 1},
-    {"name": "test_placement", "kind": "placement", "version": 1},
+    {"name": "test_placement", "kind": "placement", "version": 2},
     {"name": "duplication", "kind": "duplication", "version": 1}
   ],
   "path": ".",
@@ -428,7 +436,8 @@ file to keep a snapshot.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
-  Analyzer version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
+  Analyzer version 3 keeps comprehension iteration targets out of surrounding overload bindings.
+  Version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
   instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit
   function counts and keys may change for custom or shadowed decorators.
 

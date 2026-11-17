@@ -384,7 +384,9 @@ Qt, logging, and data-shape detector version 2 uses conservative lexical binding
 Parameters, assignments, deletions, ambiguous imports, and declared global/nonlocal bindings
 invalidate names throughout their scope; nested imports do not leak. Logger instance fields
 are shared only among direct undecorated methods of their own class. These accuracy changes can
-reduce counts; baseline comparison warns about older detector versions.
+reduce counts; baseline comparison warns about older detector versions. Test-placement detector
+version 2 applies the same lexical rules to fixture decorators and test bases; local unittest
+inheritance also requires an unambiguous, unmodified class name.
 
 Duplicate extension compares overlap positions only within each token segment and expands nested
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
