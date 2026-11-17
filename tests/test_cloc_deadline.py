@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, cloc
+from slopscope import _git_env, cli, cloc
 
 
 @pytest.mark.parametrize("engine", ["cloc", "auto"])
@@ -82,4 +82,5 @@ def test_cloc_supplies_finite_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "start_new_session": os.name == "posix",
+        "env": _git_env.hardened_git_env(),
     }

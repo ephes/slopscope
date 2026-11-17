@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import composition, fallback
+from slopscope import _git_env, composition, fallback
 from slopscope.report import FileRow, LanguageRow
 
 
@@ -443,6 +443,7 @@ def test_git_discovery_has_finite_deadline_and_preserves_output(
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.PIPE,
                 "start_new_session": os.name == "posix",
+                "env": _git_env.hardened_git_env(),
             }
 
     def capture(child: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:

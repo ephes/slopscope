@@ -584,6 +584,9 @@ analyzed path.
 - Malformed Git history (invalid month markers or counters, missing NUL boundaries, or incomplete
   rename operands) skips the entire churn result with a bounded category/record diagnostic. No partial
   or fabricated zero history is published. Empty history and binary-file exclusions remain supported.
+- Churn Git commands run with the hardened Git environment described in the README (no implicit bare
+  repositories, no fsmonitor, no signature verification programs), so a repository's own Git
+  configuration cannot make `git log` start a program.
 - Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
   `slopscope: skipping churn:` notice, and the exit code does not change.
 
