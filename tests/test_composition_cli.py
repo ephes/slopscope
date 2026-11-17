@@ -97,7 +97,7 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
         {"name": "logging", "kind": "tag", "version": 2},
         {"name": "data_shape", "kind": "tag", "version": 2},
         {"name": "compat", "kind": "marker", "version": 1},
-        {"name": "test_placement", "kind": "placement", "version": 1},
+        {"name": "test_placement", "kind": "placement", "version": 2},
         {"name": "duplication", "kind": "duplication", "version": 1},
     ]
     assert data["settings"]["min_duplicate_tokens"] == 50
@@ -513,3 +513,39 @@ def test_console_entry_point_supports_composition(
 
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out)["report_type"] == "composition"
+
+
+@pytest.mark.parametrize("format_name", ["json", "plain", "rich"])
+def test_lexical_placement_report(tmp_path: Path, format_name: str) -> None:
+    write(
+        tmp_path,
+        "tests/test_bindings.py",
+        "from pytest import fixture as resource\n"
+        "from unittest import TestCase as Base\n"
+        "@resource()\ndef client():\n    return 1\n"
+        "class Parent(Base):\n    def testValue(self):\n        pass\n"
+        "class Child(Parent):\n    def testOther(self):\n        pass\n"
+        "class Helpers:\n    resource = ordinary\n"
+        "    @resource\n    def client(self):\n        return 2\n",
+    )
+    code, out, err = run_cli(
+        ["--composition", "--format", format_name, "--no-color", str(tmp_path)]
+    )
+    assert code == 0
+    assert err == ""
+    if format_name == "json":
+        report = json.loads(out)
+        assert report["total"]["test_placement"] == {
+            "test": 4,
+            "fixture": 3,
+            "setup": 0,
+            "module_level": 2,
+            "helper_or_unknown": 7,
+        }
+        assert report["total"]["constructs"]["tests"] == 2
+        assert {"name": "test_placement", "kind": "placement", "version": 2} in report["detectors"]
+    else:
+        assert "Test Placement" in out
+        assert "fixture" in out
+        assert "helper_or_unknown" in out
+        assert "2 tests" in out

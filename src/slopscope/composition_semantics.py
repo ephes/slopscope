@@ -37,7 +37,7 @@ DETECTORS = (
     CompositionDetector(name=LOGGING, kind="tag", version=2),
     CompositionDetector(name=DATA_SHAPE, kind="tag", version=2),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
-    CompositionDetector(name="test_placement", kind="placement", version=1),
+    CompositionDetector(name="test_placement", kind="placement", version=2),
 )
 
 QT_MODULES = frozenset({"PySide2", "PySide6", "PyQt5", "PyQt6", "qtpy"})
@@ -238,6 +238,23 @@ def _scope_nodes(body: Sequence[ast.stmt]) -> list[ast.AST]:
     while pending:
         node = pending.pop()
         nodes.append(node)
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
+            # Only the outer iterable executes in this scope. Iteration targets stay
+            # in the child, but assignment expressions bind in the containing scope.
+            pending.append(node.generators[0].iter)
+            expressions = list(ast.iter_child_nodes(node))
+            while expressions:
+                expression = expressions.pop()
+                if isinstance(expression, ast.NamedExpr):
+                    pending.append(expression.target)
+                if isinstance(expression, ast.Lambda):
+                    expressions.extend(
+                        default
+                        for default in (*expression.args.defaults, *expression.args.kw_defaults)
+                        if default is not None
+                    )
+                else:
+                    expressions.extend(ast.iter_child_nodes(expression))
         if not isinstance(
             node,
             (
@@ -307,13 +324,7 @@ def overload_functions(tree: ast.Module) -> frozenset[int]:
         *,
         class_scope: bool = False,
     ) -> None:
-        nodes: list[ast.AST] = []
-        pending: list[ast.AST] = list(body)
-        while pending:
-            node = pending.pop()
-            nodes.append(node)
-            if not isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
-                pending.extend(ast.iter_child_nodes(node))
+        nodes = _scope_nodes(body)
         bindings = _scope_bindings(nodes, inherited, arguments)
         for node in nodes:
             if isinstance(node, _FUNCTION_TYPES):
@@ -603,7 +614,7 @@ def detect(
     placements = (0,) * len(COMPOSITION_TEST_PLACEMENTS)
     tests = 0
     if test_file:
-        placement_lines, tests = _test_placements(tree, imports, first_line)
+        placement_lines, tests = _test_placements(tree, scoped, first_line)
         counts = dict.fromkeys(COMPOSITION_TEST_PLACEMENTS, 0)
         for line in code_lines:
             counts[placement_lines.get(line, MODULE_LEVEL)] += 1
@@ -782,6 +793,26 @@ def _test_placements(
     placements: dict[int, str] = {}
     tests = 0
     unittest_classes: set[str] = set()
+    # Local inheritance is supported only for a unique, otherwise unmodified class name.
+    # Resolve candidate names through the same binding rules as imports, excluding the
+    # class declaration that introduces each candidate; every other write invalidates it.
+    nodes = _scope_nodes(tree.body)
+    class_names = Counter(node.name for node in nodes if isinstance(node, ast.ClassDef))
+    candidates = ImportMap(())
+    candidates.names = {
+        node.name: {f"<local class:{node.name}>"}
+        for node in nodes
+        if isinstance(node, ast.ClassDef)
+        and class_names[node.name] == 1
+        and not node.decorator_list
+    }
+    local_classes = _scope_bindings(
+        [node for node in nodes if not isinstance(node, ast.ClassDef)], candidates
+    )
+    for node in nodes:
+        if isinstance(node, ast.Global | ast.Nonlocal):
+            for name in node.names:
+                local_classes.names.pop(name, None)
 
     def place(node: ast.stmt, placement: str) -> None:
         start = first_line.get(id(node), node.lineno)
@@ -803,7 +834,11 @@ def _test_placements(
             place(stmt, HELPER_OR_UNKNOWN)
             is_unittest = any(
                 imports.resolve(base) & UNITTEST_BASES
-                or (isinstance(base, ast.Name) and base.id in unittest_classes)
+                or (
+                    isinstance(base, ast.Name)
+                    and base.id in unittest_classes
+                    and local_classes.resolve(base) == {f"<local class:{base.id}>"}
+                )
                 for base in stmt.bases
             )
             if is_unittest:

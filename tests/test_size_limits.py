@@ -595,3 +595,63 @@ def test_allowlist_integer_decoder_limit_is_domain_error(tmp_path: Path, section
     with pytest.raises(size_limits.SizeLimitsError, match="JSON number exceeds decoder limits"):
         size_limits.load_allowlist(path)
     assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "[overload for overload in ()]",
+        "{overload for overload in ()}",
+        "{overload: overload for overload in ()}",
+        "(overload for overload in ())",
+        "[overload for overload in overload(())]",
+        "[item for overload in () for item in overload]",
+        "[(lambda: (overload := ordinary)) for item in ()]",
+    ],
+)
+@pytest.mark.parametrize("scope", ["module", "function", "class"])
+def test_comprehension_targets_do_not_shadow_overload(
+    tmp_path: Path, expression: str, scope: str
+) -> None:
+    body = f"values = {expression}\n@overload\ndef large():\n    x = 1\n    return x\n"
+    prefix = "" if scope == "module" else f"{'def' if scope == 'function' else 'class'} Outer"
+    if prefix:
+        body = prefix + ("():\n" if scope == "function" else ":\n") + textwrap.indent(body, "    ")
+    write(tmp_path, "src/app.py", "from typing import overload\n" + body)
+    key = "src/app.py::" + ("" if scope == "module" else "Outer.") + "large"
+    assert key not in measure(tmp_path)["functions"]
+
+
+@pytest.mark.parametrize("binding", ["overload = object", "del overload"])
+def test_real_binding_after_comprehension_invalidates_overload(
+    tmp_path: Path, binding: str
+) -> None:
+    write(
+        tmp_path,
+        "src/app.py",
+        "from typing import overload\n[overload for overload in ()]\n"
+        + binding
+        + "\n@overload\ndef large():\n    x = 1\n    return x\n",
+    )
+    assert "src/app.py::large" in measure(tmp_path)["functions"]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "[(overload := ordinary) for item in ()]",
+        "{(overload := ordinary) for item in ()}",
+        "{item: (overload := ordinary) for item in ()}",
+        "((overload := ordinary) for item in ())",
+    ],
+)
+def test_comprehension_assignment_expression_rebinds_outer_overload(
+    tmp_path: Path, expression: str
+) -> None:
+    write(
+        tmp_path,
+        "src/app.py",
+        f"from typing import overload\nvalues = {expression}\n"
+        "@overload\ndef large():\n    x = 1\n    return x\n",
+    )
+    assert "src/app.py::large" in measure(tmp_path)["functions"]

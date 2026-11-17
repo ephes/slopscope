@@ -213,12 +213,17 @@ def test_invalid_baselines_exit_2(tmp_path: Path, content: str | None, message: 
     assert message in stderr
 
 
-def test_detector_version_mismatch_warns_and_marks_not_comparable(tmp_path: Path) -> None:
+@pytest.mark.parametrize("detector,old_version", [("qt", 0), ("test_placement", 1)])
+def test_detector_version_mismatch_warns_and_marks_not_comparable(
+    tmp_path: Path, detector: str, old_version: int
+) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "before.json"
     run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
     data = json.loads(snapshot.read_text(encoding="utf-8"))
-    data["detectors"][0]["version"] = 0
+    for metadata in data["detectors"]:
+        if metadata["name"] == detector:
+            metadata["version"] = old_version
     data["analyzer"]["version"] = 0
     snapshot.write_text(json.dumps(data), encoding="utf-8")
 
@@ -230,7 +235,7 @@ def test_detector_version_mismatch_warns_and_marks_not_comparable(tmp_path: Path
     baseline = json.loads(stdout)["baseline"]
     assert baseline["comparable"] is False
     assert "slopscope: warning: analyzer version differs" in stderr
-    assert "slopscope: warning: detector qt version differs" in stderr
+    assert f"slopscope: warning: detector {detector} version differs" in stderr
     assert len(baseline["warnings"]) == 2
 
 

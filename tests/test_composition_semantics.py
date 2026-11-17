@@ -548,3 +548,110 @@ def test_nested_class_method_scopes_are_visited_once_per_subtree() -> None:
     scopes = _ScopedImports(tree)
     assert time.perf_counter() - started < 2.0
     assert scopes.scopes
+
+
+@pytest.mark.parametrize(
+    "preamble",
+    [
+        "from pytest import fixture\nfixture = ordinary",
+        "import pytest\npytest = ordinary",
+        "from pytest import fixture\ndel fixture",
+        "from pytest import fixture\nfrom other import fixture",
+        "from pytest import fixture\nfrom pytest_asyncio import fixture",
+        "def child():\n    from pytest import fixture",
+        "from pytest import fixture\nfrom other import *",
+    ],
+)
+def test_fixture_placement_refuses_shadowed_and_child_imports(preamble: str) -> None:
+    decorator = "pytest.fixture" if "import pytest\n" in preamble else "fixture"
+    result = counts(preamble + f"\n@{decorator}\ndef client():\n    return 1\n", test_file=True)
+    assert result.placement("fixture") == 0
+    assert result.placement("helper_or_unknown") == 3 + (
+        2 if preamble.startswith("def child") else 0
+    )
+    assert sum(result.placements) == result.code
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        ("fixture = ordinary\n@fixture\ndef client(self):\n    return 1", 0),
+        ("from pytest import fixture\n@fixture\ndef client(self):\n    return 1", 3),
+        ("@fixture\ndef client(self, fixture):\n    return fixture", 3),
+        ("values = [fixture for fixture in ()]\n@fixture\ndef client(self):\n    return 1", 3),
+    ],
+)
+def test_fixture_method_decorator_uses_class_scope(body: str, expected: int) -> None:
+    result = counts(
+        "from pytest import fixture\nclass Helpers:\n" + textwrap.indent(body, "    "),
+        test_file=True,
+    )
+    assert result.placement("fixture") == expected
+    assert sum(result.placements) == result.code
+
+
+@pytest.mark.parametrize(
+    "preamble,base",
+    [
+        ("from unittest import TestCase as Base\nBase = object", "Base"),
+        ("import unittest\nunittest = ordinary", "unittest.TestCase"),
+        ("from unittest import TestCase as Base\nfrom other import Base", "Base"),
+        ("def child():\n    from unittest import TestCase as Base", "Base"),
+        ("from unittest import TestCase as Base\ndel Base", "Base"),
+        ("from unittest import TestCase as Base\nfrom other import *", "Base"),
+        (
+            "from unittest import TestCase as Base\nclass Parent(Base): pass\nParent = object",
+            "Parent",
+        ),
+        (
+            "from unittest import TestCase as Base\nclass Parent(Base): pass\nclass Parent: pass",
+            "Parent",
+        ),
+        ("from unittest import TestCase as Base\nclass Parent(Base): pass\ndel Parent", "Parent"),
+        (
+            "from unittest import TestCase as Base\nclass Parent(Base): pass\n"
+            "from other import Parent",
+            "Parent",
+        ),
+        (
+            "from unittest import TestCase as Base\nclass Parent(Base): pass\ndef Parent(): pass",
+            "Parent",
+        ),
+        ("from unittest import TestCase as Base\n@ordinary\nclass Parent(Base): pass", "Parent"),
+        (
+            "from unittest import TestCase as Base\nclass Parent(Base): pass\nglobal Parent",
+            "Parent",
+        ),
+    ],
+)
+def test_unittest_placement_refuses_shadowed_bases(preamble: str, base: str) -> None:
+    result = counts(
+        preamble + f"\nclass ServiceChecks({base}):\n    def testValue(self):\n        pass\n",
+        test_file=True,
+    )
+    assert result.construct("tests") == 0
+    assert result.placement("test") == 0
+    assert sum(result.placements) == result.code
+
+
+def test_placement_preserves_aliased_fixtures_and_unittest_inheritance() -> None:
+    result = counts(
+        """
+        from pytest_asyncio import fixture as resource
+        from django.test import SimpleTestCase as Base
+        @resource()
+        async def client():
+            return 1
+        class Parent(Base):
+            def testValue(self):
+                pass
+        class Child(Parent):
+            def testOther(self):
+                pass
+        """,
+        test_file=True,
+    )
+    assert result.placement("fixture") == 3
+    assert result.placement("test") == 4
+    assert result.construct("tests") == 2
+    assert sum(result.placements) == result.code

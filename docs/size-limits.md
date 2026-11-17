@@ -65,6 +65,9 @@ Allowlist keys identify units by path, relative to the analyzed project root:
   enclosing prefix, as if the block were not there.
 - Functions whose decorator resolves through imports to `typing.overload` or `typing_extensions.overload`
   are skipped, so the implementation keeps its plain name. Qualified imports and aliases are supported.
+  Comprehension iteration targets stay in their child scope and do not shadow a surrounding
+  overload import; real surrounding assignments or deletions, including assignment expressions
+  inside comprehensions, still invalidate it.
   Unrelated decorators named `overload`, decorator calls, and shadowed or ambiguous bindings count normally.
   Resolution is conservative within each scope: any assignment, deletion, parameter, or other rebinding of the
   imported name invalidates its exemption throughout that scope, regardless of statement order.
