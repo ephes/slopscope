@@ -10,6 +10,9 @@ implementation phases, and the `a1` suffix keeps the release clearly pre-1.0 and
 minor version for the composition report, a new report mode with its own JSON shape, and `0.3.0a1` for the
 size-limits check. `0.4.0a1` raised it again because the bounded, hardened analysis changes exit codes for oversized or
 malformed inputs, makes older baselines non-comparable, and makes composition and size-limits POSIX-only.
+`0.4.0a2` is a pre-release bump on the same line for the hardened Git configuration of Git and cloc processes;
+it has no CLI, configuration, or JSON schema changes. Only a configured project path that is an embedded bare repository
+reports differently: the Python engine falls back to filesystem discovery, and the cloc engine fails that project.
 
 Before publishing, confirm that:
 

@@ -159,3 +159,4 @@ lines. See [Size Limits](size-limits.md).
 - [x] Support one allowlist per configured project.
 - [x] Release the size-limits check in `0.3.0a1`.
 - [x] Release the bounded, hardened analysis in `0.4.0a1`.
+- [x] Release the hardened Git configuration for Git and cloc processes in `0.4.0a2`.

@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+## 0.4.0a2 - 2026-11-17
+
+Compatibility notes: no CLI, configuration, or JSON schema changes and no new runtime dependencies. Git now refuses a
+configured project path that is an embedded bare repository, so reports for such a path change: the Python engine
+falls back to filesystem discovery, while `--engine cloc` (and `auto` when cloc is installed) fails that project with
+"cloc returned no usable file rows" and exit code 1; use `--engine python` for it.
+
 - Security: Git commands and cloc now run with `safe.bareRepository=explicit`, `core.fsmonitor=false`,
   `log.showSignature=false` (appended through `GIT_CONFIG_COUNT` and, for Git older than 2.31,
   `GIT_CONFIG_PARAMETERS`) and `GIT_NO_LAZY_FETCH=1`. Before, a cloned repository that tracked a directory
