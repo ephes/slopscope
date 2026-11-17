@@ -197,7 +197,7 @@ Tags are a second, separate dimension. A tag marks code lines (lines that are no
 with what the code is about. Unlike categories, tags overlap: a line can carry several tags or none, tag counts do not
 add up to anything, and tags never change a line's category.
 
-Qt, logging, and data-shape detector version 3 resolves names through lexically scoped imports.
+Qt/data-shape detector version 3 and logging detector version 4 resolve names through lexically scoped imports.
 Parameters, assignment/deletion, conflicting imports, and declared `global`/`nonlocal` names
 invalidate a binding throughout that scope, regardless of statement order. Annotation-only
 name declarations preserve module/class runtime bindings, including imported names and logger
@@ -230,9 +230,11 @@ Instance logger fields may be shared between direct undecorated methods of the s
 each method's first positional receiver, including positional-only parameters. Receiver spellings
 may differ (`this.log` and `self.log` refer to the same field); other classes do not inherit that
 evidence. Rebinding the receiver or conflicting writes to the normalized field invalidate shared
-evidence. Arbitrary aliases of the instance are not inferred. This is static analysis: call side
+evidence. Writes or deletion at any ancestor attribute also invalidate a nested logger path,
+both within a scope and across direct methods; unchanged sibling fields remain eligible.
+Arbitrary aliases of the instance are not inferred. This is static analysis: call side
 effects, inheritance, decorated methods, and runtime mutation across scopes are not inferred.
-Version 3 can increase or reduce semantic counts; baselines with older detector versions are marked non-comparable. The compatibility wording
+Logging version 4 corrects ancestor-path invalidation; baselines with older detector versions are marked non-comparable. The compatibility wording
 marker retains its existing rules.
 
 A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
@@ -382,7 +384,7 @@ file to keep a snapshot.
   "analyzer": {"name": "slopscope.composition", "version": 4, "python_version": "3.13.1"},
   "detectors": [
     {"name": "qt", "kind": "tag", "version": 3},
-    {"name": "logging", "kind": "tag", "version": 3},
+    {"name": "logging", "kind": "tag", "version": 4},
     {"name": "data_shape", "kind": "tag", "version": 3},
     {"name": "compat", "kind": "marker", "version": 1},
     {"name": "test_placement", "kind": "placement", "version": 3},

@@ -34,7 +34,7 @@ HELPER_OR_UNKNOWN = "helper_or_unknown"
 
 DETECTORS = (
     CompositionDetector(name=QT, kind="tag", version=3),
-    CompositionDetector(name=LOGGING, kind="tag", version=3),
+    CompositionDetector(name=LOGGING, kind="tag", version=4),
     CompositionDetector(name=DATA_SHAPE, kind="tag", version=3),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
     CompositionDetector(name="test_placement", kind="placement", version=3),
@@ -432,6 +432,13 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
+def _path_ancestors(name: str) -> Iterator[str]:
+    """Yield proper receiver paths, keeping sibling fields independent."""
+    while "." in name:
+        name = name.rsplit(".", 1)[0]
+        yield name
+
+
 class _ScopedImports(ImportMap):
     """Resolve each expression in its lexical environment; class fields stay in their class."""
 
@@ -581,8 +588,10 @@ class _ScopedImports(ImportMap):
                 other_bindings.add(node.rest)
         if arguments is not None:
             other_bindings.update(_argument_names(arguments))
+        for name in tuple(bindings.names):
+            if name in writes or any(parent in writes for parent in _path_ancestors(name)):
+                bindings.names.pop(name, None)
         for name, values in writes.items():
-            bindings.names.pop(name, None)
             # Do not infer through augmented assignment, deletion, or other rebinding.
             if (
                 len(values) == 1
@@ -590,6 +599,7 @@ class _ScopedImports(ImportMap):
                 and _is_logging_getlogger(values[0], bindings)
                 and stores[name] == 1
                 and name not in other_bindings
+                and not any(parent in writes for parent in _path_ancestors(name))
             ):
                 bindings.names[name] = {"<logging.Logger>"}
         # Lambda bodies and comprehensions in a class body skip the class namespace.
@@ -652,6 +662,7 @@ class _ScopedImports(ImportMap):
                     name: {"<logging.Logger>"}
                     for name, values in field_values.items()
                     if all(values)
+                    and not any(parent in field_values for parent in _path_ancestors(name))
                 }
                 for method in methods:
                     own: dict[str, set[str]] | None = None

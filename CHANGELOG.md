@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Invalidate nested logger identities when their receiver or an ancestor attribute is
+  assigned, deleted, or otherwise rebound, including shared evidence across direct methods.
+  Preserve intact direct and sibling fields. Logging detector metadata advances to version 4;
+  older logging baselines warn as non-comparable. Package and JSON schema versions are unchanged.
+
 - Preserve runtime imports and logger aliases across module/class annotations without values;
   function annotations still shadow locals and valued annotations still invalidate aliases.
 - Share logger fields by instance receiver identity across direct undecorated methods, including

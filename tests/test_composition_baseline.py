@@ -213,7 +213,7 @@ def test_invalid_baselines_exit_2(tmp_path: Path, content: str | None, message: 
     assert message in stderr
 
 
-@pytest.mark.parametrize("detector,old_version", [("qt", 0), ("test_placement", 1)])
+@pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])
 def test_detector_version_mismatch_warns_and_marks_not_comparable(
     tmp_path: Path, detector: str, old_version: int
 ) -> None:
