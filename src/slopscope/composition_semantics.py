@@ -34,7 +34,7 @@ HELPER_OR_UNKNOWN = "helper_or_unknown"
 
 DETECTORS = (
     CompositionDetector(name=QT, kind="tag", version=3),
-    CompositionDetector(name=LOGGING, kind="tag", version=3),
+    CompositionDetector(name=LOGGING, kind="tag", version=4),
     CompositionDetector(name=DATA_SHAPE, kind="tag", version=3),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
     CompositionDetector(name="test_placement", kind="placement", version=3),
@@ -338,6 +338,27 @@ def _argument_names(arguments: ast.arguments) -> set[str]:
     return names
 
 
+def _rebound_names(nodes: Sequence[ast.AST], *, stores: bool = True) -> set[str]:
+    """Names this scope binds other than through its own parameters.
+
+    With ``stores=False``, only bindings made by something other than a plain name
+    assignment or deletion (definitions, imports, captures, declarations).
+    """
+    names = {n.name for n in nodes if isinstance(n, (*_FUNCTION_TYPES, ast.ClassDef))}
+    names.update(ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom)).names)
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            if stores:
+                names.add(node.id)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            names.update(node.names)
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return names
+
+
 def _instance_receiver(method: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
     positional = (*method.args.posonlyargs, *method.args.args)
     return positional[0].arg if positional else None
@@ -432,6 +453,13 @@ def dotted_name(node: ast.AST) -> str | None:
     return None
 
 
+def _path_ancestors(name: str) -> Iterator[str]:
+    """Yield proper receiver paths, keeping sibling fields independent."""
+    while "." in name:
+        name = name.rsplit(".", 1)[0]
+        yield name
+
+
 class _ScopedImports(ImportMap):
     """Resolve each expression in its lexical environment; class fields stay in their class."""
 
@@ -506,6 +534,22 @@ class _ScopedImports(ImportMap):
         elif isinstance(node, _TYPE_ALIAS_TYPES):
             self._expression(node.value, typed)
 
+    def _resolve_body(
+        self, body: Sequence[ast.stmt], bindings: ImportMap, enclosing: ImportMap | None
+    ) -> None:
+        """Resolve expression roots once, separately from the flat binding inventory."""
+        pending: list[ast.AST] = list(body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, *_TYPE_ALIAS_TYPES)):
+                self._header(node, bindings, enclosing)
+            elif isinstance(node, ast.expr):
+                # _expression owns all child expressions, including nested defaults
+                # and lambda/comprehension bodies with their own lexical bindings.
+                self._expression(node, bindings, enclosing)
+            else:
+                pending.extend(ast.iter_child_nodes(node))
+
     def _visit(
         self,
         body: Sequence[ast.stmt],
@@ -526,12 +570,10 @@ class _ScopedImports(ImportMap):
         for binding_name in tuple(bindings.names):
             if binding_name.split(".", 1)[0] in ambiguous:
                 bindings.names.pop(binding_name, None)
+        # Assignment, deletion, import, definition, except/match capture and
+        # global/nonlocal declarations all rebind a receiver for the whole scope.
+        rebound = _rebound_names(nodes)
         if fields:
-            rebound = {
-                n.id
-                for n in nodes
-                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del)
-            }
             bindings.names.update(
                 {
                     name: value
@@ -568,21 +610,17 @@ class _ScopedImports(ImportMap):
             for n in nodes
             if isinstance(n, ast.Name | ast.Attribute) and isinstance(n.ctx, ast.Store | ast.Del)
         )
-        other_bindings = {n.name for n in nodes if isinstance(n, (*_FUNCTION_TYPES, ast.ClassDef))}
-        other_bindings.update(
-            ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom)).names
-        )
-        for node in nodes:
-            if isinstance(node, ast.Global | ast.Nonlocal):
-                other_bindings.update(node.names)
-            elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
-                other_bindings.add(node.name)
-            elif isinstance(node, ast.MatchMapping) and node.rest:
-                other_bindings.add(node.rest)
+        other_bindings = _rebound_names(nodes, stores=False)
         if arguments is not None:
             other_bindings.update(_argument_names(arguments))
+
+        def ancestor_rebound(name: str) -> bool:
+            return any(parent in writes or parent in rebound for parent in _path_ancestors(name))
+
+        for name in tuple(bindings.names):
+            if name in writes or ancestor_rebound(name):
+                bindings.names.pop(name, None)
         for name, values in writes.items():
-            bindings.names.pop(name, None)
             # Do not infer through augmented assignment, deletion, or other rebinding.
             if (
                 len(values) == 1
@@ -590,24 +628,20 @@ class _ScopedImports(ImportMap):
                 and _is_logging_getlogger(values[0], bindings)
                 and stores[name] == 1
                 and name not in other_bindings
+                and not ancestor_rebound(name)
             ):
                 bindings.names[name] = {"<logging.Logger>"}
         # Lambda bodies and comprehensions in a class body skip the class namespace.
         enclosing = inherited if class_scope else None
         for node in nodes:
             self.scopes[id(node)] = bindings
-            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
-                self._header(node, bindings, enclosing)
         if shallow:
             # Only this scope's own bindings are needed (to gather class fields);
             # the caller visits the full body exactly once afterwards.
             return
+        self._resolve_body(body, bindings, enclosing)
         for node in nodes:
-            if isinstance(
-                node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
-            ):
-                self._expression(node, bindings, enclosing)
-            elif isinstance(node, _FUNCTION_TYPES):
+            if isinstance(node, _FUNCTION_TYPES):
                 # Methods are visited shallowly here; their ClassDef visits them fully
                 # once, with fields. Visiting twice would double work per nesting level.
                 self._visit(
@@ -628,12 +662,7 @@ class _ScopedImports(ImportMap):
                     if receiver is None:
                         continue
                     method_nodes = _scope_nodes(method.body, function_scope=True)
-                    receiver_rebound = any(
-                        isinstance(n, ast.Name)
-                        and n.id == receiver
-                        and isinstance(n.ctx, ast.Store | ast.Del)
-                        for n in method_nodes
-                    )
+                    receiver_rebound = receiver in _rebound_names(method_nodes)
                     for child in method_nodes:
                         if isinstance(child, ast.Attribute) and isinstance(
                             child.ctx, ast.Store | ast.Del
@@ -652,6 +681,7 @@ class _ScopedImports(ImportMap):
                     name: {"<logging.Logger>"}
                     for name, values in field_values.items()
                     if all(values)
+                    and not any(parent in field_values for parent in _path_ancestors(name))
                 }
                 for method in methods:
                     own: dict[str, set[str]] | None = None

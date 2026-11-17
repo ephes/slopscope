@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 import textwrap
+from collections import Counter
 
 import pytest
 
 from slopscope import composition
+from slopscope.composition_semantics import ImportMap, _ScopedImports
 
 
 def analyze(source: str, *, test_file: bool = False) -> composition.FileAnalysis:
@@ -429,3 +432,66 @@ def test_module_imports_still_bind_lambda_and_comprehension_bodies_in_class() ->
             handler = lambda: logging.info("yes")
     """)
     assert result.counts.tag("logging") == 3
+
+
+@pytest.mark.parametrize("owner", ["assignment", "function", "method", "class_base"])
+def test_nested_default_expressions_have_linear_resolver_visits(
+    monkeypatch: pytest.MonkeyPatch, owner: str
+) -> None:
+    original = _ScopedImports._expression
+    visits = 0
+    expressions: Counter[int] = Counter()
+
+    def counted(
+        self: _ScopedImports, node: ast.AST, bindings: ImportMap, enclosing: ImportMap | None = None
+    ) -> None:
+        nonlocal visits
+        visits += 1
+        if isinstance(node, ast.expr):
+            expressions[id(node)] += 1
+        original(self, node, bindings, enclosing)
+
+    monkeypatch.setattr(_ScopedImports, "_expression", counted)
+    totals = []
+    for depth in (20, 40, 80, 160):
+        expression = 'logging.info("default")'
+        for level in range(depth):
+            expression = f'(lambda x{level}={expression}: logging.info("body"))'
+        if owner == "function":
+            body = f'def f(logging, x={expression}):\n    logging.info("no")\n'
+        elif owner == "method":
+            body = f"class C:\n    def f(self, logging, *, x={expression}): pass\n"
+        elif owner == "class_base":
+            body = f"class C({expression}): pass\n"
+        else:
+            body = f"value = {expression}\n"
+        visits = 0
+        expressions.clear()
+        result = analyze("import logging\n" + body + 'logging.info("outer")\n')
+        # Import, one header/assignment with real calls, and the final outer call.
+        assert result.counts.tag("logging") == 3
+        totals.append(visits)
+        assert max(expressions.values()) == 1
+    # A fixed number of resolver visits per syntax node, not per containing header.
+    assert all(
+        larger <= 2 * smaller + 20 for smaller, larger in zip(totals, totals[1:], strict=False)
+    )
+
+
+@pytest.mark.parametrize(
+    "expression,expected",
+    [
+        ('lambda logging=(lambda logging: logging.info("no")): logging.info("no")', 2),
+        ('lambda logging=(lambda x=logging.info("yes"): x): logging.info("no")', 3),
+        ("lambda x=(lambda y=(logging := object()): y): x", 0),
+    ],
+)
+def test_nested_default_reports_keep_lexical_and_walrus_boundaries(
+    expression: str, expected: int
+) -> None:
+    result = analyze(
+        f'import logging\ndef f(x=({expression})):\n    logging.info("body")\n'
+        'logging.info("outer")\n'
+    )
+    # Expected counts exclude the import, which always tags its own unit.
+    assert result.counts.tag("logging") == expected + 1

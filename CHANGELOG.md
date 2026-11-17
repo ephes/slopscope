@@ -8,6 +8,17 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Resolve definition headers and nested lambda defaults once in their lexical environment,
+  separating binding inventory from expression traversal. Resolver visits now grow linearly
+  with nested-default syntax while preserving default child scopes, walrus bindings, and
+  class/lambda/comprehension boundaries. Counting rules and version metadata are unchanged.
+
+- Invalidate nested logger identities when their receiver or an ancestor attribute is
+  assigned, deleted, or otherwise rebound (import, nested definition, `except`/`match` capture,
+  or `global`/`nonlocal` declaration), including shared evidence across direct methods.
+  Preserve intact direct and sibling fields. Logging detector metadata advances to version 4;
+  older logging baselines warn as non-comparable. Package and JSON schema versions are unchanged.
+
 - Preserve runtime imports and logger aliases across module/class annotations without values;
   function annotations still shadow locals and valued annotations still invalidate aliases.
 - Share logger fields by instance receiver identity across direct undecorated methods, including

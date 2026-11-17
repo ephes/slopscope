@@ -380,7 +380,7 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`
 
-Qt, logging, and data-shape detector version 3 uses conservative lexical binding resolution.
+Qt/data-shape detector version 3 and logging detector version 4 use conservative lexical binding resolution.
 Parameters, assignments, deletions, ambiguous imports, and declared global/nonlocal bindings
 invalidate names throughout their scope; nested imports do not leak. Only direct signature
 parameters bind arguments. Writes in definition defaults/decorators/bases affect the enclosing
@@ -389,9 +389,17 @@ resolve only the first iterable outside their complete set of local targets. On 
 explicit type parameters shadow aliases in their annotation and body scopes. Module/class
 annotations without values preserve runtime bindings; function annotations still declare locals. Logger instance fields are shared only among direct undecorated methods
 of their own class, using each method's first positional receiver (including positional-only
-parameters) regardless of its spelling. These accuracy changes can increase or reduce counts;
+parameters) regardless of its spelling. Assignment, deletion, or augmented assignment to a
+logger field's receiver or any ancestor attribute invalidates that nested logger identity,
+including shared evidence from another direct method. Rebinding the receiver name by import,
+definition, `except`/`match` capture, or `global`/`nonlocal` declaration does too. Unchanged sibling fields remain eligible.
+These accuracy changes can increase or reduce counts;
 baseline comparison warns about older detector versions. Test-placement detector version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
 inheritance also requires an unambiguous, unmodified class name.
+
+Semantic resolution inventories lexical bindings separately from visiting expressions. Definition
+headers and nested lambda defaults are resolved once in their owning environment, so doubling
+nested-default syntax produces linear growth in resolver expression visits.
 
 Duplicate extension compares overlap positions only within each token segment and expands nested
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
