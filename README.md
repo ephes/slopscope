@@ -391,7 +391,8 @@ annotations without values preserve runtime bindings; function annotations still
 of their own class, using each method's first positional receiver (including positional-only
 parameters) regardless of its spelling. Assignment, deletion, or augmented assignment to a
 logger field's receiver or any ancestor attribute invalidates that nested logger identity,
-including shared evidence from another direct method. Unchanged sibling fields remain eligible.
+including shared evidence from another direct method. Rebinding the receiver name by import,
+definition, `except`/`match` capture, or `global`/`nonlocal` declaration does too. Unchanged sibling fields remain eligible.
 These accuracy changes can increase or reduce counts;
 baseline comparison warns about older detector versions. Test-placement detector version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
 inheritance also requires an unambiguous, unmodified class name.

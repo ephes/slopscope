@@ -338,6 +338,27 @@ def _argument_names(arguments: ast.arguments) -> set[str]:
     return names
 
 
+def _rebound_names(nodes: Sequence[ast.AST], *, stores: bool = True) -> set[str]:
+    """Names this scope binds other than through its own parameters.
+
+    With ``stores=False``, only bindings made by something other than a plain name
+    assignment or deletion (definitions, imports, captures, declarations).
+    """
+    names = {n.name for n in nodes if isinstance(n, (*_FUNCTION_TYPES, ast.ClassDef))}
+    names.update(ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom)).names)
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            if stores:
+                names.add(node.id)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            names.update(node.names)
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return names
+
+
 def _instance_receiver(method: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
     positional = (*method.args.posonlyargs, *method.args.args)
     return positional[0].arg if positional else None
@@ -549,12 +570,10 @@ class _ScopedImports(ImportMap):
         for binding_name in tuple(bindings.names):
             if binding_name.split(".", 1)[0] in ambiguous:
                 bindings.names.pop(binding_name, None)
+        # Assignment, deletion, import, definition, except/match capture and
+        # global/nonlocal declarations all rebind a receiver for the whole scope.
+        rebound = _rebound_names(nodes)
         if fields:
-            rebound = {
-                n.id
-                for n in nodes
-                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del)
-            }
             bindings.names.update(
                 {
                     name: value
@@ -591,21 +610,15 @@ class _ScopedImports(ImportMap):
             for n in nodes
             if isinstance(n, ast.Name | ast.Attribute) and isinstance(n.ctx, ast.Store | ast.Del)
         )
-        other_bindings = {n.name for n in nodes if isinstance(n, (*_FUNCTION_TYPES, ast.ClassDef))}
-        other_bindings.update(
-            ImportMap(n for n in nodes if isinstance(n, ast.Import | ast.ImportFrom)).names
-        )
-        for node in nodes:
-            if isinstance(node, ast.Global | ast.Nonlocal):
-                other_bindings.update(node.names)
-            elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
-                other_bindings.add(node.name)
-            elif isinstance(node, ast.MatchMapping) and node.rest:
-                other_bindings.add(node.rest)
+        other_bindings = _rebound_names(nodes, stores=False)
         if arguments is not None:
             other_bindings.update(_argument_names(arguments))
+
+        def ancestor_rebound(name: str) -> bool:
+            return any(parent in writes or parent in rebound for parent in _path_ancestors(name))
+
         for name in tuple(bindings.names):
-            if name in writes or any(parent in writes for parent in _path_ancestors(name)):
+            if name in writes or ancestor_rebound(name):
                 bindings.names.pop(name, None)
         for name, values in writes.items():
             # Do not infer through augmented assignment, deletion, or other rebinding.
@@ -615,7 +628,7 @@ class _ScopedImports(ImportMap):
                 and _is_logging_getlogger(values[0], bindings)
                 and stores[name] == 1
                 and name not in other_bindings
-                and not any(parent in writes for parent in _path_ancestors(name))
+                and not ancestor_rebound(name)
             ):
                 bindings.names[name] = {"<logging.Logger>"}
         # Lambda bodies and comprehensions in a class body skip the class namespace.
@@ -649,12 +662,7 @@ class _ScopedImports(ImportMap):
                     if receiver is None:
                         continue
                     method_nodes = _scope_nodes(method.body, function_scope=True)
-                    receiver_rebound = any(
-                        isinstance(n, ast.Name)
-                        and n.id == receiver
-                        and isinstance(n.ctx, ast.Store | ast.Del)
-                        for n in method_nodes
-                    )
+                    receiver_rebound = receiver in _rebound_names(method_nodes)
                     for child in method_nodes:
                         if isinstance(child, ast.Attribute) and isinstance(
                             child.ctx, ast.Store | ast.Del

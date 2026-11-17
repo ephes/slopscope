@@ -706,3 +706,60 @@ def test_local_nested_logger_refuses_ancestor_write_but_keeps_sibling() -> None:
             holder.direct.info("logging")
     """)
     assert result.tag("logging") == 4
+
+
+@pytest.mark.parametrize(
+    "rebinding",
+    [
+        "try:\n    pass\nexcept Exception as holder:\n    pass",
+        "match value:\n    case holder:\n        pass",
+        "match value:\n    case [*holder]:\n        pass",
+        "match value:\n    case {**holder}:\n        pass",
+        "import holder",
+        "def holder():\n    pass",
+        "class holder:\n    pass",
+    ],
+)
+def test_local_nested_logger_refuses_non_assignment_receiver_rebinding(rebinding: str) -> None:
+    result = counts(
+        "import logging\n"
+        "def run(holder, value, keeper):\n"
+        '    holder.backend.log = logging.getLogger("nested")\n'
+        '    keeper.log = logging.getLogger("kept")\n' + textwrap.indent(rebinding, "    ") + "\n"
+        '    holder.backend.log.info("not logging")\n'
+        '    keeper.log.info("logging")\n'
+    )
+    # Import, two getLogger assignments, and only the intact receiver's logger call.
+    assert result.tag("logging") == 4
+
+
+@pytest.mark.parametrize(
+    "rebinding",
+    [
+        "try:\n    pass\nexcept Exception as this:\n    pass",
+        "match value:\n    case this:\n        pass",
+        "import this",
+        "def this():\n    pass",
+    ],
+)
+def test_logger_fields_refuse_non_assignment_receiver_rebinding(rebinding: str) -> None:
+    source = (
+        "import logging\n"
+        "class Service:\n"
+        "    def setup(this, value):\n"
+        '        this.backend.log = logging.getLogger("nested")\n'
+        + textwrap.indent(rebinding, "        ")
+        + "\n"
+        "    def run(self):\n"
+        '        self.backend.log.info("not logging")\n'
+        "class Other:\n"
+        "    def setup(this):\n"
+        '        this.backend.log = logging.getLogger("other")\n'
+        "    def run(self, value):\n"
+        + textwrap.indent(rebinding.replace("this", "self"), "        ")
+        + "\n"
+        '        self.backend.log.info("not logging")\n'
+    )
+    result = counts(source)
+    # Import and two getLogger assignments only; every later call follows a rebinding.
+    assert result.tag("logging") == 3

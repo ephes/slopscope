@@ -14,7 +14,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   class/lambda/comprehension boundaries. Counting rules and version metadata are unchanged.
 
 - Invalidate nested logger identities when their receiver or an ancestor attribute is
-  assigned, deleted, or otherwise rebound, including shared evidence across direct methods.
+  assigned, deleted, or otherwise rebound (import, nested definition, `except`/`match` capture,
+  or `global`/`nonlocal` declaration), including shared evidence across direct methods.
   Preserve intact direct and sibling fields. Logging detector metadata advances to version 4;
   older logging baselines warn as non-comparable. Package and JSON schema versions are unchanged.
 

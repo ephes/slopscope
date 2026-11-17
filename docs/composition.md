@@ -235,7 +235,9 @@ each method's first positional receiver, including positional-only parameters. R
 may differ (`this.log` and `self.log` refer to the same field); other classes do not inherit that
 evidence. Rebinding the receiver or conflicting writes to the normalized field invalidate shared
 evidence. Writes or deletion at any ancestor attribute also invalidate a nested logger path,
-both within a scope and across direct methods; unchanged sibling fields remain eligible.
+both within a scope and across direct methods. Receiver rebinding includes assignment, deletion,
+imports, nested `def`/`class` names, `except ... as` and `match` captures, and declared
+`global`/`nonlocal` names; unchanged sibling fields remain eligible.
 Arbitrary aliases of the instance are not inferred. This is static analysis: call side
 effects, inheritance, decorated methods, and runtime mutation across scopes are not inferred.
 Logging version 4 corrects ancestor-path invalidation; baselines with older detector versions are marked non-comparable. The compatibility wording
