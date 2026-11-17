@@ -210,6 +210,8 @@ Lambda-body assignment expressions shadow throughout the lambda without escaping
 nested body bindings remain separate. Lambdas and comprehensions keep their own bindings.
 Only a comprehension's first iterable uses the enclosing environment: all iteration targets
 are lexical locals in every later iterable, filter, and result expression, and never leak out.
+Inside a class body, lambda bodies and those later comprehension parts skip the class
+namespace, so class-local imports do not bind them.
 On Python 3.12+, explicit type parameters shadow imported aliases in function/class bodies,
 function annotations, generic class bases/keywords, type-alias values, and parameter bounds
 (and defaults on Python 3.13+). Function defaults and all decorators retain the enclosing

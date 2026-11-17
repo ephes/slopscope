@@ -450,21 +450,28 @@ class _ScopedImports(ImportMap):
             return frozenset(f"{base}.{node.attr}" for base in self.resolve(node.value))
         return frozenset()
 
-    def _expression(self, node: ast.AST, bindings: ImportMap) -> None:
+    def _expression(
+        self, node: ast.AST, bindings: ImportMap, enclosing: ImportMap | None = None
+    ) -> None:
+        """``enclosing`` is the environment child scopes see when ``bindings`` is a class body.
+
+        Lambda bodies and comprehensions (after their first iterable) skip class scope.
+        """
         self.scopes[id(node)] = bindings
+        nested = bindings if enclosing is None else enclosing
         if isinstance(node, ast.Lambda):
             for default in (*node.args.defaults, *node.args.kw_defaults):
                 if default is not None:
-                    self._expression(default, bindings)
+                    self._expression(default, bindings, enclosing)
             local = _scope_bindings(
-                _scope_nodes([node.body], function_scope=True), bindings, node.args
+                _scope_nodes([node.body], function_scope=True), nested, node.args
             )
             self._expression(node.body, local)
         elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
-            self._expression(node.generators[0].iter, bindings)
+            self._expression(node.generators[0].iter, bindings, enclosing)
             # All targets are lexical locals even before their own clause executes.
             local = _scope_bindings(
-                [n for generator in node.generators for n in ast.walk(generator.target)], bindings
+                [n for generator in node.generators for n in ast.walk(generator.target)], nested
             )
             for index, generator in enumerate(node.generators):
                 if index:
@@ -479,11 +486,13 @@ class _ScopedImports(ImportMap):
                 self._expression(node.elt, local)
         else:
             for child in ast.iter_child_nodes(node):
-                self._expression(child, bindings)
+                self._expression(child, bindings, enclosing)
 
-    def _header(self, node: ast.AST, bindings: ImportMap) -> None:
+    def _header(
+        self, node: ast.AST, bindings: ImportMap, enclosing: ImportMap | None = None
+    ) -> None:
         for child in _definition_header(node):
-            self._expression(child, bindings)
+            self._expression(child, bindings, enclosing)
         typed = _type_bindings(node, bindings)
         parameters: list[ast.AST] = getattr(node, "type_params", [])
         for parameter in parameters:
@@ -583,10 +592,12 @@ class _ScopedImports(ImportMap):
                 and name not in other_bindings
             ):
                 bindings.names[name] = {"<logging.Logger>"}
+        # Lambda bodies and comprehensions in a class body skip the class namespace.
+        enclosing = inherited if class_scope else None
         for node in nodes:
             self.scopes[id(node)] = bindings
             if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
-                self._header(node, bindings)
+                self._header(node, bindings, enclosing)
         if shallow:
             # Only this scope's own bindings are needed (to gather class fields);
             # the caller visits the full body exactly once afterwards.
@@ -595,7 +606,7 @@ class _ScopedImports(ImportMap):
             if isinstance(
                 node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
             ):
-                self._expression(node, bindings)
+                self._expression(node, bindings, enclosing)
             elif isinstance(node, _FUNCTION_TYPES):
                 # Methods are visited shallowly here; their ClassDef visits them fully
                 # once, with fields. Visiting twice would double work per nesting level.

@@ -390,3 +390,42 @@ def test_rebound_and_unrelated_receivers_cannot_consume_shared_logger_fields() -
                 alias.log.info("no")
     """)
     assert result.counts.tag("logging") == 2
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        'values = [logging.info("no") for _ in ()]',
+        'values = {item: logging.info("no") for item in ()}',
+        'values = (item for item in () if logging.info("no"))',
+        'values = [item for _ in () for item in logging.getLogger("no").handlers]',
+        'handler = lambda: logging.info("no")',
+        'def method(self, x=lambda: logging.info("no")): pass',
+        'values = [lambda: logging.info("no") for _ in ()]',
+    ],
+)
+def test_class_local_imports_do_not_bind_lambda_or_comprehension_bodies(expression: str) -> None:
+    result = analyze("class C:\n    import logging\n    " + expression + "\n")
+    assert result.counts.tag("logging") == 1
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        'values = [item for item in logging.getLogger("yes").handlers]',
+        'handler = lambda x=logging.getLogger("yes"): x',
+    ],
+)
+def test_class_local_imports_still_bind_class_evaluated_parts(expression: str) -> None:
+    result = analyze("class C:\n    import logging\n    " + expression + "\n")
+    assert result.counts.tag("logging") == 2
+
+
+def test_module_imports_still_bind_lambda_and_comprehension_bodies_in_class() -> None:
+    result = analyze("""
+        import logging
+        class C:
+            values = [logging.info("yes") for _ in ()]
+            handler = lambda: logging.info("yes")
+    """)
+    assert result.counts.tag("logging") == 3
