@@ -199,9 +199,11 @@ add up to anything, and tags never change a line's category.
 
 Qt, logging, and data-shape detector version 3 resolves names through lexically scoped imports.
 Parameters, assignment/deletion, conflicting imports, and declared `global`/`nonlocal` names
-invalidate a binding throughout that scope, regardless of statement order. Child imports never
-leak into a parent or sibling; class-local imports do not bind method bodies. Function defaults,
-decorators, and class bases use the enclosing scope. Only direct signature parameters bind
+invalidate a binding throughout that scope, regardless of statement order. Annotation-only
+name declarations preserve module/class runtime bindings, including imported names and logger
+aliases; in functions they declare locals. Annotations with values are ordinary assignments.
+Child imports never leak into a parent or sibling; class-local imports do not bind method bodies.
+Function defaults, decorators, and nongeneric class bases use the enclosing scope. Only direct signature parameters bind
 function arguments; child signatures in defaults do not shadow the function body.
 Writes in definition defaults, decorators, and class bases invalidate enclosing bindings.
 Lambda-body assignment expressions shadow throughout the lambda without escaping to its parent;
@@ -223,10 +225,12 @@ classes. This is a known count drop of version 2.
 
 A logger alias must have one unambiguous assignment from a resolved `logging.getLogger()` call.
 Instance logger fields may be shared between direct undecorated methods of the same class using
-the same receiver name; other classes do not inherit that evidence. Rebinding a field invalidates
-that shared evidence. This is static analysis: call side effects, inheritance, decorated methods,
-and runtime mutation across scopes are not inferred. Version 2 can reduce semantic counts;
-baselines with older detector versions are marked non-comparable. The compatibility wording
+each method's first positional receiver, including positional-only parameters. Receiver spellings
+may differ (`this.log` and `self.log` refer to the same field); other classes do not inherit that
+evidence. Rebinding the receiver or conflicting writes to the normalized field invalidate shared
+evidence. Arbitrary aliases of the instance are not inferred. This is static analysis: call side
+effects, inheritance, decorated methods, and runtime mutation across scopes are not inferred.
+Version 3 can increase or reduce semantic counts; baselines with older detector versions are marked non-comparable. The compatibility wording
 marker retains its existing rules.
 
 A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
@@ -448,7 +452,8 @@ file to keep a snapshot.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
-  Analyzer version 4 corrects signature/header binding boundaries for overloads.
+  Analyzer version 4 corrects signature/header, generic-parameter, and annotation-only binding
+  boundaries for overloads. Semantic/placement detector version 3 uses the corrected lexical rules.
   Version 3 keeps comprehension iteration targets out of surrounding overload bindings.
   Version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
   instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit

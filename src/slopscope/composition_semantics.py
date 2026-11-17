@@ -278,13 +278,23 @@ def _definition_header(node: ast.AST) -> Iterator[ast.AST]:
         yield node.name
 
 
-def _scope_nodes(body: Sequence[ast.AST]) -> list[ast.AST]:
+def _scope_nodes(body: Sequence[ast.AST], *, function_scope: bool = False) -> list[ast.AST]:
     """Collect one lexical scope without importing bindings from child scopes."""
     nodes: list[ast.AST] = []
     pending: list[ast.AST] = list(body)
     while pending:
         node = pending.pop()
         nodes.append(node)
+        if (
+            isinstance(node, ast.AnnAssign)
+            and node.value is None
+            and isinstance(node.target, ast.Name)
+            and not function_scope
+        ):
+            # Module/class annotations do not replace an existing runtime value;
+            # function annotations instead declare a lexical local.
+            pending.append(node.annotation)
+            continue
         if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
             pending.extend(_definition_header(node))
         if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
@@ -326,6 +336,11 @@ def _argument_names(arguments: ast.arguments) -> set[str]:
     names = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
     names.update(arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
     return names
+
+
+def _instance_receiver(method: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    positional = (*method.args.posonlyargs, *method.args.args)
+    return positional[0].arg if positional else None
 
 
 def _scope_bindings(
@@ -381,7 +396,7 @@ def overload_functions(tree: ast.Module) -> frozenset[int]:
         *,
         class_scope: bool = False,
     ) -> None:
-        nodes = _scope_nodes(body)
+        nodes = _scope_nodes(body, function_scope=arguments is not None)
         bindings = _scope_bindings(nodes, inherited, arguments)
         for node in nodes:
             if isinstance(node, _FUNCTION_TYPES):
@@ -441,7 +456,9 @@ class _ScopedImports(ImportMap):
             for default in (*node.args.defaults, *node.args.kw_defaults):
                 if default is not None:
                     self._expression(default, bindings)
-            local = _scope_bindings(_scope_nodes([node.body]), bindings, node.args)
+            local = _scope_bindings(
+                _scope_nodes([node.body], function_scope=True), bindings, node.args
+            )
             self._expression(node.body, local)
         elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
             self._expression(node.generators[0].iter, bindings)
@@ -490,7 +507,7 @@ class _ScopedImports(ImportMap):
         fields: dict[str, set[str]] | None = None,
         shallow: bool = False,
     ) -> None:
-        nodes = _scope_nodes(body)
+        nodes = _scope_nodes(body, function_scope=arguments is not None)
         bindings = _scope_bindings(nodes, inherited, arguments)
         # Tags refuse every ambiguous import and declared cross-scope mutation.
         ambiguous = {name for name, values in bindings.names.items() if len(values) != 1}
@@ -513,7 +530,13 @@ class _ScopedImports(ImportMap):
                     if name.split(".", 1)[0] not in rebound
                 }
             )
-        assignments = [n for n in nodes if isinstance(n, ast.Assign | ast.AnnAssign)]
+        assignments = [
+            n
+            for n in nodes
+            if isinstance(n, ast.Assign)
+            or isinstance(n, ast.AnnAssign)
+            and (n.value is not None or arguments is not None)
+        ]
         # Ordinary rebinding, deletion or a different assignment invalidates a logger alias.
         writes: dict[str, list[ast.AST | None]] = {}
         for node in nodes:
@@ -590,10 +613,10 @@ class _ScopedImports(ImportMap):
                 methods = [n for n in _scope_nodes(node.body) if isinstance(n, _FUNCTION_TYPES)]
                 field_values: dict[str, list[bool]] = {}
                 for method in methods:
-                    if not method.args.args:
+                    receiver = _instance_receiver(method)
+                    if receiver is None:
                         continue
-                    receiver = method.args.args[0].arg
-                    method_nodes = _scope_nodes(method.body)
+                    method_nodes = _scope_nodes(method.body, function_scope=True)
                     receiver_rebound = any(
                         isinstance(n, ast.Name)
                         and n.id == receiver
@@ -607,7 +630,9 @@ class _ScopedImports(ImportMap):
                             name = dotted_name(child)
                             if name and name.startswith(receiver + "."):
                                 resolved = self.scopes[id(child)].names.get(name, set())
-                                field_values.setdefault(name, []).append(
+                                # Fields belong to the instance, not the spelling of
+                                # each method's first positional parameter.
+                                field_values.setdefault(name[len(receiver) + 1 :], []).append(
                                     resolved == {"<logging.Logger>"}
                                     and not method.decorator_list
                                     and not receiver_rebound
@@ -619,13 +644,9 @@ class _ScopedImports(ImportMap):
                 }
                 for method in methods:
                     own: dict[str, set[str]] | None = None
-                    if method.args.args and not method.decorator_list:
-                        receiver = method.args.args[0].arg
-                        own = {
-                            name: value
-                            for name, value in known.items()
-                            if name.startswith(receiver + ".")
-                        }
+                    receiver = _instance_receiver(method)
+                    if receiver is not None and not method.decorator_list:
+                        own = {f"{receiver}.{name}": value for name, value in known.items()}
                     self._visit(method.body, _type_bindings(method, outer), method.args, fields=own)
 
 

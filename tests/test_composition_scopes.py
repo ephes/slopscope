@@ -246,3 +246,147 @@ def test_generic_annotation_scope_can_use_class_imports_without_leaking_to_metho
             type Alias[T] = logging.getLogger()
     """)
     assert result.counts.tag("logging") == 3
+
+
+@pytest.mark.parametrize("class_scope", [False, True])
+@pytest.mark.parametrize("annotation_first", [False, True])
+def test_annotation_only_keeps_module_and_class_runtime_imports(
+    class_scope: bool, annotation_first: bool
+) -> None:
+    statements = ["import logging", "logging: object"]
+    if annotation_first:
+        statements.reverse()
+    body = "\n".join(statements) + '\nlogging.info("yes")\n'
+    if class_scope:
+        body = "class C:\n" + textwrap.indent(body, "    ")
+    assert analyze(body).counts.tag("logging") == 2
+    statements = ["from typing import overload", "overload: object"]
+    if annotation_first:
+        statements.reverse()
+    body = "\n".join(statements) + "\n@overload\ndef stub(): ...\n"
+    if class_scope:
+        body = "class C:\n" + textwrap.indent(body, "    ")
+    assert next(f for f in analyze(body).functions if f.name.endswith("stub")).overload
+
+
+@pytest.mark.parametrize("class_scope", [False, True])
+def test_annotation_only_keeps_inferred_logger_alias(class_scope: bool) -> None:
+    body = 'logger = logging.getLogger()\nlogger: object\nlogger.info("yes")\n'
+    if class_scope:
+        body = "class C:\n" + textwrap.indent(body, "    ")
+    assert analyze("import logging\n" + body).counts.tag("logging") == 3
+
+
+@pytest.mark.parametrize("scope", ["module", "class", "function"])
+@pytest.mark.parametrize("value", ["", " = ordinary"])
+def test_annotation_shadowing_depends_on_runtime_write_and_function_scope(
+    scope: str, value: str
+) -> None:
+    body = f'logging: object{value}\nlogging.info("call")\n'
+    if scope != "module":
+        header = "class C:" if scope == "class" else "def f():"
+        body = header + "\n" + textwrap.indent(body, "    ")
+    expected = 2 if not value and scope != "function" else 1
+    assert analyze("import logging\n" + body).counts.tag("logging") == expected
+
+
+def test_function_annotation_still_shadows_overload() -> None:
+    result = analyze("""
+        from typing import overload
+        def f():
+            overload: object
+            @overload
+            def stub(): ...
+    """)
+    assert not next(f for f in result.functions if f.name == "f.stub").overload
+
+
+def test_annotation_only_keeps_fixture_binding() -> None:
+    result = analyze(
+        """
+        from pytest import fixture
+        fixture: object
+        @fixture
+        def resource(): pass
+    """,
+        test_file=True,
+    )
+    assert result.counts.placement("fixture") == 2
+
+
+@pytest.mark.parametrize("writer,reader", [("this", "self"), ("self", "this"), ("obj", "instance")])
+@pytest.mark.parametrize(
+    "writer_posonly,reader_posonly", [(False, False), (True, False), (False, True), (True, True)]
+)
+def test_logger_fields_follow_instance_receiver_identity(
+    writer: str, reader: str, writer_posonly: bool, reader_posonly: bool
+) -> None:
+    writer_args = writer + (", /" if writer_posonly else "")
+    reader_args = reader + (", /" if reader_posonly else "")
+    result = analyze(f"""
+        import logging
+        class Service:
+            def __init__({writer_args}):
+                {writer}.log = logging.getLogger()
+            def run({reader_args}):
+                {reader}.log.info("yes")
+        class Other:
+            def run({reader_args}):
+                {reader}.log.info("no")
+    """)
+    assert result.counts.tag("logging") == 3
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "def reset(instance):\n    instance.log = ordinary",
+        "def reset(instance, /):\n    del instance.log",
+        "@property\ndef reset(instance):\n    instance.log = ordinary",
+        "@staticmethod\ndef reset(instance):\n    instance.log = ordinary",
+        "@classmethod\ndef reset(instance):\n    instance.log = ordinary",
+        "def reset(instance):\n    instance = ordinary\n    instance.log = logging.getLogger()",
+    ],
+)
+def test_logger_field_conflicts_use_normalized_receiver(method: str) -> None:
+    source = """\
+import logging
+class Service:
+    def __init__(this):
+        this.log = logging.getLogger()
+    def run(self):
+        self.log.info("no")
+"""
+    result = analyze(source + textwrap.indent(method, "    ") + "\n")
+    assert result.counts.tag("logging") == (3 if "getLogger" in method else 2)
+
+
+@pytest.mark.parametrize("decorator", ["staticmethod", "classmethod", "ordinary"])
+def test_decorated_methods_cannot_consume_shared_logger_fields(decorator: str) -> None:
+    result = analyze(f"""
+        import logging
+        class Service:
+            def __init__(this):
+                this.log = logging.getLogger()
+            @{decorator}
+            def run(self, /):
+                self.log.info("no")
+    """)
+    assert result.counts.tag("logging") == 2
+
+
+def test_rebound_and_unrelated_receivers_cannot_consume_shared_logger_fields() -> None:
+    result = analyze("""
+        import logging
+        class Service:
+            def __init__(this):
+                this.log = logging.getLogger()
+            def run(self, /):
+                self = ordinary
+                self.log.info("no")
+            def other(self, obj):
+                obj.log.info("no")
+                alias = self
+                alias.log.info("no")
+    """)
+    assert result.counts.tag("logging") == 2

@@ -386,10 +386,11 @@ invalidate names throughout their scope; nested imports do not leak. Only direct
 parameters bind arguments. Writes in definition defaults/decorators/bases affect the enclosing
 scope; lambda-body writes stay local and shadow throughout that lambda. Comprehensions
 resolve only the first iterable outside their complete set of local targets. On Python 3.12+,
-explicit type parameters shadow aliases in their annotation and body scopes. Logger instance fields
-are shared only among direct undecorated methods of their own class. These accuracy changes can
-reduce counts; baseline comparison warns about older detector versions. Test-placement detector
-version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
+explicit type parameters shadow aliases in their annotation and body scopes. Module/class
+annotations without values preserve runtime bindings; function annotations still declare locals. Logger instance fields are shared only among direct undecorated methods
+of their own class, using each method's first positional receiver (including positional-only
+parameters) regardless of its spelling. These accuracy changes can increase or reduce counts;
+baseline comparison warns about older detector versions. Test-placement detector version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
 inheritance also requires an unambiguous, unmodified class name.
 
 Duplicate extension compares overlap positions only within each token segment and expands nested

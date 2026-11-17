@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve runtime imports and logger aliases across module/class annotations without values;
+  function annotations still shadow locals and valued annotations still invalidate aliases.
+- Share logger fields by instance receiver identity across direct undecorated methods, including
+  differently named and positional-only receivers. Conflicting writes, rebound receivers,
+  decorated methods, and unrelated classes remain excluded from shared evidence.
+
 - Precollect every comprehension iteration target before resolving later iterables, filters,
   and results; keep the first iterable in its enclosing scope and targets confined to the child.
 - Respect explicit generic type parameters in annotation and definition-body scopes, including
