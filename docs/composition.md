@@ -206,6 +206,14 @@ function arguments; child signatures in defaults do not shadow the function body
 Writes in definition defaults, decorators, and class bases invalidate enclosing bindings.
 Lambda-body assignment expressions shadow throughout the lambda without escaping to its parent;
 nested body bindings remain separate. Lambdas and comprehensions keep their own bindings.
+Only a comprehension's first iterable uses the enclosing environment: all iteration targets
+are lexical locals in every later iterable, filter, and result expression, and never leak out.
+On Python 3.12+, explicit type parameters shadow imported aliases in function/class bodies,
+function annotations, generic class bases/keywords, type-alias values, and parameter bounds
+(and defaults on Python 3.13+). Function defaults and all decorators retain the enclosing
+bindings. Annotation scopes can use enclosing class imports; method bodies cannot. These rules
+follow [Python's annotation scopes](https://docs.python.org/3/reference/executionmodel.html#annotation-scopes)
+and are feature-detected to retain Python 3.11 support.
 Relative imports never match a third-party or standard library module. Star imports
 tag their own line but conservatively invalidate import resolution within their scope.
 Conflicting imports include the common Qt-binding fallback (`try: from PySide6.QtWidgets import

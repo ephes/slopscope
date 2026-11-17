@@ -102,6 +102,8 @@ UNITTEST_SETUP_METHODS = frozenset(
 )
 
 _FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+_TYPE_ALIAS = getattr(ast, "TypeAlias", None)
+_TYPE_ALIAS_TYPES = (_TYPE_ALIAS,) if _TYPE_ALIAS is not None else ()
 
 
 @dataclass(frozen=True)
@@ -231,16 +233,49 @@ class ImportMap:
         return any(in_modules(module, modules) for module in self.modules)
 
 
+def _annotations(node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    for arg in (
+        *node.args.posonlyargs,
+        *node.args.args,
+        *node.args.kwonlyargs,
+        node.args.vararg,
+        node.args.kwarg,
+    ):
+        if arg is not None and arg.annotation is not None:
+            yield arg.annotation
+    if node.returns is not None:
+        yield node.returns
+
+
+def _type_bindings(node: ast.AST, inherited: ImportMap) -> ImportMap:
+    """PEP 695 parameters shadow aliases only inside their annotation/body scopes."""
+    parameters: list[ast.AST] = getattr(node, "type_params", [])
+    if not parameters:
+        return inherited
+    names = {getattr(parameter, "name", None) for parameter in parameters}
+    bindings = ImportMap(())
+    bindings.names = {
+        name: values
+        for name, values in inherited.names.items()
+        if name.split(".", 1)[0] not in names
+    }
+    return bindings
+
+
 def _definition_header(node: ast.AST) -> Iterator[ast.AST]:
-    """Expressions evaluated outside a definition's body, excluding type parameters."""
-    if isinstance(node, ast.Lambda):
+    """Only header expressions evaluated in the enclosing binding inventory."""
+    if isinstance(node, (*_FUNCTION_TYPES, ast.Lambda)):
         yield from (d for d in (*node.args.defaults, *node.args.kw_defaults) if d is not None)
-    else:
-        for field, value in ast.iter_fields(node):
-            if field in {"body", "type_params"}:
-                continue
-            children = value if isinstance(value, list) else [value]
-            yield from (child for child in children if isinstance(child, ast.AST))
+        if isinstance(node, _FUNCTION_TYPES):
+            yield from node.decorator_list
+            if not getattr(node, "type_params", []):
+                yield from _annotations(node)
+    elif isinstance(node, ast.ClassDef):
+        yield from node.decorator_list
+        if not getattr(node, "type_params", []):
+            yield from (*node.bases, *node.keywords)
+    elif isinstance(node, _TYPE_ALIAS_TYPES):
+        yield node.name
 
 
 def _scope_nodes(body: Sequence[ast.AST]) -> list[ast.AST]:
@@ -250,7 +285,7 @@ def _scope_nodes(body: Sequence[ast.AST]) -> list[ast.AST]:
     while pending:
         node = pending.pop()
         nodes.append(node)
-        if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
+        if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
             pending.extend(_definition_header(node))
         if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
             # Only the outer iterable executes in this scope. Iteration targets stay
@@ -279,6 +314,7 @@ def _scope_nodes(body: Sequence[ast.AST]) -> list[ast.AST]:
                 ast.SetComp,
                 ast.DictComp,
                 ast.GeneratorExp,
+                *_TYPE_ALIAS_TYPES,
             ),
         ):
             pending.extend(ast.iter_child_nodes(node))
@@ -354,9 +390,17 @@ def overload_functions(tree: ast.Module) -> frozenset[int]:
                     for decorator in node.decorator_list
                 ):
                     overloads.add(id(node))
-                visit_scope(node.body, inherited if class_scope else bindings, node.args)
+                visit_scope(
+                    node.body,
+                    _type_bindings(node, inherited if class_scope else bindings),
+                    node.args,
+                )
             elif isinstance(node, ast.ClassDef):
-                visit_scope(node.body, inherited if class_scope else bindings, class_scope=True)
+                visit_scope(
+                    node.body,
+                    _type_bindings(node, inherited if class_scope else bindings),
+                    class_scope=True,
+                )
 
     visit_scope(tree.body, ImportMap(()))
     return frozenset(overloads)
@@ -400,15 +444,15 @@ class _ScopedImports(ImportMap):
             local = _scope_bindings(_scope_nodes([node.body]), bindings, node.args)
             self._expression(node.body, local)
         elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
-            local = ImportMap(())
-            local.names = dict(bindings.names)
-            for generator in node.generators:
-                self._expression(generator.iter, local)
-                targets = {n.id for n in ast.walk(generator.target) if isinstance(n, ast.Name)}
-                local = _scope_bindings(list(ast.walk(generator.target)), local)
-                for name in tuple(local.names):
-                    if name.split(".", 1)[0] in targets:
-                        local.names.pop(name, None)
+            self._expression(node.generators[0].iter, bindings)
+            # All targets are lexical locals even before their own clause executes.
+            local = _scope_bindings(
+                [n for generator in node.generators for n in ast.walk(generator.target)], bindings
+            )
+            for index, generator in enumerate(node.generators):
+                if index:
+                    self._expression(generator.iter, local)
+                self._expression(generator.target, local)
                 for condition in generator.ifs:
                     self._expression(condition, local)
             if isinstance(node, ast.DictComp):
@@ -419,6 +463,22 @@ class _ScopedImports(ImportMap):
         else:
             for child in ast.iter_child_nodes(node):
                 self._expression(child, bindings)
+
+    def _header(self, node: ast.AST, bindings: ImportMap) -> None:
+        for child in _definition_header(node):
+            self._expression(child, bindings)
+        typed = _type_bindings(node, bindings)
+        parameters: list[ast.AST] = getattr(node, "type_params", [])
+        for parameter in parameters:
+            self._expression(parameter, typed)
+        if parameters and isinstance(node, _FUNCTION_TYPES):
+            for annotation in _annotations(node):
+                self._expression(annotation, typed)
+        elif parameters and isinstance(node, ast.ClassDef):
+            for child in (*node.bases, *node.keywords):
+                self._expression(child, typed)
+        elif isinstance(node, _TYPE_ALIAS_TYPES):
+            self._expression(node.value, typed)
 
     def _visit(
         self,
@@ -502,15 +562,8 @@ class _ScopedImports(ImportMap):
                 bindings.names[name] = {"<logging.Logger>"}
         for node in nodes:
             self.scopes[id(node)] = bindings
-            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
-                # Decorators/defaults/bases execute in the enclosing environment.
-                for field, value in ast.iter_fields(node):
-                    if field == "body":
-                        continue
-                    children = value if isinstance(value, list) else [value]
-                    for child in children:
-                        if isinstance(child, ast.AST):
-                            self._expression(child, bindings)
+            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
+                self._header(node, bindings)
         if shallow:
             # Only this scope's own bindings are needed (to gather class fields);
             # the caller visits the full body exactly once afterwards.
@@ -525,12 +578,12 @@ class _ScopedImports(ImportMap):
                 # once, with fields. Visiting twice would double work per nesting level.
                 self._visit(
                     node.body,
-                    inherited if class_scope else bindings,
+                    _type_bindings(node, inherited if class_scope else bindings),
                     node.args,
                     shallow=class_scope,
                 )
             elif isinstance(node, ast.ClassDef):
-                outer = inherited if class_scope else bindings
+                outer = _type_bindings(node, inherited if class_scope else bindings)
                 self._visit(node.body, outer, class_scope=True)
                 # Gather instance fields from this class's direct methods only. A field with
                 # any non-logger write is ambiguous. Do not share fields with other classes.
@@ -573,7 +626,7 @@ class _ScopedImports(ImportMap):
                             for name, value in known.items()
                             if name.startswith(receiver + ".")
                         }
-                    self._visit(method.body, outer, method.args, fields=own)
+                    self._visit(method.body, _type_bindings(method, outer), method.args, fields=own)
 
 
 def detect(

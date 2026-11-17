@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Precollect every comprehension iteration target before resolving later iterables, filters,
+  and results; keep the first iterable in its enclosing scope and targets confined to the child.
+- Respect explicit generic type parameters in annotation and definition-body scopes, including
+  generic class bases and type aliases, without shadowing outer decorators/function defaults.
+  Newer syntax is feature-detected; Python 3.11 remains supported.
+
 - Include enclosing-scope writes from definition headers (defaults, decorators, class bases)
   in semantic and overload resolution, while keeping lambda-body writes local to the lambda.
 
