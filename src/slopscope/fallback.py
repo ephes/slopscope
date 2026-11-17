@@ -12,6 +12,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from slopscope._capture import CaptureError, capture_process
+from slopscope._git_env import hardened_git_env
 from slopscope.report import FileRow, LanguageRow, LanguageSummaryReport
 
 DEFAULT_EXCLUDED_PATH_SEGMENTS = frozenset(
@@ -108,6 +109,7 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
             build_git_ls_files_command(path, executable=executable),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=hardened_git_env(),
             start_new_session=os.name == "posix",
         )
     except OSError:

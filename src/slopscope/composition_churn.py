@@ -11,6 +11,7 @@ from pathlib import Path
 
 from slopscope import classify, fallback
 from slopscope._capture import CaptureError, capture_process
+from slopscope._git_env import hardened_git_env
 from slopscope.report import CompositionChurn, CompositionChurnMonth
 
 DEFAULT_REF = "HEAD"
@@ -194,6 +195,7 @@ def _git(
             [executable, "-C", str(path), *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=hardened_git_env(),
             start_new_session=os.name == "posix",
         )
     except OSError:

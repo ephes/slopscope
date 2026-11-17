@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope._capture import CaptureError, capture_process
+from slopscope._git_env import hardened_git_env
 from slopscope.fallback import MAX_DISCOVERY_FILES
 from slopscope.report import FileRow, LanguageRow
 
@@ -55,6 +56,7 @@ def run_command(command: Sequence[str]) -> ClocResult:
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=hardened_git_env(),
             start_new_session=os.name == "posix",
         )
     except OSError as exc:
