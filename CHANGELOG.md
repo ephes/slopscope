@@ -8,6 +8,14 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Include enclosing-scope writes from definition headers (defaults, decorators, class bases)
+  in semantic and overload resolution, while keeping lambda-body writes local to the lambda.
+
+- Inventory only direct signature parameters, excluding child lambdas/comprehensions in defaults,
+  for semantic tags, fixture placement, and typing overload exemptions. Semantic and placement
+  detectors advance to version 3 and analyzer metadata to version 4: older baselines warn as
+  non-comparable. Package and JSON schema versions are unchanged.
+
 - Resolve fixture decorators and test bases through lexical bindings. Rebound names and child
   imports no longer create false fixtures/tests; local unittest inheritance refuses ambiguous
   or modified class names. Test-placement detector version 2 warns on older baselines; pytest

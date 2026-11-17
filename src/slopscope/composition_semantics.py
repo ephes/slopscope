@@ -33,11 +33,11 @@ MODULE_LEVEL = "module_level"
 HELPER_OR_UNKNOWN = "helper_or_unknown"
 
 DETECTORS = (
-    CompositionDetector(name=QT, kind="tag", version=2),
-    CompositionDetector(name=LOGGING, kind="tag", version=2),
-    CompositionDetector(name=DATA_SHAPE, kind="tag", version=2),
+    CompositionDetector(name=QT, kind="tag", version=3),
+    CompositionDetector(name=LOGGING, kind="tag", version=3),
+    CompositionDetector(name=DATA_SHAPE, kind="tag", version=3),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
-    CompositionDetector(name="test_placement", kind="placement", version=2),
+    CompositionDetector(name="test_placement", kind="placement", version=3),
 )
 
 QT_MODULES = frozenset({"PySide2", "PySide6", "PyQt5", "PyQt6", "qtpy"})
@@ -231,13 +231,27 @@ class ImportMap:
         return any(in_modules(module, modules) for module in self.modules)
 
 
-def _scope_nodes(body: Sequence[ast.stmt]) -> list[ast.AST]:
+def _definition_header(node: ast.AST) -> Iterator[ast.AST]:
+    """Expressions evaluated outside a definition's body, excluding type parameters."""
+    if isinstance(node, ast.Lambda):
+        yield from (d for d in (*node.args.defaults, *node.args.kw_defaults) if d is not None)
+    else:
+        for field, value in ast.iter_fields(node):
+            if field in {"body", "type_params"}:
+                continue
+            children = value if isinstance(value, list) else [value]
+            yield from (child for child in children if isinstance(child, ast.AST))
+
+
+def _scope_nodes(body: Sequence[ast.AST]) -> list[ast.AST]:
     """Collect one lexical scope without importing bindings from child scopes."""
     nodes: list[ast.AST] = []
     pending: list[ast.AST] = list(body)
     while pending:
         node = pending.pop()
         nodes.append(node)
+        if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda)):
+            pending.extend(_definition_header(node))
         if isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
             # Only the outer iterable executes in this scope. Iteration targets stay
             # in the child, but assignment expressions bind in the containing scope.
@@ -271,6 +285,13 @@ def _scope_nodes(body: Sequence[ast.stmt]) -> list[ast.AST]:
     return nodes
 
 
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    """Only this signature's parameters; defaults may contain child signatures."""
+    names = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    names.update(arg.arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
+    return names
+
+
 def _scope_bindings(
     nodes: Sequence[ast.AST], inherited: ImportMap, arguments: ast.arguments | None = None
 ) -> ImportMap:
@@ -300,7 +321,7 @@ def _scope_bindings(
         elif isinstance(node, ast.MatchMapping) and node.rest:
             shadowed.add(node.rest)
     if arguments is not None:
-        shadowed.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
+        shadowed.update(_argument_names(arguments))
     for name in tuple(bindings.names):
         if name.split(".", 1)[0] in shadowed:
             bindings.names.pop(name, None)
@@ -376,7 +397,7 @@ class _ScopedImports(ImportMap):
             for default in (*node.args.defaults, *node.args.kw_defaults):
                 if default is not None:
                     self._expression(default, bindings)
-            local = _scope_bindings((), bindings, node.args)
+            local = _scope_bindings(_scope_nodes([node.body]), bindings, node.args)
             self._expression(node.body, local)
         elif isinstance(node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp):
             local = ImportMap(())
@@ -467,7 +488,7 @@ class _ScopedImports(ImportMap):
             elif isinstance(node, ast.MatchMapping) and node.rest:
                 other_bindings.add(node.rest)
         if arguments is not None:
-            other_bindings.update(n.arg for n in ast.walk(arguments) if isinstance(n, ast.arg))
+            other_bindings.update(_argument_names(arguments))
         for name, values in writes.items():
             bindings.names.pop(name, None)
             # Do not infer through augmented assignment, deletion, or other rebinding.

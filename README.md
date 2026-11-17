@@ -380,12 +380,14 @@ composition report answers "lines of what". It parses each discovered `.py` and 
 - the largest modules by code lines, and the largest classes and functions by span, with qualified names such as
   `src/pkg/module.py:Outer.method`
 
-Qt, logging, and data-shape detector version 2 uses conservative lexical binding resolution.
+Qt, logging, and data-shape detector version 3 uses conservative lexical binding resolution.
 Parameters, assignments, deletions, ambiguous imports, and declared global/nonlocal bindings
-invalidate names throughout their scope; nested imports do not leak. Logger instance fields
+invalidate names throughout their scope; nested imports do not leak. Only direct signature
+parameters bind arguments. Writes in definition defaults/decorators/bases affect the enclosing
+scope; lambda-body writes stay local and shadow throughout that lambda. Logger instance fields
 are shared only among direct undecorated methods of their own class. These accuracy changes can
 reduce counts; baseline comparison warns about older detector versions. Test-placement detector
-version 2 applies the same lexical rules to fixture decorators and test bases; local unittest
+version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
 inheritance also requires an unambiguous, unmodified class name.
 
 Duplicate extension compares overlap positions only within each token segment and expands nested

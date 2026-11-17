@@ -49,7 +49,7 @@ from slopscope.report import (
 )
 
 ANALYZER_NAME = "slopscope.composition"
-ANALYZER_VERSION = 3
+ANALYZER_VERSION = 4
 SCHEMA_VERSION = 4
 DEFAULT_LIMIT = 10
 COMPOSITION_LANGUAGE = "Python"

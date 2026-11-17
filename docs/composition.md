@@ -197,12 +197,16 @@ Tags are a second, separate dimension. A tag marks code lines (lines that are no
 with what the code is about. Unlike categories, tags overlap: a line can carry several tags or none, tag counts do not
 add up to anything, and tags never change a line's category.
 
-Qt, logging, and data-shape detector version 2 resolves names through lexically scoped imports.
+Qt, logging, and data-shape detector version 3 resolves names through lexically scoped imports.
 Parameters, assignment/deletion, conflicting imports, and declared `global`/`nonlocal` names
 invalidate a binding throughout that scope, regardless of statement order. Child imports never
 leak into a parent or sibling; class-local imports do not bind method bodies. Function defaults,
-decorators, and class bases use the enclosing scope. Lambdas and comprehensions keep their own
-bindings. Relative imports never match a third-party or standard library module. Star imports
+decorators, and class bases use the enclosing scope. Only direct signature parameters bind
+function arguments; child signatures in defaults do not shadow the function body.
+Writes in definition defaults, decorators, and class bases invalidate enclosing bindings.
+Lambda-body assignment expressions shadow throughout the lambda without escaping to its parent;
+nested body bindings remain separate. Lambdas and comprehensions keep their own bindings.
+Relative imports never match a third-party or standard library module. Star imports
 tag their own line but conservatively invalidate import resolution within their scope.
 Conflicting imports include the common Qt-binding fallback (`try: from PySide6.QtWidgets import
 QWidget` / `except ImportError: from PyQt5.QtWidgets import QWidget`): only the two import lines
@@ -251,7 +255,7 @@ Per file and aggregated:
 For files classified as tests, every code line is placed in exactly one bucket, so the buckets add up to the test
 files' code lines. Other files are not placed and report zero for every bucket.
 
-Test-placement detector version 2 resolves fixture decorators and imported test bases in their
+Test-placement detector version 3 resolves fixture decorators and imported test bases in their
 lexical scope, using the same conservative rebinding rules as semantic tags. Child imports do
 not leak, and class-local imports can supply method decorators. Rebinding, deletion, conflicting
 imports, and star imports invalidate fixture/base names throughout their scope. Local unittest
@@ -361,13 +365,13 @@ file to keep a snapshot.
 {
   "report_type": "composition",
   "schema_version": 4,
-  "analyzer": {"name": "slopscope.composition", "version": 3, "python_version": "3.13.1"},
+  "analyzer": {"name": "slopscope.composition", "version": 4, "python_version": "3.13.1"},
   "detectors": [
-    {"name": "qt", "kind": "tag", "version": 2},
-    {"name": "logging", "kind": "tag", "version": 2},
-    {"name": "data_shape", "kind": "tag", "version": 2},
+    {"name": "qt", "kind": "tag", "version": 3},
+    {"name": "logging", "kind": "tag", "version": 3},
+    {"name": "data_shape", "kind": "tag", "version": 3},
     {"name": "compat", "kind": "marker", "version": 1},
-    {"name": "test_placement", "kind": "placement", "version": 2},
+    {"name": "test_placement", "kind": "placement", "version": 3},
     {"name": "duplication", "kind": "duplication", "version": 1}
   ],
   "path": ".",
@@ -436,7 +440,8 @@ file to keep a snapshot.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
-  Analyzer version 3 keeps comprehension iteration targets out of surrounding overload bindings.
+  Analyzer version 4 corrects signature/header binding boundaries for overloads.
+  Version 3 keeps comprehension iteration targets out of surrounding overload bindings.
   Version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
   instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit
   function counts and keys may change for custom or shadowed decorators.
