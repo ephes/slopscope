@@ -158,3 +158,4 @@ lines. See [Size Limits](size-limits.md).
 - [x] Add `--seed-allowlist` and `--update-allowlist`, which never adds or raises an entry.
 - [x] Support one allowlist per configured project.
 - [x] Release the size-limits check in `0.3.0a1`.
+- [x] Release the bounded, hardened analysis in `0.4.0a1`.

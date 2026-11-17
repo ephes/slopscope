@@ -231,7 +231,8 @@ churn_months = 24
 ```
 
 See [Composition Report](composition.md#configuration) for what each field does. `0.1.0a1` rejects this section as an
-unknown field.
+unknown field. `0.3.0a1` and earlier reject the `max_source_bytes`, `max_total_source_bytes`,
+`max_total_tokens`, and `max_total_anchors` keys; use `0.4.0a1` or later when setting them.
 
 ## Size Limits
 

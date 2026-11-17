@@ -3,7 +3,7 @@
 Colorful repository line-count reports by language, source, tests, and directory, with `cloc` support and a
 pure-Python fallback.
 
-The latest pre-release is `0.3.0a1`. The repository contains the installable Python package,
+The latest pre-release is `0.4.0a1`. The repository contains the installable Python package,
 `cloc`-backed language summaries and file summaries, internal report data models, a pure-Python fallback for
 physical-line reports, default path classification, rendered reports for language, source/test, area, and directory
 summaries, `[tool.slopscope]` configuration loading from `pyproject.toml`, configured profile execution for YAML

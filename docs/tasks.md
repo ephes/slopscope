@@ -69,6 +69,7 @@ No open tasks. See the [roadmap](roadmap.md) for the next phases.
 - [x] Add the `--size-limits` check with a JSON allowlist, report, strict, seed, and update modes, and
   `[tool.slopscope.size_limits]` configuration.
 - [x] Release `0.3.0a1` with the size-limits check.
+- [x] Release `0.4.0a1` with bounded, hardened analysis and lexical-scope detector resolution.
 - [x] Composition report slice 1: `--composition` and `--limit N`, structural line categories from `ast` and
   `tokenize`, statement and continuation-line counts, largest modules, classes, and functions, failure reporting,
   plain/Rich/JSON output, project support, and documentation.

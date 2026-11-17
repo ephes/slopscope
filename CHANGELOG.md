@@ -8,6 +8,27 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+## 0.4.0a1 - 2026-11-17
+
+Compatibility notes: report modes and JSON schema versions are unchanged; churn output gains `churn.commit`.
+`[tool.slopscope.composition]` accepts four new budget keys (`max_source_bytes`, `max_total_source_bytes`,
+`max_total_tokens`, `max_total_anchors`, defaults 16 MiB, 128 MiB, 2,000,000 and 500,000); `0.3.0a1` and earlier
+reject them as unknown fields, so repositories that set them need `0.4.0a1` or later. Semantic, placement, Qt,
+logging, and data-shape detectors and the analyzer metadata advance their versions, so comparisons with older
+baselines warn as non-comparable. `--composition`, `--size-limits`, and allowlist seeding/updating now need POSIX
+descriptor-relative, no-follow opening (and `flock` for snapshot publication), so they are unsupported on Windows,
+where every source is reported as an incomplete-analysis failure; the default report and profiles still run there.
+
+Several inputs that earlier versions reported on now fail with a diagnostic and exit code 2 instead of partial results
+or tracebacks: physical-line reports (`--engine python`, `auto` without cloc, `physical_lines = true` profiles) over
+16 MiB per file or 128 MiB in total; composition and size-limits runs over the configurable composition budgets
+(by default 16 MiB per Python source); allowlists and composition baselines over 16 MiB or malformed;
+cloc and Git discovery output over 16 MiB or running longer than 30 seconds; malformed cloc CSV; discovery and
+duplicate-analysis work beyond their ceilings; and configuration files that are not UTF-8. Churn is different: a
+churn Git timeout, oversized Git log output, or malformed history skips churn with a notice and keeps the report's
+exit code. Source symlinks and linked directories are skipped during discovery. No new runtime dependencies are
+required.
+
 - Resolve definition headers and nested lambda defaults once in their lexical environment,
   separating binding inventory from expression traversal. Resolver visits now grow linearly
   with nested-default syntax while preserving default child scopes, walrus bindings, and
