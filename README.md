@@ -185,7 +185,16 @@ POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process obser
 until the last TERM/KILL attempt, reserving its process-group identity. On macOS (libproc)
 and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
 capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
-Where group membership cannot be listed, the full TERM grace applies. If the leader was
+Membership inspection shares the current cleanup deadline and retains at most 65,536 entries.
+The macOS kqueue post-exit leader presence check gets its own short inspection budget, so an
+exit observed just before the capture timeout is not misread as reaped elsewhere.
+macOS libproc buffers stop growing at that ceiling; Linux streams at most 65,536 `/proc`
+directory entries (plus one overflow probe) and reads at most 4 KiB per process stat file
+(plus one overflow byte). Deadlines are checked between bounded OS calls; a single OS call
+itself cannot be interrupted. Expired, oversized, truncated, failed, or unsupported listings
+are unknown evidence, never proof of absence or permission to signal a released identity.
+Where membership is unknown, the remaining TERM grace applies; the final safe KILL attempt
+still precedes reaping the reserved leader. If the leader was
 already reaped elsewhere (for example under an inherited `SIGCHLD` = `SIG_IGN`), its exit
 status is lost and the capture fails with a bounded error instead of accepting status 0.
 Before failing, a group whose other members are positively listed (macOS libproc, Linux
@@ -203,6 +212,14 @@ cleanup only checks absence with signal 0 (which sends no signal); it never send
 terminating signal to a potentially reused identity. macOS may refuse signals to a
 zombie-only group: this is accepted only when the subsequent absence check succeeds.
 An extant or uninspectable group still refuses the result within the cleanup deadline.
+
+If either output-reader thread fails to start, capture discards partial output and runs
+bounded child termination, reader draining, and reaping. Rollback closes pipes not yet
+claimed by a reader; readers close their own pipes. A late-starting reader cannot reuse a
+pipe reclaimed during rollback. The fixed diagnostic is `could not start <command> output readers`:
+cloc and Git discovery return exit code 2 without a report, snapshot, or allowlist
+write, and Git discovery does not use the filesystem fallback for this incomplete capture.
+Interruptions retain their original exit behavior.
 
 During POSIX main-thread capture, supervisor SIGTERM runs the same bounded owned-tree
 cleanup and exits with status 143 (`128 + SIGTERM`), without accepting partial output.

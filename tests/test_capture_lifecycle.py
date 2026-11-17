@@ -598,6 +598,39 @@ def test_kqueue_unconfirmed_leader_presence_fails_closed(monkeypatch: pytest.Mon
         process.communicate(timeout=5)
 
 
+@pytest.mark.skipif(not hasattr(select, "kqueue"), reason="macOS kqueue observation")
+def test_kqueue_presence_check_has_own_budget_after_late_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exit observed as the capture timeout runs out is still confirmed as unreaped."""
+
+    import time
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        process_deadline = time.monotonic() + 5
+        observe = _capture._observe_exit_kqueue
+        clock = time.monotonic
+
+        def observe_then_expire(*args: object, **kwargs: object) -> None:
+            observe(*args, **kwargs)  # type: ignore[arg-type]
+            # The capture deadline has now passed; only the inspection budget remains.
+            monkeypatch.setattr(time, "monotonic", lambda: clock() + 10)
+
+        monkeypatch.setattr(_capture, "_observe_exit_kqueue", observe_then_expire)
+        assert _capture._wait_for_exit_kqueue(
+            process, deadline=process_deadline, timeout=5, label="x"
+        )
+    finally:
+        monkeypatch.undo()
+        process.communicate(timeout=5)
+
+
 def test_released_group_gets_no_kill_after_members_exit_on_term(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
