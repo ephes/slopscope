@@ -182,15 +182,16 @@ Windows tree termination remains best-effort.
 
 Git commands that slopscope starts (`git ls-files`, churn's `git rev-parse` and `git log`) and the cloc
 process (whose own Git calls inherit the environment) run with command-line scope Git settings appended
-through `GIT_CONFIG_COUNT`: `safe.bareRepository=explicit`, `core.fsmonitor=false`, and
-`log.showSignature=false`, plus `GIT_NO_LAZY_FETCH=1`. A cloned repository can track a directory laid out
-as a bare repository, for example one named by a configured project, and Git would otherwise read that
-directory's `config` and run its fsmonitor command; a directory without such a repository falls back to
-filesystem discovery as before. Existing `GIT_CONFIG_COUNT` entries are kept and these settings take
-precedence. Git older than 2.38 ignores `safe.bareRepository` and Git older than 2.45 ignores
-`GIT_NO_LAZY_FETCH`. Analyzing a directory whose own `.git` directory came from an untrusted source (an
-archive rather than a clone) is still only as safe as running Git there; other command-running settings in
-such a `.git/config` are outside this guarantee.
+through `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` (for Git older than 2.31):
+`safe.bareRepository=explicit`, `core.fsmonitor=false`, and `log.showSignature=false`, plus
+`GIT_NO_LAZY_FETCH=1`. A cloned repository can track a directory laid out as a bare repository, for example
+one named by a configured project, and Git would otherwise read that directory's `config` and run its
+fsmonitor command; a directory without such a repository falls back to filesystem discovery as before.
+Existing `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` entries are kept and these settings take precedence.
+Git older than 2.38 ignores `safe.bareRepository` and Git older than 2.45 ignores `GIT_NO_LAZY_FETCH`.
+Analyzing a directory whose own `.git` directory came from an untrusted source (an archive rather than a
+clone) is still only as safe as running Git there; other command-running settings in such a `.git/config` are
+outside this guarantee.
 
 POSIX capture requires public `waitid`/`WNOWAIT` or macOS `kqueue` process observation
 (including older macOS Python without `waitid`). The exited leader stays unreaped

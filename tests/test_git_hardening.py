@@ -104,6 +104,18 @@ def test_hardened_env_appends_after_existing_command_line_config() -> None:
     }
     assert env["GIT_NO_LAZY_FETCH"] == "1"
     assert env["PATH"] == "/bin"
+    assert env["GIT_CONFIG_PARAMETERS"] == (
+        "'safe.bareRepository=explicit' 'core.fsmonitor=false' 'log.showSignature=false'"
+    )
+
+
+def test_hardened_env_appends_after_existing_parameters() -> None:
+    base = {"GIT_CONFIG_PARAMETERS": "'core.fsmonitor=true' "}
+
+    env = _git_env.hardened_git_env(base)
+
+    assert env["GIT_CONFIG_PARAMETERS"].startswith("'core.fsmonitor=true' 'safe.bareRepository")
+    assert env["GIT_CONFIG_PARAMETERS"].endswith("'log.showSignature=false'")
 
 
 @pytest.mark.parametrize("count", ["", "x", "-2"])
@@ -146,6 +158,30 @@ def test_git_discovery_ignores_repository_fsmonitor(tmp_path: Path) -> None:
     assert not marker.exists()
     assert result.returncode == 0
     assert fallback.parse_git_ls_files_output(result.stdout) == [Path("module.py")]
+
+
+@posix_git
+def test_parameters_alone_protect_git_without_config_count(tmp_path: Path) -> None:
+    """Git before 2.31 reads only GIT_CONFIG_PARAMETERS; that part must suffice on its own."""
+
+    marker = tmp_path / "executed"
+    clone = embedded_bare_repository_clone(tmp_path, marker)
+    env = {
+        name: value
+        for name, value in _git_env.hardened_git_env().items()
+        if not name.startswith(("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    }
+
+    result = subprocess.run(
+        ["git", "-C", str(clone / "evil"), "ls-files", "-z", "--", "."],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+
+    assert not marker.exists()
+    assert result.returncode != 0
+    assert b"safe.bareRepository" in result.stderr
 
 
 @posix_git

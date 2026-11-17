@@ -9,12 +9,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 ## Unreleased
 
 - Security: Git commands and cloc now run with `safe.bareRepository=explicit`, `core.fsmonitor=false`,
-  `log.showSignature=false` (appended through `GIT_CONFIG_COUNT`) and `GIT_NO_LAZY_FETCH=1`. Before, a
-  cloned repository that tracked a directory laid out as a bare repository, named as a configured project,
-  could make `slopscope --project all` run an arbitrary command through that directory's
-  `core.fsmonitor`; a `.git/config` from an untrusted archive could do the same, and `--churn` could run
-  its `gpg.program`. A configured path that is such an embedded bare repository now uses filesystem
-  discovery (Python engine). No CLI, configuration, or JSON changes.
+  `log.showSignature=false` (appended through `GIT_CONFIG_COUNT` and, for Git older than 2.31,
+  `GIT_CONFIG_PARAMETERS`) and `GIT_NO_LAZY_FETCH=1`. Before, a cloned repository that tracked a directory
+  laid out as a bare repository, named as a configured project, could make `slopscope --project all` run an
+  arbitrary command through that directory's `core.fsmonitor`; a `.git/config` from an untrusted archive could
+  do the same, and `--churn` could run its `gpg.program`. A configured path that is such an embedded bare
+  repository now uses filesystem discovery (Python engine). No CLI, configuration, or JSON changes.
 
 ## 0.4.0a1 - 2026-11-17
 
