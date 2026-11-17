@@ -186,6 +186,8 @@ until the last TERM/KILL attempt, reserving its process-group identity. On macOS
 and Linux (`/proc`), the TERM grace ends as soon as only that exited leader remains, so a
 capture without lingering descendants adds no fixed delay; KILL is still sent before reaping.
 Membership inspection shares the current cleanup deadline and retains at most 65,536 entries.
+The macOS kqueue post-exit leader presence check gets its own short inspection budget, so an
+exit observed just before the capture timeout is not misread as reaped elsewhere.
 macOS libproc buffers stop growing at that ceiling; Linux streams at most 65,536 `/proc`
 directory entries (plus one overflow probe) and reads at most 4 KiB per process stat file
 (plus one overflow byte). Deadlines are checked between bounded OS calls; a single OS call

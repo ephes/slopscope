@@ -245,8 +245,12 @@ def _wait_for_exit_kqueue(
     # kqueue cannot tell an unreaped zombie from a leader reaped elsewhere; libproc lists
     # zombies, so an absent leader was reaped. Unconfirmed presence fails closed: the
     # identity is treated as released, never signalled, and its status is refused.
+    # The presence check gets its own bounded budget: an exit observed just inside the
+    # capture timeout must not be misread as reaped elsewhere (matching waitid).
     try:
-        return process.pid in _darwin_group_members(process.pid, deadline=deadline)
+        return process.pid in _darwin_group_members(
+            process.pid, deadline=time.monotonic() + _GROUP_TERM_SECONDS
+        )
     except Exception:
         return False
 

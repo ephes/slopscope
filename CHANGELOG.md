@@ -16,6 +16,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 - Bound macOS/Linux capture-group inspection by the cleanup deadline and a 65,536-entry
   ceiling, streaming Linux `/proc` with bounded stat reads. Incomplete listings remain
   unknown evidence, preserving final signalling before reap and refusing unconfirmed cleanup.
+  The macOS kqueue post-exit presence check uses its own short budget, so an exit observed
+  just inside the capture timeout is not misread as reaped elsewhere.
 
 - Handle supervisor SIGTERM during POSIX main-thread Git/cloc capture through bounded
   owned-tree cleanup, then exit 143. Restore the prior handler on all outcomes and keep
