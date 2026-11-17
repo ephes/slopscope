@@ -203,6 +203,10 @@ invalidate a binding throughout that scope, regardless of statement order. Annot
 name declarations preserve module/class runtime bindings, including imported names and logger
 aliases; in functions they declare locals. Annotations with values are ordinary assignments.
 Child imports never leak into a parent or sibling; class-local imports do not bind method bodies.
+Binding inventory and expression resolution are separate passes. Each definition header and its
+nested default expressions are resolved once in the owning lexical environment, keeping resolver
+expression visits linear in nested-default syntax size. Shallow method field collection does not
+resolve expressions again; the full method visit owns them.
 Function defaults, decorators, and nongeneric class bases use the enclosing scope. Only direct signature parameters bind
 function arguments; child signatures in defaults do not shadow the function body.
 Writes in definition defaults, decorators, and class bases invalidate enclosing bindings.

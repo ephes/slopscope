@@ -396,6 +396,10 @@ These accuracy changes can increase or reduce counts;
 baseline comparison warns about older detector versions. Test-placement detector version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
 inheritance also requires an unambiguous, unmodified class name.
 
+Semantic resolution inventories lexical bindings separately from visiting expressions. Definition
+headers and nested lambda defaults are resolved once in their owning environment, so doubling
+nested-default syntax produces linear growth in resolver expression visits.
+
 Duplicate extension compares overlap positions only within each token segment and expands nested
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
 incomplete and preserves any snapshot. Each project also has fixed whole-analysis ceilings of

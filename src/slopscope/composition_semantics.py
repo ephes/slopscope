@@ -513,6 +513,22 @@ class _ScopedImports(ImportMap):
         elif isinstance(node, _TYPE_ALIAS_TYPES):
             self._expression(node.value, typed)
 
+    def _resolve_body(
+        self, body: Sequence[ast.stmt], bindings: ImportMap, enclosing: ImportMap | None
+    ) -> None:
+        """Resolve expression roots once, separately from the flat binding inventory."""
+        pending: list[ast.AST] = list(body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, *_TYPE_ALIAS_TYPES)):
+                self._header(node, bindings, enclosing)
+            elif isinstance(node, ast.expr):
+                # _expression owns all child expressions, including nested defaults
+                # and lambda/comprehension bodies with their own lexical bindings.
+                self._expression(node, bindings, enclosing)
+            else:
+                pending.extend(ast.iter_child_nodes(node))
+
     def _visit(
         self,
         body: Sequence[ast.stmt],
@@ -606,18 +622,13 @@ class _ScopedImports(ImportMap):
         enclosing = inherited if class_scope else None
         for node in nodes:
             self.scopes[id(node)] = bindings
-            if isinstance(node, (*_FUNCTION_TYPES, ast.ClassDef, ast.Lambda, *_TYPE_ALIAS_TYPES)):
-                self._header(node, bindings, enclosing)
         if shallow:
             # Only this scope's own bindings are needed (to gather class fields);
             # the caller visits the full body exactly once afterwards.
             return
+        self._resolve_body(body, bindings, enclosing)
         for node in nodes:
-            if isinstance(
-                node, ast.Lambda | ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
-            ):
-                self._expression(node, bindings, enclosing)
-            elif isinstance(node, _FUNCTION_TYPES):
+            if isinstance(node, _FUNCTION_TYPES):
                 # Methods are visited shallowly here; their ClassDef visits them fully
                 # once, with fields. Visiting twice would double work per nesting level.
                 self._visit(
