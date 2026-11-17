@@ -8,6 +8,28 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve runtime imports and logger aliases across module/class annotations without values;
+  function annotations still shadow locals and valued annotations still invalidate aliases.
+- Share logger fields by instance receiver identity across direct undecorated methods, including
+  differently named and positional-only receivers. Conflicting writes, rebound receivers,
+  decorated methods, and unrelated classes remain excluded from shared evidence.
+
+- Precollect every comprehension iteration target before resolving later iterables, filters,
+  and results; keep the first iterable in its enclosing scope and targets confined to the child.
+- Class-local imports and logger aliases no longer bind lambda bodies or comprehension parts
+  after the first iterable inside a class body, matching Python's class-scope rules.
+- Respect explicit generic type parameters in annotation and definition-body scopes, including
+  generic class bases and type aliases, without shadowing outer decorators/function defaults.
+  Newer syntax is feature-detected; Python 3.11 remains supported.
+
+- Include enclosing-scope writes from definition headers (defaults, decorators, class bases)
+  in semantic and overload resolution, while keeping lambda-body writes local to the lambda.
+
+- Inventory only direct signature parameters, excluding child lambdas/comprehensions in defaults,
+  for semantic tags, fixture placement, and typing overload exemptions. Semantic and placement
+  detectors advance to version 3 and analyzer metadata to version 4: older baselines warn as
+  non-comparable. Package and JSON schema versions are unchanged.
+
 - Resolve fixture decorators and test bases through lexical bindings. Rebound names and child
   imports no longer create false fixtures/tests; local unittest inheritance refuses ambiguous
   or modified class names. Test-placement detector version 2 warns on older baselines; pytest

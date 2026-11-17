@@ -197,12 +197,28 @@ Tags are a second, separate dimension. A tag marks code lines (lines that are no
 with what the code is about. Unlike categories, tags overlap: a line can carry several tags or none, tag counts do not
 add up to anything, and tags never change a line's category.
 
-Qt, logging, and data-shape detector version 2 resolves names through lexically scoped imports.
+Qt, logging, and data-shape detector version 3 resolves names through lexically scoped imports.
 Parameters, assignment/deletion, conflicting imports, and declared `global`/`nonlocal` names
-invalidate a binding throughout that scope, regardless of statement order. Child imports never
-leak into a parent or sibling; class-local imports do not bind method bodies. Function defaults,
-decorators, and class bases use the enclosing scope. Lambdas and comprehensions keep their own
-bindings. Relative imports never match a third-party or standard library module. Star imports
+invalidate a binding throughout that scope, regardless of statement order. Annotation-only
+name declarations preserve module/class runtime bindings, including imported names and logger
+aliases; in functions they declare locals. Annotations with values are ordinary assignments.
+Child imports never leak into a parent or sibling; class-local imports do not bind method bodies.
+Function defaults, decorators, and nongeneric class bases use the enclosing scope. Only direct signature parameters bind
+function arguments; child signatures in defaults do not shadow the function body.
+Writes in definition defaults, decorators, and class bases invalidate enclosing bindings.
+Lambda-body assignment expressions shadow throughout the lambda without escaping to its parent;
+nested body bindings remain separate. Lambdas and comprehensions keep their own bindings.
+Only a comprehension's first iterable uses the enclosing environment: all iteration targets
+are lexical locals in every later iterable, filter, and result expression, and never leak out.
+Inside a class body, lambda bodies and those later comprehension parts skip the class
+namespace, so class-local imports do not bind them.
+On Python 3.12+, explicit type parameters shadow imported aliases in function/class bodies,
+function annotations, generic class bases/keywords, type-alias values, and parameter bounds
+(and defaults on Python 3.13+). Function defaults and all decorators retain the enclosing
+bindings. Annotation scopes can use enclosing class imports; method bodies cannot. These rules
+follow [Python's annotation scopes](https://docs.python.org/3/reference/executionmodel.html#annotation-scopes)
+and are feature-detected to retain Python 3.11 support.
+Relative imports never match a third-party or standard library module. Star imports
 tag their own line but conservatively invalidate import resolution within their scope.
 Conflicting imports include the common Qt-binding fallback (`try: from PySide6.QtWidgets import
 QWidget` / `except ImportError: from PyQt5.QtWidgets import QWidget`): only the two import lines
@@ -211,10 +227,12 @@ classes. This is a known count drop of version 2.
 
 A logger alias must have one unambiguous assignment from a resolved `logging.getLogger()` call.
 Instance logger fields may be shared between direct undecorated methods of the same class using
-the same receiver name; other classes do not inherit that evidence. Rebinding a field invalidates
-that shared evidence. This is static analysis: call side effects, inheritance, decorated methods,
-and runtime mutation across scopes are not inferred. Version 2 can reduce semantic counts;
-baselines with older detector versions are marked non-comparable. The compatibility wording
+each method's first positional receiver, including positional-only parameters. Receiver spellings
+may differ (`this.log` and `self.log` refer to the same field); other classes do not inherit that
+evidence. Rebinding the receiver or conflicting writes to the normalized field invalidate shared
+evidence. Arbitrary aliases of the instance are not inferred. This is static analysis: call side
+effects, inheritance, decorated methods, and runtime mutation across scopes are not inferred.
+Version 3 can increase or reduce semantic counts; baselines with older detector versions are marked non-comparable. The compatibility wording
 marker retains its existing rules.
 
 A tag applies to the lines of a *unit*: a simple statement, or the header of a compound statement (decorators and
@@ -251,7 +269,7 @@ Per file and aggregated:
 For files classified as tests, every code line is placed in exactly one bucket, so the buckets add up to the test
 files' code lines. Other files are not placed and report zero for every bucket.
 
-Test-placement detector version 2 resolves fixture decorators and imported test bases in their
+Test-placement detector version 3 resolves fixture decorators and imported test bases in their
 lexical scope, using the same conservative rebinding rules as semantic tags. Child imports do
 not leak, and class-local imports can supply method decorators. Rebinding, deletion, conflicting
 imports, and star imports invalidate fixture/base names throughout their scope. Local unittest
@@ -361,13 +379,13 @@ file to keep a snapshot.
 {
   "report_type": "composition",
   "schema_version": 4,
-  "analyzer": {"name": "slopscope.composition", "version": 3, "python_version": "3.13.1"},
+  "analyzer": {"name": "slopscope.composition", "version": 4, "python_version": "3.13.1"},
   "detectors": [
-    {"name": "qt", "kind": "tag", "version": 2},
-    {"name": "logging", "kind": "tag", "version": 2},
-    {"name": "data_shape", "kind": "tag", "version": 2},
+    {"name": "qt", "kind": "tag", "version": 3},
+    {"name": "logging", "kind": "tag", "version": 3},
+    {"name": "data_shape", "kind": "tag", "version": 3},
     {"name": "compat", "kind": "marker", "version": 1},
-    {"name": "test_placement", "kind": "placement", "version": 2},
+    {"name": "test_placement", "kind": "placement", "version": 3},
     {"name": "duplication", "kind": "duplication", "version": 1}
   ],
   "path": ".",
@@ -436,7 +454,9 @@ file to keep a snapshot.
 - `code_per_statement` is rounded to two decimals and is `null` without statements.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
-  Analyzer version 3 keeps comprehension iteration targets out of surrounding overload bindings.
+  Analyzer version 4 corrects signature/header, generic-parameter, and annotation-only binding
+  boundaries for overloads. Semantic/placement detector version 3 uses the corrected lexical rules.
+  Version 3 keeps comprehension iteration targets out of surrounding overload bindings.
   Version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
   instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit
   function counts and keys may change for custom or shadowed decorators.
