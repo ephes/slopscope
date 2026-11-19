@@ -511,17 +511,21 @@ def _allowlist_lock(target: Path, *, deadline: float) -> Iterator[None]:
             # matching size-limits source analysis, which is unsupported there.
             import fcntl
 
-            while time.monotonic() < deadline:
+            # Always try once, so an uncontended lock is taken even after the shared
+            # deadline was spent waiting on an earlier target.
+            while True:
                 try:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     remaining = deadline - time.monotonic()
-                    if remaining > 0:
-                        time.sleep(min(_LOCK_RETRY_SECONDS, remaining))
+                    if remaining <= 0:
+                        raise SizeLimitsError(
+                            f"timed out acquiring allowlist lock for {target}; another"
+                            " seed/update is still running, retry when it finishes"
+                        ) from None
+                    time.sleep(min(_LOCK_RETRY_SECONDS, remaining))
                 else:
                     break
-            else:
-                raise SizeLimitsError(f"timed out acquiring allowlist lock for {target}")
         except OSError as exc:
             raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
         info = os.fstat(descriptor)

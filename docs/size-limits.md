@@ -152,8 +152,13 @@ Seed and update hold an OS lock from the allowlist read through planning and ato
 Concurrent updates re-read the latest baseline before measuring, so a later update cannot restore a
 larger size; concurrent seeds admit only the first publisher. Multi-project mutations acquire all
 locks in sorted resolved-target order before planning any project. Writers share one 10-second
-monotonic deadline across all lock acquisitions. If it expires, the command releases any
-locks already acquired and returns exit code 2 before planning or staging. Report mode remains read-only.
+monotonic deadline across all lock acquisitions; each lock is still tried once after the
+deadline passes. If a contended lock is not acquired in time, the command releases any locks
+already acquired and returns exit code 2 before planning or staging. Writers do not queue
+behind a long-running holder: because the holder keeps its locks through measurement, a
+concurrent seed/update fails instead of waiting when that measurement takes longer than
+10 seconds (for example on large repositories); rerun it after the other writer finishes.
+Report mode remains read-only.
 Locks use persistent sibling files named `.<allowlist-name>.lock`, created with mode 0600; do not
 delete these files while mutations may be running. Mutations can create these files and their parent
 directories even if planning later refuses the operation (for example, updating a missing allowlist).

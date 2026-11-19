@@ -476,7 +476,9 @@ before any staging. Multi-project snapshots share one ceiling for the complete e
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Lock entries are opened without following symlinks and must be single-link regular files;
 identity is rechecked after acquiring the lock. Each mutation has one 10-second deadline to
-acquire all locks and returns exit code 2 before planning if it expires. Multi-project publication
+acquire all locks and returns exit code 2 before planning if it expires, so a concurrent writer
+fails instead of waiting when another seed/update holds a lock for longer; rerun it afterwards.
+Multi-project publication
 stages all outputs first and restores earlier writes on catchable replacement failures, including
 `KeyboardInterrupt` and `SystemExit`.
 The original interruption propagates after recovery; failed restoration retains a named recovery

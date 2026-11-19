@@ -191,6 +191,14 @@ def test_contended_second_lock_releases_first_before_planning(
             holder.join(5)
 
 
+def test_uncontended_lock_is_taken_after_shared_deadline_expired(tmp_path: Path) -> None:
+    import time
+
+    target = (tmp_path / "a.json").resolve()
+    with size_limits._allowlist_lock(target, deadline=time.monotonic() - 1):
+        pass
+
+
 def test_lock_targets_are_sorted_and_deduplicated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
