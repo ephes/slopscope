@@ -120,8 +120,10 @@ at most 64 KiB chunks and one overflow-probe byte. Each file's code-token and po
 counts are checked before mutating the shared interner or retaining its token/line arrays; the
 actual duplicate index has no more anchors than this admitted upper bound. Per-file parsing and
 tokenization remain bounded by `max_source_bytes`. Exact ceilings are accepted; below the limits,
-counts and exact duplicate detection are unchanged. The aggregate budgets also apply to size-limits
-measurement, alongside its per-source ceiling; exhaustion preserves allowlists and returns exit code 2 without a partial report.
+counts and exact duplicate detection are unchanged. Of the aggregate budgets, only
+`max_total_source_bytes` also applies to size-limits measurement, alongside its per-source
+ceiling; size-limits builds no token segments. Exhaustion preserves allowlists and returns exit
+code 2 without a partial report.
 
 ## Failures
 

@@ -514,8 +514,6 @@ def _plan_size_limits(
             max_source_bytes=slopscope_config.composition.max_source_bytes
             or composition.DEFAULT_MAX_SOURCE_BYTES,
             max_total_source_bytes=slopscope_config.composition.max_total_source_bytes,
-            max_total_tokens=slopscope_config.composition.max_total_tokens,
-            max_total_anchors=slopscope_config.composition.max_total_anchors,
         )
     except size_limits.SizeLimitsError as exc:
         if label is None:

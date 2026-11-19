@@ -161,18 +161,16 @@ def test_whole_composition_refuses_before_retaining_all_files(
 @pytest.mark.parametrize("field", ["tokens", "anchors"])
 def test_overbudget_file_does_not_mutate_interner(field: str) -> None:
     interner = {"sentinel": 0}
-    budget = composition.AnalysisBudget(
-        1000,
-        composition_duplication.TokenBudget(
-            tokens=2 if field == "tokens" else 100,
-            anchors=0 if field == "anchors" else 100,
-        ),
+    tokens = composition_duplication.TokenBudget(
+        tokens=2 if field == "tokens" else 100,
+        anchors=0 if field == "anchors" else 100,
     )
+    budget = composition.AnalysisBudget(1000, tokens)
     with pytest.raises(composition_duplication.BudgetExceeded, match=field[:-1]):
         composition.analyze_source("new_name = 123\n", interner=interner, budget=budget)
     assert interner == {"sentinel": 0}
-    assert budget.tokens.tokens == (2 if field == "tokens" else 100)
-    assert budget.tokens.anchors == (0 if field == "anchors" else 100)
+    assert tokens.tokens == (2 if field == "tokens" else 100)
+    assert tokens.anchors == (0 if field == "anchors" else 100)
 
 
 def test_exact_token_anchor_budget_preserves_duplicate_detection(tmp_path: Path) -> None:
@@ -265,10 +263,7 @@ def test_physical_limit_diagnostic_escapes_and_bounds_path(
     assert "\\n" in message and len(message) < 320
 
 
-@pytest.mark.parametrize(
-    "setting,limit",
-    [("max_total_source_bytes", 30), ("max_total_tokens", 8), ("max_total_anchors", 3)],
-)
+@pytest.mark.parametrize("setting,limit", [("max_total_source_bytes", 30)])
 @pytest.mark.parametrize("mode", [[], ["--strict"], ["--seed-allowlist"], ["--update-allowlist"]])
 def test_size_cumulative_limit_stops_before_publication(
     tmp_path: Path,
@@ -311,16 +306,13 @@ def test_size_cumulative_limit_stops_before_publication(
     assert out.getvalue() == ""
     assert (allowlist.read_bytes() if allowlist.exists() else None) == previous
     assert 1 <= len(analyzed) <= 2
-    assert len(retained) == 1
-    assert sum(retained) <= 8
+    assert retained == []
 
 
 @pytest.mark.parametrize(
     "constant,limit",
     [
         ("DEFAULT_MAX_TOTAL_SOURCE_BYTES", 30),
-        ("DEFAULT_MAX_TOTAL_TOKENS", 8),
-        ("DEFAULT_MAX_TOTAL_ANCHORS", 3),
     ],
 )
 def test_size_measure_uses_cumulative_defaults(
@@ -338,18 +330,45 @@ def test_size_measure_uses_cumulative_defaults(
         size_limits.measure(tmp_path, excluded_paths=())
 
 
+@pytest.mark.parametrize(
+    "setting,limit",
+    [("max_total_tokens", 1), ("max_total_anchors", 1)],
+)
+def test_size_limits_ignore_token_and_anchor_budgets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, limit: int
+) -> None:
+    """Size-limits builds no duplicate-detection token segments, so the budgets that bound
+    them cannot stop it, however large the project."""
+    for index in range(5):
+        (tmp_path / f"{index}.py").write_text(
+            f"def unique_{index}():\n    return {index}\n", encoding="utf-8"
+        )
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.slopscope.composition]\n{setting} = {limit}\n", encoding="utf-8"
+    )
+    built: list[int] = []
+    token_segments = composition_duplication.token_segments
+
+    def record_segments(*args: Any, **kwargs: Any) -> Any:
+        built.append(1)
+        return token_segments(*args, **kwargs)
+
+    monkeypatch.setattr(composition_duplication, "token_segments", record_segments)
+    out, err = io.StringIO(), io.StringIO()
+    assert (
+        cli.run([str(tmp_path), "--size-limits", "--format", "json"], stdout=out, stderr=err) == 0
+    )
+    assert json.loads(out.getvalue())["units"]["functions"] == 5
+    assert built == []
+
+
 def test_size_exact_cumulative_limits_preserve_units(tmp_path: Path) -> None:
     source = "class Box:\n    def run(self):\n        return 1\n"
-    budget = composition.AnalysisBudget(1000, composition_duplication.TokenBudget(1000, 1000))
-    composition.analyze_source(source, interner={}, budget=budget)
     (tmp_path / "tests").mkdir()
     for path in ("app.py", "tests/test_app.py"):
         (tmp_path / path).write_text(source, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.slopscope.composition]\n"
-        f"max_total_source_bytes = {len(source.encode()) * 2}\n"
-        f"max_total_tokens = {(1000 - budget.tokens.tokens) * 2}\n"
-        f"max_total_anchors = {(1000 - budget.tokens.anchors) * 2}\n",
+        f"[tool.slopscope.composition]\nmax_total_source_bytes = {len(source.encode()) * 2}\n",
         encoding="utf-8",
     )
     out, err = io.StringIO(), io.StringIO()
