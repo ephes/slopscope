@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Share one 10-second deadline across all allowlist writer locks, releasing earlier locks on timeout
+  before planning or publication.
+
 - Size-limits skips composition's semantic detectors while retaining definition spans,
   overload exclusion, and test-file code-line totals.
 - Size-limits associates allowlist entries with failed source paths containing `::`,

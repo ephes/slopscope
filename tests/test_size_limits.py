@@ -616,7 +616,7 @@ def test_allowlist_lock_refuses_without_no_follow(
     monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
     with (
         pytest.raises(size_limits.SizeLimitsError, match="O_NOFOLLOW"),
-        size_limits._allowlist_lock(tmp_path / "allowlist.toml"),
+        size_limits.allowlist_locks([tmp_path / "allowlist.toml"], action=size_limits.UPDATE),
     ):
         pass
 

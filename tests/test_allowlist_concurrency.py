@@ -151,20 +151,61 @@ def test_interrupted_owner_releases_lock(tmp_path: Path) -> None:
             assert second.recv() == 0
 
 
+def _hold_lock(target: Path, pipe: Connection) -> None:
+    with size_limits.allowlist_locks([target], action=size_limits.UPDATE):
+        pipe.send("locked")
+        pipe.poll(3)  # Let the regression fail finitely even with a blocking writer.
+    pipe.close()
+
+
+def test_contended_second_lock_releases_first_before_planning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fcntl
+
+    first, second = (tmp_path / name for name in ("a.json", "b.json"))
+    monkeypatch.setattr(size_limits, "ALLOWLIST_LOCK_TIMEOUT_SECONDS", 0.1, raising=False)
+    ctx = multiprocessing.get_context("spawn")
+    parent, child = ctx.Pipe()
+    holder = ctx.Process(target=_hold_lock, args=(second, child))
+    holder.start()
+    child.close()
+    try:
+        assert parent.poll(10)
+        assert parent.recv() == "locked"
+        with (
+            pytest.raises(size_limits.SizeLimitsError, match=r"timed out.*b\.json"),
+            size_limits.allowlist_locks([second, first], action=size_limits.UPDATE),
+        ):
+            pytest.fail("the writer reached planning")
+        assert holder.is_alive()
+        with (tmp_path / ".a.json.lock").open("rb") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert not first.exists()
+        assert not second.exists()
+    finally:
+        parent.close()
+        holder.join(5)
+        if holder.is_alive():
+            holder.terminate()
+            holder.join(5)
+
+
 def test_lock_targets_are_sorted_and_deduplicated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    acquired: list[Path] = []
+    acquired: list[tuple[Path, float]] = []
 
     @contextlib.contextmanager
-    def record(target: Path) -> Iterator[None]:
-        acquired.append(target)
+    def record(target: Path, *, deadline: float) -> Iterator[None]:
+        acquired.append((target, deadline))
         yield
 
     monkeypatch.setattr(size_limits, "_allowlist_lock", record)
     a, b = tmp_path / "a.json", tmp_path / "b.json"
     with size_limits.allowlist_locks([b, a, b], action=size_limits.UPDATE):
-        assert acquired == [a.resolve(), b.resolve()]
+        assert [target for target, _ in acquired] == [a.resolve(), b.resolve()]
+        assert len({deadline for _, deadline in acquired}) == 1
 
 
 def test_report_does_not_create_lock_files(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ import json
 import os
 import stat
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -29,6 +30,8 @@ from slopscope.report import (
 DEFAULT_ALLOWLIST = "size-limits.json"
 SCHEMA_VERSION = 1
 MAX_ALLOWLIST_BYTES = 16 * 1024 * 1024
+ALLOWLIST_LOCK_TIMEOUT_SECONDS = 10.0
+_LOCK_RETRY_SECONDS = 0.05
 REPORT = "report"
 UPDATE = "update"
 SEED = "seed"
@@ -457,12 +460,13 @@ def allowlist_locks(
         return
     with contextlib.ExitStack() as stack:
         try:
+            deadline = time.monotonic() + ALLOWLIST_LOCK_TIMEOUT_SECONDS
             targets = {path: _resolve(path) for path in paths}
             parents = {}
             for target in sorted(set(targets.values())):
                 _ensure_parent(target.parent)
                 parents[target] = _identity(target.parent)
-                stack.enter_context(_allowlist_lock(target))
+                stack.enter_context(_allowlist_lock(target, deadline=deadline))
             destinations = {}
             for path, target in targets.items():
                 if _resolve(path) != target or _identity(target.parent) != parents[target]:
@@ -475,7 +479,7 @@ def allowlist_locks(
 
 
 @contextlib.contextmanager
-def _allowlist_lock(target: Path) -> Iterator[None]:
+def _allowlist_lock(target: Path, *, deadline: float) -> Iterator[None]:
     # Keep the sibling file: unlinking it would let waiters lock different inodes.
     lock = target.with_name(f".{target.name}.lock")
     try:
@@ -497,7 +501,17 @@ def _allowlist_lock(target: Path) -> Iterator[None]:
             # matching size-limits source analysis, which is unsupported there.
             import fcntl
 
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        time.sleep(min(_LOCK_RETRY_SECONDS, remaining))
+                else:
+                    break
+            else:
+                raise SizeLimitsError(f"timed out acquiring allowlist lock for {target}")
         except OSError as exc:
             raise SizeLimitsError(f"could not lock allowlist {target}: {exc}") from exc
         info = os.fstat(descriptor)
