@@ -6,6 +6,7 @@ import io
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -175,6 +176,14 @@ def test_cli_multi_project_update_budgets_outputs_and_recovery_together(
     monkeypatch.setattr(
         size_limits, "MAX_ALLOWLIST_STAGING_BYTES", total - int(overflow), raising=False
     )
+    staged: list[Path] = []
+    stage_bytes = size_limits._stage_bytes
+
+    def record_stage(target: Path, *args: Any, **kwargs: Any) -> Path:
+        staged.append(target)
+        return stage_bytes(target, *args, **kwargs)
+
+    monkeypatch.setattr(size_limits, "_stage_bytes", record_stage)
     code, output, error = run(
         [str(tmp_path), "--size-limits", "--update-allowlist", "--project", "all"]
     )
@@ -182,8 +191,10 @@ def test_cli_multi_project_update_budgets_outputs_and_recovery_together(
         assert code == 2
         assert output == ""
         assert f"staging exceeds {total - 1} bytes" in error
+        assert staged == []  # the budget is admitted before any output or backup is staged
     else:
         assert (code, error) == (0, "")
+        assert staged
     for target in targets:
         assert target.read_bytes() == (prior if overflow else candidate)
         assert list(target.parent.glob(f".{target.name}.*")) == [
