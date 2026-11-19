@@ -295,7 +295,8 @@ files. A file's token/anchor batch is admitted before changing the shared intern
 segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
 under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
 or snapshot/allowlist; prior artifacts survive. Size-limits applies only the source-byte ceiling:
-it builds no duplicate-detection token segments, so the token and anchor ceilings do not apply to it.
+it skips composition's semantic detectors and duplicate-detection token segments. It still
+classifies lines, measures definition spans, and resolves overload decorators.
 These aggregate settings do not apply to cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
 
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission

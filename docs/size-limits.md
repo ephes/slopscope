@@ -47,6 +47,7 @@ slopscope --size-limits --project all
 Spans and code lines use the composition report's definitions, so the largest allowlist entries match its Largest
 Functions and Largest Classes tables. Nested definitions count toward the units that enclose them and are also
 checked on their own: a method's lines count toward its class, and a helper function inside a method is a unit too.
+Size-limits uses structural classification and overload resolution and skips composition's semantic detectors.
 
 Every discovered Python file is checked, including functions and classes in test files and tooling scripts. Discovery,
 excludes, and include globs are the same as for the composition report.

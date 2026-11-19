@@ -52,8 +52,8 @@ def measure(
 ) -> tuple[Units, tuple[CompositionFailure, ...]]:
     """Measure every function, class, and test file below ``root``, keyed as in the allowlist.
 
-    Only the cumulative source-byte budget applies. No duplicate-detection token segments are
-    built, so the composition token and anchor budgets, which bound those, do not apply here.
+    Use structural line counts and definition spans, with overload stubs excluded.
+    Only the cumulative source-byte budget applies.
     """
 
     budget = composition.AnalysisBudget(
@@ -72,6 +72,7 @@ def measure(
             analysis = composition.analyze_file(
                 root,
                 relative_path,
+                measure_only=True,
                 admission=admissions[relative_path],
                 max_source_bytes=max_source_bytes,
                 budget=budget,

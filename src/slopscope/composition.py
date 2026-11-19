@@ -147,6 +147,7 @@ def analyze_source(
     *,
     path: str = "<source>",
     test_file: bool = False,
+    measure_only: bool = False,
     interner: dict[str, int] | None = None,
     budget: AnalysisBudget | None = None,
     settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
@@ -155,7 +156,8 @@ def analyze_source(
 
     ``source`` must already use ``\\n`` line endings, as produced by ``tokenize.open()``.
     Test placement is computed only when ``test_file`` is true. Token segments for duplicate
-    detection are built only when an ``interner`` is passed.
+    detection are built only when an ``interner`` is passed. With ``measure_only``, skip
+    semantic detectors and duplicate segments while still resolving overload decorators.
     Raises :class:`CompositionAnalysisError` when parsing, tokenization, or traversal fails.
     """
 
@@ -179,8 +181,10 @@ def analyze_source(
         classifier = _LineClassifier(lines, composition_semantics.overload_functions(tree))
         classifier.mark_blank_and_comment_lines(tokens)
         classifier.visit_body(tree.body, allow_docstring=True)
-        analysis = classifier.result(tree, tokens, test_file=test_file, settings=settings)
-        if interner is None:
+        analysis = classifier.result(
+            tree, tokens, test_file=test_file, measure_only=measure_only, settings=settings
+        )
+        if measure_only or interner is None:
             return analysis
         segments = composition_duplication.token_segments(
             tokens,
@@ -198,13 +202,14 @@ def analyze_file(
     relative_path: str,
     *,
     test_file: bool = False,
+    measure_only: bool = False,
     interner: dict[str, int] | None = None,
     budget: AnalysisBudget | None = None,
     settings: composition_semantics.SemanticSettings = composition_semantics.DEFAULT_SETTINGS,
     admission: _source.Admission | None = None,
     max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
 ) -> FileAnalysis:
-    """Read one file with PEP 263 encoding detection and classify its lines."""
+    """Read one file with PEP 263 encoding detection and analyze it as in ``analyze_source``."""
 
     try:
         with _source.open_source(root, relative_path, admission) as handle:
@@ -237,6 +242,7 @@ def analyze_file(
         source,
         path=relative_path,
         test_file=test_file,
+        measure_only=measure_only,
         interner=interner,
         settings=settings,
         budget=budget,
@@ -638,6 +644,7 @@ class _LineClassifier:
         tokens: Sequence[tokenize.TokenInfo],
         *,
         test_file: bool,
+        measure_only: bool,
         settings: composition_semantics.SemanticSettings,
     ) -> FileAnalysis:
         counts = [0] * len(COMPOSITION_CATEGORIES)
@@ -649,37 +656,42 @@ class _LineClassifier:
             counts[_CATEGORY_INDEX[category]] += 1
             if category not in (BLANK, COMMENT, DOCSTRING) and lineno not in self.begin_lines:
                 continuation_lines += 1
-        code_lines = frozenset(
-            lineno
-            for lineno, category in enumerate(line_categories, start=1)
-            if category not in (BLANK, COMMENT, DOCSTRING)
+        constructs = {"classes": len(self.classes), "functions": len(self.functions)}
+        file_counts = CompositionCounts(
+            categories=tuple(counts),
+            statements=self.statements,
+            continuation_lines=continuation_lines,
+            constructs=tuple(constructs.get(name, 0) for name in COMPOSITION_CONSTRUCTS),
         )
-        semantics = composition_semantics.detect(
-            tree,
-            units=self.units,
-            code_lines=code_lines,
-            tokens=tokens,
-            first_line=self.first_lines,
-            test_file=test_file,
-            settings=settings,
-        )
-        constructs = {
-            "classes": len(self.classes),
-            "functions": len(self.functions),
-            "data_shape_classes": semantics.data_shape_classes,
-            "qt_classes": semantics.qt_classes,
-            "tests": semantics.tests,
-        }
-        return FileAnalysis(
-            counts=CompositionCounts(
-                categories=tuple(counts),
-                statements=self.statements,
-                continuation_lines=continuation_lines,
+        if not measure_only:
+            code_lines = frozenset(
+                lineno
+                for lineno, category in enumerate(line_categories, start=1)
+                if category not in (BLANK, COMMENT, DOCSTRING)
+            )
+            semantics = composition_semantics.detect(
+                tree,
+                units=self.units,
+                code_lines=code_lines,
+                tokens=tokens,
+                first_line=self.first_lines,
+                test_file=test_file,
+                settings=settings,
+            )
+            constructs.update(
+                data_shape_classes=semantics.data_shape_classes,
+                qt_classes=semantics.qt_classes,
+                tests=semantics.tests,
+            )
+            file_counts = dataclasses.replace(
+                file_counts,
                 tags=semantics.tags,
                 markers=semantics.markers,
                 placements=semantics.placements,
                 constructs=tuple(constructs[name] for name in COMPOSITION_CONSTRUCTS),
-            ),
+            )
+        return FileAnalysis(
+            counts=file_counts,
             line_categories=tuple(line_categories),
             classes=tuple(self.classes),
             functions=tuple(self.functions),
