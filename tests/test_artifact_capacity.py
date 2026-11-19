@@ -6,6 +6,7 @@ import io
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -151,3 +152,51 @@ def test_cli_multi_project_seed_refuses_whole_oversized_batch(
     for name in ("a", "b"):
         assert not (tmp_path / name / "size-limits.json").exists()
         assert list((tmp_path / name).glob("*.pending")) == []
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_cli_multi_project_update_budgets_outputs_and_recovery_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overflow: bool
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.projects]]\nname = "a"\npath = "a"\n'
+        '[[tool.slopscope.projects]]\nname = "b"\npath = "b"\n',
+        encoding="utf-8",
+    )
+    prior = b'{"functions": {"missing.py::f": 200}}\n'
+    data: size_limits.Units = {"functions": {}, "classes": {}, "test_files": {}}
+    candidate = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    targets = [tmp_path / name / "size-limits.json" for name in ("a", "b")]
+    for target in targets:
+        target.parent.mkdir()
+        target.write_bytes(prior)
+
+    monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_BYTES", max(len(prior), len(candidate)))
+    total = len(targets) * (len(prior) + len(candidate))
+    monkeypatch.setattr(
+        size_limits, "MAX_ALLOWLIST_STAGING_BYTES", total - int(overflow), raising=False
+    )
+    staged: list[Path] = []
+    stage_bytes = size_limits._stage_bytes
+
+    def record_stage(target: Path, *args: Any, **kwargs: Any) -> Path:
+        staged.append(target)
+        return stage_bytes(target, *args, **kwargs)
+
+    monkeypatch.setattr(size_limits, "_stage_bytes", record_stage)
+    code, output, error = run(
+        [str(tmp_path), "--size-limits", "--update-allowlist", "--project", "all"]
+    )
+    if overflow:
+        assert code == 2
+        assert output == ""
+        assert f"staging exceeds {total - 1} bytes" in error
+        assert staged == []  # the budget is admitted before any output or backup is staged
+    else:
+        assert (code, error) == (0, "")
+        assert staged
+    for target in targets:
+        assert target.read_bytes() == (prior if overflow else candidate)
+        assert list(target.parent.glob(f".{target.name}.*")) == [
+            target.with_name(f".{target.name}.lock")
+        ]

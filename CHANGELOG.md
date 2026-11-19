@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound allowlist publication staging to 128 MiB across serialized outputs and recovery bytes.
+  Oversized mutations fail before staging or replacing any allowlist.
+
+- Share one 10-second deadline across all allowlist writer locks, releasing earlier locks on timeout
+  before planning or publication. A concurrent seed/update now fails with exit code 2 instead of
+  waiting when another writer holds a lock for longer than that.
+
 - Size-limits skips composition's semantic detectors while retaining definition spans,
   overload exclusion, and test-file code-line totals.
 - Size-limits associates allowlist entries with failed source paths containing `::`,

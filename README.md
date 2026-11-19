@@ -470,11 +470,17 @@ return exit code 2 with a bounded diagnostic and preserve prior snapshots.
 Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,
 including JSON formatting and the final newline. Exact-limit outputs are accepted. Overflow
 returns exit code 2 before staging; any oversized allowlist in a multi-project batch preserves
-all previous allowlists. Multi-project snapshots share one ceiling for the complete envelope.
+all previous allowlists. Allowlist mutations also share a 128 MiB staging budget for all
+serialized outputs and their previous recovery bytes. Exceeding it returns exit code 2
+before any staging. Multi-project snapshots share one ceiling for the complete envelope.
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Lock entries are opened without following symlinks and must be single-link regular files;
-identity is rechecked after acquiring the lock. Multi-project publication stages all outputs first
-and restores earlier writes on catchable replacement failures, including `KeyboardInterrupt` and `SystemExit`.
+identity is rechecked after acquiring the lock. Each mutation has one 10-second deadline to
+acquire all locks and returns exit code 2 before planning if it expires, so a concurrent writer
+fails instead of waiting when another seed/update holds a lock for longer; rerun it afterwards.
+Multi-project publication
+stages all outputs first and restores earlier writes on catchable replacement failures, including
+`KeyboardInterrupt` and `SystemExit`.
 The original interruption propagates after recovery; failed restoration retains a named recovery
 backup reported in exception notes. Recovery names are directory-synced before replacement; each
 replacement and restoration is directory-synced before recovery evidence is retired, and backup
