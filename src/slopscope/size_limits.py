@@ -49,23 +49,19 @@ def measure(
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
     max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
     max_total_source_bytes: int | None = None,
-    max_total_tokens: int | None = None,
-    max_total_anchors: int | None = None,
 ) -> tuple[Units, tuple[CompositionFailure, ...]]:
-    """Measure every function, class, and test file below ``root``, keyed as in the allowlist."""
+    """Measure every function, class, and test file below ``root``, keyed as in the allowlist.
+
+    Only the cumulative source-byte budget applies. No duplicate-detection token segments are
+    built, so the composition token and anchor budgets, which bound those, do not apply here.
+    """
 
     budget = composition.AnalysisBudget(
         composition.DEFAULT_MAX_TOTAL_SOURCE_BYTES
         if max_total_source_bytes is None
         else max_total_source_bytes,
-        composition_duplication.TokenBudget(
-            composition.DEFAULT_MAX_TOTAL_TOKENS if max_total_tokens is None else max_total_tokens,
-            composition.DEFAULT_MAX_TOTAL_ANCHORS
-            if max_total_anchors is None
-            else max_total_anchors,
-        ),
+        None,
     )
-    interner: dict[str, int] = {}
     units: Units = {kind: {} for kind in SIZE_LIMIT_KINDS}
     failures: list[CompositionFailure] = []
     admissions: dict[str, _source.Admission] = {}
@@ -79,7 +75,6 @@ def measure(
                 admission=admissions[relative_path],
                 max_source_bytes=max_source_bytes,
                 budget=budget,
-                interner=interner,
             )
         except composition_duplication.BudgetExceeded as exc:
             raise fallback.CountingError(f"incomplete analysis: whole-size-limits {exc}") from exc
@@ -531,8 +526,6 @@ def check(
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
     max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
     max_total_source_bytes: int | None = None,
-    max_total_tokens: int | None = None,
-    max_total_anchors: int | None = None,
 ) -> SizeLimitsReport:
     """Measure a project, apply ``action`` to its allowlist, and report the four groups."""
 
@@ -549,8 +542,6 @@ def check(
             test_dirs=test_dirs,
             max_source_bytes=max_source_bytes,
             max_total_source_bytes=max_total_source_bytes,
-            max_total_tokens=max_total_tokens,
-            max_total_anchors=max_total_anchors,
         )
         if pending is not None:
             write_allowlist(allowlist_path, pending, destination=destinations[allowlist_path])
@@ -570,8 +561,6 @@ def plan(
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
     max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
     max_total_source_bytes: int | None = None,
-    max_total_tokens: int | None = None,
-    max_total_anchors: int | None = None,
 ) -> tuple[SizeLimitsReport, Units | None]:
     """Measure and validate everything without writing.
 
@@ -598,8 +587,6 @@ def plan(
         test_dirs=test_dirs,
         max_source_bytes=max_source_bytes,
         max_total_source_bytes=max_total_source_bytes,
-        max_total_tokens=max_total_tokens,
-        max_total_anchors=max_total_anchors,
     )
     if failures and action != REPORT:
         raise SizeLimitsError(

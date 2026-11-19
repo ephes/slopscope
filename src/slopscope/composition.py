@@ -100,10 +100,13 @@ class CompositionAnalysisError(Exception):
 
 @dataclass
 class AnalysisBudget:
-    """Raw bytes read and token/index state admitted across one complete report."""
+    """Raw bytes read and token/index state admitted across one complete report.
+
+    ``tokens`` is ``None`` when no duplicate-detection token segments are built (size-limits).
+    """
 
     source_bytes: int
-    tokens: composition_duplication.TokenBudget
+    tokens: composition_duplication.TokenBudget | None
 
     def consume_source(self, size: int) -> None:
         if size > self.source_bytes:

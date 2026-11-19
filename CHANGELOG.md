@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Size-limits no longer builds duplicate-detection token segments it never reads, so the composition
+  `max_total_tokens` and `max_total_anchors` budgets no longer apply to it. Since 0.4.0a1 they did, and
+  a project with more than 2,000,000 code tokens (the default) could no longer run `--size-limits` at
+  all ("incomplete analysis: whole-size-limits token limit exceeded"). The cumulative
+  `max_total_source_bytes` budget still bounds size-limits. No CLI, configuration, or JSON changes.
+
 ## 0.4.0a2 - 2026-11-17
 
 Compatibility notes: no CLI, configuration, or JSON schema changes and no new runtime dependencies. Git now refuses a
