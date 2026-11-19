@@ -633,7 +633,8 @@ def plan(
 
 
 def _unit_path(kind: str, key: str) -> str:
-    return key if kind == "test_files" else key.split("::", 1)[0]
+    # Paths may contain "::"; qualified definition names and ordinal suffixes cannot.
+    return key if kind == "test_files" else key.rsplit("::", 1)[0]
 
 
 def _groups(

@@ -459,8 +459,9 @@ definitions. Units over a limit must be recorded in an allowlist (`size-limits.j
 `path::Qualified.name`; they may shrink but not grow. The report lists new offenders, grown and shrunk allowlisted
 units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offenders. `--seed-allowlist` writes the
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
-one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
-including duplicates with identical values; refused inputs leave existing outputs unchanged.
+one. When a source fails analysis, its entries are excluded from stale reporting, including when
+the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
+nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
 Baseline reads compare opened-descriptor generation metadata before and after the bounded read;
 in-place changes are refused before comparison. Atomic pathname replacement remains supported:
 the reader uses its already opened generation.

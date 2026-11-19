@@ -78,6 +78,9 @@ Allowlist keys identify units by path, relative to the analyzed project root:
   `#2`, `#3`, and so on in source order: `Box.size`, `Box.size#2`.
 - Test files: the path alone, for example `tests/test_views.py`.
 
+For functions and classes, the final `::` separates the path from the qualified name, allowing
+earlier occurrences of `::` in the path. Test-file keys are read as full paths.
+
 Keys change when a unit is renamed or moved, so a renamed unit shows up as new over its limit plus a stale entry for
 its old key. Moving the entry to the new key in the allowlist, with its recorded size, resolves both.
 
