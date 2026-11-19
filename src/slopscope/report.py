@@ -9,8 +9,8 @@ from typing import Self
 
 # Whole-composition budgets; composition re-exports these as its defaults.
 DEFAULT_MAX_TOTAL_SOURCE_BYTES = 128 * 1024 * 1024
-DEFAULT_MAX_TOTAL_TOKENS = 2_000_000
-DEFAULT_MAX_TOTAL_ANCHORS = 500_000
+DEFAULT_MAX_TOTAL_TOKENS = 8_000_000
+DEFAULT_MAX_TOTAL_ANCHORS = 2_000_000
 
 
 @dataclass(frozen=True)

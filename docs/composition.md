@@ -47,8 +47,8 @@ limit = 20
 min_duplicate_tokens = 80
 max_source_bytes = 16777216
 max_total_source_bytes = 134217728
-max_total_tokens = 2000000
-max_total_anchors = 500000
+max_total_tokens = 8000000
+max_total_anchors = 2000000
 qt_modules = ["app.ui.qt"]
 logging_patterns = ["audit_log"]
 compat_markers = ["legacy", "fallback", "compat", "deprecated"]
@@ -62,8 +62,8 @@ churn_months = 24
 | `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
 | `max_source_bytes` | Positive per-source byte ceiling, also used by size-limits, checked before decoding or parsing. | 16777216 (16 MiB) |
 | `max_total_source_bytes` | Positive cumulative raw-byte ceiling for all sources read in one composition or size-limits report, charged before decoding (including failed files). | 134217728 (128 MiB) |
-| `max_total_tokens` | Positive cumulative retained code-token ceiling; also bounds the number of shared interned strings. | 2000000 |
-| `max_total_anchors` | Positive cumulative potential duplicate-anchor ceiling: code line starts in token segments, including short segments without a full duplicate window. | 500000 |
+| `max_total_tokens` | Positive cumulative retained code-token ceiling; also bounds the number of shared interned strings. | 8000000 |
+| `max_total_anchors` | Positive cumulative potential duplicate-anchor ceiling: code line starts in token segments, including short segments without a full duplicate window. | 2000000 |
 | `qt_modules` | Extra modules treated as Qt, added to `PySide2`, `PySide6`, `PyQt5`, `PyQt6`, and `qtpy`. Dotted names match the module and everything inside it, so a project's own Qt wrapper package can count. | none |
 | `logging_patterns` | Opt-in substrings: a call whose dotted function name contains one of them, such as `audit_log.write()` for `audit_log`, gets the `logging` tag. | none |
 | `compat_markers` | Words for the `compat` marker, replacing the defaults. An empty list turns the marker off. | `legacy`, `fallback`, `compat` |
@@ -336,7 +336,7 @@ tokens, and list up to five locations each.
 
 In addition to token and anchor admission, each project has fixed duplicate-analysis budgets:
 1,000,000 cumulative metadata entries for blocks, occurrence memberships, line intervals, and
-anchor coverage memberships, plus 10,000,000 work units. Each token word in an anchor
+anchor coverage memberships, plus 100,000,000 work units. Each token word in an anchor
 window is charged before copying, byte conversion, and hashing. Verification,
 subgroup extension, and coverage scans share the work allowance across all groups. Entries
 are charged before retention, including subgroup results before materializing occurrences.
@@ -404,8 +404,8 @@ file to keep a snapshot.
     "limit": 10,
     "max_source_bytes": 16777216,
     "max_total_source_bytes": 134217728,
-    "max_total_tokens": 2000000,
-    "max_total_anchors": 500000,
+    "max_total_tokens": 8000000,
+    "max_total_anchors": 2000000,
     "min_duplicate_tokens": 50,
     "qt_modules": ["PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy"],
     "logging_patterns": [],

@@ -17,6 +17,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
   a project with more than 2,000,000 code tokens (the default) could no longer run `--size-limits` at
   all ("incomplete analysis: whole-size-limits token limit exceeded"). The cumulative
   `max_total_source_bytes` budget still bounds size-limits. No CLI, configuration, or JSON changes.
+- Composition budgets now fit large repositories: the default `max_total_tokens` rises from 2,000,000
+  to 8,000,000, the default `max_total_anchors` from 500,000 to 2,000,000, and the fixed duplicate
+  work budget from 10,000,000 to 100,000,000 units. A Python project of about 3.6 million code
+  tokens needs about 575,000 anchors and 27.5 million work units, so the 0.4.0a1 defaults stopped it
+  with "incomplete analysis: whole-composition token limit exceeded"; it now runs in about 250 MB.
+  Explicitly configured budgets are unchanged; the JSON `settings` show the new defaults.
 
 ## 0.4.0a2 - 2026-11-17
 
