@@ -288,7 +288,7 @@ or growing inputs return exit code 2 with an incomplete-analysis error and no re
 These limits are not configurable: exclude large generated or data files, or use the cloc engine.
 
 Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
-2,000,000 retained code tokens, and 500,000 potential duplicate anchors (code line starts within
+8,000,000 retained code tokens, and 2,000,000 potential duplicate anchors (code line starts within
 each token segment). These ceilings include all files together; unique interned strings cannot
 outnumber admitted code tokens. Raw bytes are charged before decoding, including reads from failed
 files. A file's token/anchor batch is admitted before changing the shared interner or retaining its
@@ -419,7 +419,7 @@ Duplicate extension compares overlap positions only within each token segment an
 subgroups with an explicit stack. Duplicate-analysis traversal or memory exhaustion marks the report
 incomplete and preserves any snapshot. Each project also has fixed whole-analysis ceilings of
 1,000,000 cumulative metadata entries (blocks, occurrences, line intervals, and coverage memberships)
-and 10,000,000 duplicate work units, including token words copied/hashed for anchor windows
+and 100,000,000 duplicate work units, including token words copied/hashed for anchor windows
 and comparison/traversal work. Admission happens before expansion;
 exhaustion exits 2 with an incomplete-analysis diagnostic and no report or snapshot. Exact-limit
 analyses retain the same output.
