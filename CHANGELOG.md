@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound allowlist publication staging to 128 MiB across serialized outputs and recovery bytes.
+  Oversized mutations fail before staging or replacing any allowlist.
+
 - Share one 10-second deadline across all allowlist writer locks, releasing earlier locks on timeout
   before planning or publication.
 

@@ -30,6 +30,7 @@ from slopscope.report import (
 DEFAULT_ALLOWLIST = "size-limits.json"
 SCHEMA_VERSION = 1
 MAX_ALLOWLIST_BYTES = 16 * 1024 * 1024
+MAX_ALLOWLIST_STAGING_BYTES = 128 * 1024 * 1024
 ALLOWLIST_LOCK_TIMEOUT_SECONDS = 10.0
 _LOCK_RETRY_SECONDS = 0.05
 REPORT = "report"
@@ -347,22 +348,31 @@ def publish_allowlists(
     also retains a named sibling backup for manual recovery.
     """
 
-    # Admit the whole batch before staging any output or recovery copy.
-    contents = [(path, _serialize_allowlist(path, data)) for path, data in updates]
     prepared: list[_PreparedAllowlist] = []
     replaced: list[_PreparedAllowlist] = []
     durability_uncertain = False
     try:
-        for path, content in contents:
+        # Admit the whole batch before staging any output or recovery copy.
+        contents = []
+        staging_bytes = 0
+        for path, data in updates:
+            content = _serialize_allowlist(path, data)
+            prior = _read_allowlist_bytes(path, destinations[path])
+            staging_bytes += len(content) + len(prior or b"")
+            if staging_bytes > MAX_ALLOWLIST_STAGING_BYTES:
+                raise SizeLimitsError(
+                    f"allowlist publication staging exceeds {MAX_ALLOWLIST_STAGING_BYTES} bytes"
+                    f" at {path}"
+                )
+            contents.append((path, content, prior))
+        for path, content, prior in contents:
             destination = destinations[path]
             _verify_destination(destination)
             temporary = _stage_bytes(
                 destination.target, content, destination.mode, suffix=".pending"
             )
-            item = _PreparedAllowlist(destination, temporary, None)
+            item = _PreparedAllowlist(destination, temporary, None, prior=prior)
             prepared.append(item)
-            prior = _read_allowlist_bytes(path, destination)
-            item.prior = prior
             if prior is not None:
                 item.backup = _stage_bytes(
                     destination.target, prior, destination.mode, suffix=".backup"

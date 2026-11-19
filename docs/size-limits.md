@@ -115,10 +115,12 @@ named pipes are refused without waiting for a writer. The opened size, mtime, an
 remain unchanged across the read; concurrent in-place edits refuse loading, update planning,
 and backup creation before any destination is replaced.
 Seed/update output uses the same 16 MiB ceiling, measured on the complete serialized UTF-8
-bytes including formatting and the final newline. Exact-limit output is accepted. Every
-project's payload is checked before staging any output or recovery backup; an oversized
-payload returns exit code 2 and preserves all prior allowlists (or their absence). Stable
-lock files may remain as usual. The ceiling is per allowlist, not the sum across projects.
+bytes including formatting and the final newline. Publication also has one 128 MiB
+(134,217,728 bytes) staging budget across the mutation, counting both serialized outputs
+and the exact previous bytes needed for recovery. Exact-limit payloads and batches are
+accepted. Both ceilings are checked before staging any output or recovery backup. Exceeding
+either ceiling returns exit code 2 and preserves all prior allowlists (or their absence).
+Stable lock files may remain as usual.
 
 ## Report
 
