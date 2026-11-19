@@ -806,9 +806,9 @@ def test_baseline_limit_is_inclusive(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize("action", ["--seed-allowlist", "--update-allowlist"])
-def test_semantic_recursion_prevents_allowlist_mutation(tmp_path: Path, action: str) -> None:
+def test_parse_failure_prevents_allowlist_mutation(tmp_path: Path, action: str) -> None:
     repository = make_repository(tmp_path)
-    write(repository, "src/deep.py", "import logging\nx = logging" + ".a" * 1300 + "()\n")
+    write(repository, "src/broken.py", "def broken(:\n")
     allowlist = repository / "size-limits.json"
     if action == "--update-allowlist":
         allowlist.write_bytes(b'{"functions": {"old.py::old": 999}}')

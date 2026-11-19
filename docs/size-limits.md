@@ -47,6 +47,7 @@ slopscope --size-limits --project all
 Spans and code lines use the composition report's definitions, so the largest allowlist entries match its Largest
 Functions and Largest Classes tables. Nested definitions count toward the units that enclose them and are also
 checked on their own: a method's lines count toward its class, and a helper function inside a method is a unit too.
+Size-limits uses structural classification and overload resolution and skips composition's semantic detectors.
 
 Every discovered Python file is checked, including functions and classes in test files and tooling scripts. Discovery,
 excludes, and include globs are the same as for the composition report.
@@ -76,6 +77,9 @@ Allowlist keys identify units by path, relative to the analyzed project root:
 - A name that repeats in the same file, such as a property getter and setter or two conditional definitions, gets
   `#2`, `#3`, and so on in source order: `Box.size`, `Box.size#2`.
 - Test files: the path alone, for example `tests/test_views.py`.
+
+For functions and classes, the final `::` separates the path from the qualified name, allowing
+earlier occurrences of `::` in the path. Test-file keys are read as full paths.
 
 Keys change when a unit is renamed or moved, so a renamed unit shows up as new over its limit plus a stale entry for
 its old key. Moving the entry to the new key in the allowlist, with its recorded size, resolves both.

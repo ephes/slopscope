@@ -199,6 +199,33 @@ def test_parse_failures_exit_1(tmp_path: Path) -> None:
     assert "could not analyze" in stderr
 
 
+def test_failed_source_with_delimiter_keeps_allowlist_entries(tmp_path: Path) -> None:
+    write(tmp_path, "pyproject.toml", CONFIG)
+    path = "tests/test_sample::extra.py"
+    method = "    def run(self):\n        value = 1\n        value += 1\n        return value\n"
+    write(tmp_path, path, "class Sample:\n" + method * 2)
+    args = ["--size-limits", "--format", "json", str(tmp_path)]
+
+    assert run_cli([*args, "--seed-allowlist"])[0] == 0
+    allowlist = tmp_path / "size-limits.json"
+    seeded = allowlist.read_bytes()
+    assert json.loads(seeded) == {
+        "classes": {f"{path}::Sample": 9},
+        "functions": {f"{path}::Sample.run": 4, f"{path}::Sample.run#2": 4},
+        "test_files": {path: 9},
+    }
+
+    write(tmp_path, path, "def broken(:\n")
+    code, stdout, stderr = run_cli(args)
+    report = json.loads(stdout)
+
+    assert code == 1
+    assert "could not analyze" in stderr
+    assert [failure["path"] for failure in report["failures"]] == [path]
+    assert report["stale"] == []
+    assert allowlist.read_bytes() == seeded
+
+
 def test_projects_use_one_allowlist_each(tmp_path: Path) -> None:
     make_project(tmp_path / "one", config="")
     make_project(tmp_path / "two", config="")

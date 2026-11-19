@@ -295,7 +295,8 @@ files. A file's token/anchor batch is admitted before changing the shared intern
 segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
 under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
 or snapshot/allowlist; prior artifacts survive. Size-limits applies only the source-byte ceiling:
-it builds no duplicate-detection token segments, so the token and anchor ceilings do not apply to it.
+it skips composition's semantic detectors and duplicate-detection token segments. It still
+classifies lines, measures definition spans, and resolves overload decorators.
 These aggregate settings do not apply to cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.
 
 If an included mapped regular file exists but cannot be opened or read at counting time (for example, permission
@@ -458,8 +459,9 @@ definitions. Units over a limit must be recorded in an allowlist (`size-limits.j
 `path::Qualified.name`; they may shrink but not grow. The report lists new offenders, grown and shrunk allowlisted
 units, and stale entries, and exits 0; `--strict` exits 1 on new or grown offenders. `--seed-allowlist` writes the
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries without ever adding or raising
-one. Allowlist and composition baseline JSON reject duplicate object keys at every nesting level,
-including duplicates with identical values; refused inputs leave existing outputs unchanged.
+one. When a source fails analysis, its entries are excluded from stale reporting, including when
+the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
+nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
 Baseline reads compare opened-descriptor generation metadata before and after the bounded read;
 in-place changes are refused before comparison. Atomic pathname replacement remains supported:
 the reader uses its already opened generation.

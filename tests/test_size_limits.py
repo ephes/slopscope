@@ -5,10 +5,11 @@ import os
 import stat
 import textwrap
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from slopscope import fallback, size_limits
+from slopscope import composition, composition_semantics, fallback, size_limits
 from slopscope.report import SizeLimitSettings, SizeLimitsReport
 
 EXCLUDES = tuple(sorted(fallback.DEFAULT_EXCLUDED_PATH_SEGMENTS))
@@ -112,6 +113,43 @@ def test_overload_stubs_are_skipped(tmp_path: Path) -> None:
     )
 
     assert measure(tmp_path)["functions"] == {"src/app.py::parse": 2}
+
+
+def test_measure_skips_composition_detectors(tmp_path: Path) -> None:
+    path = "tests/test_sample.py"
+    write(
+        tmp_path,
+        path,
+        '''
+        """Module docstring."""
+        import logging
+        from typing import overload
+
+        class Outer:
+            class Inner:
+                @overload
+                def parse(self, value: int) -> int: ...
+                def parse(self, value):
+                    """Method docstring."""
+                    # Keep the value.
+                    logging.info(value)
+                    return value
+        ''',
+    )
+    with patch.object(composition_semantics, "detect", wraps=composition_semantics.detect) as spy:
+        baseline = composition.analyze_file(tmp_path, path, test_file=True)
+        assert baseline.counts.tag("logging") > 0
+        spy.assert_called_once()
+        spy.reset_mock()
+
+        units = measure(tmp_path)
+
+    spy.assert_not_called()
+    assert units == {
+        "classes": {f"{path}::Outer": 9, f"{path}::Outer.Inner": 8},
+        "functions": {f"{path}::Outer.Inner.parse": 5},
+        "test_files": {path: baseline.counts.code},
+    }
 
 
 def test_repeated_names_get_numbered_suffixes_in_source_order(tmp_path: Path) -> None:
