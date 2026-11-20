@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Mark composition baseline comparisons with retired detectors as non-comparable and still report deltas.
+
 - Reject incomplete composition baseline reads before JSON decoding, even when the file metadata is stable.
 
 - Require a JSON integer for the composition baseline schema version. Float, boolean, and string markers

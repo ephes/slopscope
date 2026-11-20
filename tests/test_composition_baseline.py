@@ -61,10 +61,26 @@ def test_snapshot_write_failure_exits_2(tmp_path: Path) -> None:
     assert "could not write snapshot" in stderr
 
 
-def test_baseline_reports_deltas(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "inventory_change,warning",
+    [
+        ("matching", None),
+        ("retired", "detector retired is present only in the baseline"),
+        ("new", "detector qt version differs: baseline None, current 3"),
+    ],
+)
+def test_baseline_reports_deltas(
+    tmp_path: Path, inventory_change: str, warning: str | None
+) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "before.json"
     run_cli(["--composition", "--snapshot", str(snapshot), "--format", "json", str(repository)])
+    data = json.loads(snapshot.read_text(encoding="utf-8"))
+    if inventory_change == "retired":
+        data["detectors"].append({"name": "retired", "version": 1, "kind": "tag"})
+    elif inventory_change == "new":
+        data["detectors"] = [detector for detector in data["detectors"] if detector["name"] != "qt"]
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
     write(
         repository,
         "src/app.py",
@@ -77,11 +93,11 @@ def test_baseline_reports_deltas(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    assert stderr == ""
+    assert stderr == (f"slopscope: warning: {warning}\n" if warning else "")
     baseline = json.loads(stdout)["baseline"]
     assert baseline["path"] == str(snapshot)
-    assert baseline["comparable"] is True
-    assert baseline["warnings"] == []
+    assert baseline["comparable"] is (warning is None)
+    assert baseline["warnings"] == ([warning] if warning else [])
     total = baseline["deltas"]["total"]
     assert total["files"] == {"baseline": 2, "current": 3, "delta": 1}
     assert total["categories.import"]["delta"] == 1
