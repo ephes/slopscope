@@ -355,10 +355,11 @@ def _extend_blocks(
             for first, second in zip(ordered, ordered[1:], strict=False):
                 limit = min(limit, second - first)
         reference_ids, reference_position, _segment = starts[0]
+        other_starts = starts[1:]
         while length < limit:
             budget.reserve(work=len(starts))
             token = reference_ids[reference_position + length]
-            if any(ids[position + length] != token for ids, position, _segment in starts[1:]):
+            if any(ids[position + length] != token for ids, position, _segment in other_starts):
                 break
             length += 1
 

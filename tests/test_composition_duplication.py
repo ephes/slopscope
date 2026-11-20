@@ -4,6 +4,7 @@ import io
 import textwrap
 import tokenize
 from pathlib import Path
+from types import GeneratorType
 from typing import Any
 
 import pytest
@@ -261,6 +262,49 @@ def test_staircase_subgroups_preserve_exact_output_order() -> None:
         block(3, tuple(occurrence(index, 1, 3) for index in range(2))),
     )
     assert result.intervals == {0: [(1, 3)], 1: [(1, 3)], 2: [(1, 2)], 3: [(1, 1)]}
+
+
+def test_extension_reuses_member_tail_per_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    from array import array
+    from gc import get_referents
+
+    shared_length = 64
+    files = [
+        [
+            composition_duplication.Segment(
+                array("i", [*range(shared_length), shared_length + index % 2]),
+                array("i", [index + 1] * shared_length + [index + 2]),
+            )
+        ]
+        for index in range(8)
+    ]
+    compared_tails: list[object] = []
+
+    def count_tail(comparisons: GeneratorType[bool, None, None]) -> bool:
+        # Keep each iterator's backing list alive so separate copies have distinct identities.
+        frame = comparisons.gi_frame
+        assert frame is not None
+        (tail,) = get_referents(frame.f_locals[".0"])
+        compared_tails.append(tail)
+        return any(comparisons)
+
+    monkeypatch.setattr(composition_duplication, "any", count_tail, raising=False)
+    result = composition_duplication.find_duplicates(files, min_tokens=2)
+    occurrence = composition_duplication.Occurrence
+    block = composition_duplication.Block
+    assert result.blocks == (
+        block(shared_length, tuple(occurrence(index, index + 1, index + 1) for index in range(8))),
+        block(
+            shared_length + 1,
+            tuple(occurrence(index, index + 1, index + 2) for index in range(0, 8, 2)),
+        ),
+        block(
+            shared_length + 1,
+            tuple(occurrence(index, index + 1, index + 2) for index in range(1, 8, 2)),
+        ),
+    )
+    assert result.intervals == {index: [(index + 1, index + 2)] for index in range(8)}
+    assert len({id(tail) for tail in compared_tails}) == 3
 
 
 def test_staircase_subgroups_do_not_use_python_recursion() -> None:
