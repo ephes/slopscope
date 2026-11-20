@@ -84,15 +84,15 @@ def load_baseline(
             if len(content) > MAX_BASELINE_BYTES:
                 raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
             after = os.fstat(handle.fileno())
-            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
-                after.st_dev,
-                after.st_ino,
-                after.st_size,
-                after.st_mtime_ns,
-            ) or (
-                info.st_ctime_ns != after.st_ctime_ns
-                # Atomic pathname replacement unlinks the opened, unchanged inode.
-                and not (info.st_nlink > 0 and after.st_nlink == 0)
+            if (
+                len(content) != after.st_size
+                or (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or (
+                    info.st_ctime_ns != after.st_ctime_ns
+                    # Atomic pathname replacement unlinks the opened, unchanged inode.
+                    and not (info.st_nlink > 0 and after.st_nlink == 0)
+                )
             ):
                 raise BaselineError(f"baseline file {path} changed while reading")
         data = json.loads(content.decode("utf-8"), object_pairs_hook=unique_object)

@@ -517,9 +517,10 @@ identity are not preserved. A read-only file can be replaced when its parent dir
 `--baseline PATH` loads an earlier snapshot and adds a comparison. Inputs must be regular files of at most
 16 MiB (16,777,216 bytes), including multi-project snapshots. The opened descriptor is checked before a bounded
 read; special files such as FIFOs are refused without waiting for a writer. Symlinks to regular files remain
-supported. Descriptor identity, size, and timestamps are compared after the read, before decoding or comparison;
-in-place changes return exit code 2 and preserve the prior snapshot. Atomic replacement of the pathname is
-supported: the reader continues using the opened inode (unlink-only ctime changes are allowed).
+supported. After the read and before decoding, the reader verifies descriptor identity, size, and timestamps and
+checks that the number of bytes read matches the descriptor's size. In-place changes and incomplete reads return
+exit code 2 and preserve the prior snapshot. If the pathname is atomically replaced, the reader continues
+using the opened inode and allows unlink-only ctime changes.
 Type or size refusals also return exit code 2 without changing baseline or snapshot bytes.
 
 Comparison rules:

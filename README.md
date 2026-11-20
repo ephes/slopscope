@@ -462,9 +462,9 @@ first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale 
 one. When a source fails analysis, its entries are excluded from stale reporting, including when
 the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
 nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
-Baseline reads compare opened-descriptor generation metadata before and after the bounded read;
-in-place changes are refused before comparison. Atomic pathname replacement remains supported:
-the reader uses its already opened generation.
+Baseline reads compare opened-descriptor generation metadata before and after the bounded read and verify that
+the byte count matches the descriptor's size. In-place changes and incomplete reads are refused before comparison.
+If the pathname is atomically replaced, the reader uses the file it already opened.
 Baseline integer-decoder resource failures, including oversized integers in extension fields,
 return exit code 2 with a bounded diagnostic and preserve prior snapshots.
 Written allowlists and composition snapshots share their readers' 16 MiB UTF-8 byte ceilings,

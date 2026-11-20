@@ -932,6 +932,36 @@ def test_duplicate_budget_preserves_prior_outputs(
     assert allowlist.read_bytes() == b"previous allowlist"
 
 
+def test_baseline_refuses_short_read_with_stable_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    complete_report = baseline.read_bytes()
+    baseline.write_bytes(complete_report + b"\n  ")
+    real_fdopen = os.fdopen
+
+    def fdopen(fd: int, mode: str) -> BinaryIO:
+        handle = cast(BinaryIO, real_fdopen(fd, mode))
+        read = handle.read
+
+        def short_read(size: int) -> bytes:
+            assert size == composition_baseline.MAX_BASELINE_BYTES + 1
+            return read(len(complete_report))
+
+        monkeypatch.setattr(handle, "read", short_read)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    with pytest.raises(composition_baseline.BaselineError) as error:
+        composition_baseline.load_baseline(
+            baseline, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    assert str(error.value) == f"baseline file {baseline} changed while reading"
+
+
 @pytest.mark.parametrize("replace_path", [False, True])
 @pytest.mark.parametrize("restore_mtime", [False, True])
 def test_baseline_read_generation(
