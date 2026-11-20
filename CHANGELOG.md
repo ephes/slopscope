@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Distinguish a missing Git executable from other process startup failures in churn reports.
+  Startup diagnostics include a short OS error code for failures such as permission errors.
+
+- Reuse precompiled metric paths during composition baseline validation and format field diagnostics
+  only for invalid metrics or groups.
+
 - Write size-limit measurements directly from source-ordered definitions, avoiding temporary tuple lists
   and preserving allowlist keys and overload filtering.
 

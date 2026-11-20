@@ -444,6 +444,8 @@ The branch is resolved once to a commit SHA; every history command uses that SHA
 as `churn.commit` in JSON, while `churn.ref` retains the requested display label.
 Malformed history or more than 16 MiB of combined output from any churn Git command skips optional
 churn with a diagnostic, preserving source analysis and snapshot success policy.
+Git launch failures also skip optional churn. The diagnostic distinguishes a missing executable
+from other launch failures such as permission errors.
 `[tool.slopscope.composition]` configures list sizes, the duplicate threshold, extra Qt modules, opt-in logging
 patterns, compatibility marker words, and the churn branch and window. `--engine`, `--profile`, `--total-only`, and
 `--top` cannot be combined with `--composition`. Files that cannot be read, decoded, or parsed are reported on stderr

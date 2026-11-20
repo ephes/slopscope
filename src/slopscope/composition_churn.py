@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Sequence
 from datetime import date, timedelta
@@ -65,12 +67,10 @@ def collect_churn(
 
     try:
         inside = _git(executable, path, ["rev-parse", "--is-inside-work-tree"])
-        if inside is None:
-            return skipped("git was not found")
         if inside.returncode != 0 or inside.stdout.strip() != b"true":
             return skipped("not a Git repository")
         verified = _git(executable, path, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
-        if verified is None or verified.returncode != 0:
+        if verified.returncode != 0:
             return skipped(f"unknown branch or ref {ref!r}")
 
         commit = verified.stdout.decode("ascii").strip()
@@ -92,10 +92,10 @@ def collect_churn(
         result = _git(
             executable, path, [*log_arguments, f"--since-as-filter={cutoff.isoformat()}", "--"]
         )
-        if result is not None and result.returncode != 0:
+        if result.returncode != 0:
             result = _git(executable, path, [*log_arguments, "--"])
-        if result is None or result.returncode != 0:
-            message = "" if result is None else result.stderr.decode(errors="replace").strip()
+        if result.returncode != 0:
+            message = result.stderr.decode(errors="replace").strip()
             return skipped(f"git log failed: {message or 'no error output'}")
 
     except subprocess.TimeoutExpired:
@@ -189,7 +189,7 @@ def _git(
     executable: str,
     path: Path,
     arguments: list[str],
-) -> subprocess.CompletedProcess[bytes] | None:
+) -> subprocess.CompletedProcess[bytes]:
     try:
         process = subprocess.Popen(
             [executable, "-C", str(path), *arguments],
@@ -198,8 +198,16 @@ def _git(
             env=hardened_git_env(),
             start_new_session=os.name == "posix",
         )
-    except OSError:
-        return None
+    except OSError as exc:
+        # ENOENT can also mean that an existing executable's interpreter is missing.
+        if (
+            isinstance(exc, FileNotFoundError)
+            and exc.filename in (None, executable)
+            and shutil.which(executable) is None
+        ):
+            raise GitCaptureError("git was not found") from exc
+        error = errno.errorcode.get(exc.errno or 0, "unknown error")
+        raise GitCaptureError(f"could not start git ({error})") from exc
     return capture_process(
         process, timeout=GIT_TIMEOUT_SECONDS, max_bytes=MAX_GIT_OUTPUT_BYTES, label="git"
     )

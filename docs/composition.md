@@ -557,6 +557,8 @@ Comparison rules:
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
+  Validation reuses the same metric paths for every project's total and kind counts and formats field paths only
+  when a metric or group is invalid.
 - `--baseline` and `--snapshot` must name distinct files, including through symlink or hardlink aliases.
   To refresh a baseline, write a separate snapshot and explicitly replace the baseline after reviewing it.
 
@@ -594,8 +596,10 @@ analyzed path.
   repositories, no fsmonitor, and no signature verification programs. Other command-running settings in an
   untrusted `.git` directory (for example a promisor remote on Git older than 2.45) are outside this
   guarantee.
-- Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
-  `slopscope: skipping churn:` notice, and the exit code does not change.
+- Outside a Git repository, with an unknown ref, without Git, or when Git fails to start, the report
+  records why churn was skipped and stderr gets a `slopscope: skipping churn:` notice. The exit code
+  stays the same. A missing executable reports `git was not found`. Other launch failures report
+  `could not start git` with a short OS error code. If the ref already resolved, the report keeps its commit SHA.
 
 This is churn, not growth: net lines per month mix new code with rewrites, moves between kinds, and deletions.
 
