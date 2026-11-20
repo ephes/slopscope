@@ -75,7 +75,8 @@ Allowlist keys identify units by path, relative to the analyzed project root:
   Side effects from calls and rebinding from other scopes (including `global`/`nonlocal` assignments) are
   not propagated into the affected scope. Dynamic rebinding cannot be resolved statically.
 - A name that repeats in the same file, such as a property getter and setter or two conditional definitions, gets
-  `#2`, `#3`, and so on in source order: `Box.size`, `Box.size#2`.
+  `#2`, `#3`, and so on in source order: `Box.size`, `Box.size#2`. Size measurement uses the analyzer's
+  source-ordered definition records directly and numbers repeats after excluding overload stubs.
 - Test files: the path alone, for example `tests/test_views.py`.
 
 For functions and classes, the final `::` separates the path from the qualified name, allowing

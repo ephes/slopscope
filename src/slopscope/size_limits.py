@@ -86,16 +86,8 @@ def measure(
         except composition.CompositionAnalysisError as exc:
             failures.append(CompositionFailure(path=relative_path, error=str(exc)))
             continue
-        functions = [
-            (definition.line, definition.name, definition.lines)
-            for definition in analysis.functions
-            if not definition.overload
-        ]
-        classes = [
-            (definition.line, definition.name, definition.lines) for definition in analysis.classes
-        ]
-        units["functions"].update(_keyed(relative_path, functions))
-        units["classes"].update(_keyed(relative_path, classes))
+        _add_keyed(units["functions"], relative_path, analysis.functions)
+        _add_keyed(units["classes"], relative_path, analysis.classes)
         kind = classify.classify_source_test(
             relative_path, source_dirs=source_dirs, test_dirs=test_dirs
         )
@@ -104,17 +96,21 @@ def measure(
     return units, tuple(failures)
 
 
-def _keyed(path: str, definitions: list[tuple[int, str, int]]) -> dict[str, int]:
-    """Key definitions as ``path::Qualified.name``, numbering repeats ``#2``, ``#3`` in order."""
+def _add_keyed(
+    units: dict[str, int], path: str, definitions: Sequence[composition.DefinitionSize]
+) -> None:
+    """Skip overloads and number repeated definitions in source order."""
 
-    keyed: dict[str, int] = {}
     seen: dict[str, int] = {}
-    for _line, name, size in sorted(definitions):
+    for definition in definitions:
+        if definition.overload:
+            continue
+        name = definition.name
+        ordinal = seen.get(name, 0) + 1
+        seen[name] = ordinal
         base = f"{path}::{name}"
-        seen[base] = seen.get(base, 0) + 1
-        key = base if seen[base] == 1 else f"{base}#{seen[base]}"
-        keyed[key] = size
-    return keyed
+        key = base if ordinal == 1 else f"{base}#{ordinal}"
+        units[key] = definition.lines
 
 
 @dataclasses.dataclass(frozen=True)
