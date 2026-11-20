@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reuse the list of copies compared against the reference while extending each duplicate group.
+
+- Validate the duplicate-window threshold for direct library calls. A one-token window is supported.
+
 - Distinguish a missing Git executable from other process startup failures in churn reports.
   Startup diagnostics include a short OS error code for failures such as permission errors.
 

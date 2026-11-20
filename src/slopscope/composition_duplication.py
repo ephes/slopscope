@@ -159,7 +159,10 @@ def find_duplicates(
     *,
     min_tokens: int = DEFAULT_MIN_TOKENS,
 ) -> DuplicationResult:
-    """Find duplicated blocks of at least ``min_tokens`` tokens across and within files."""
+    """Find duplicates within and across files using a positive integer window size."""
+
+    if not isinstance(min_tokens, int) or isinstance(min_tokens, bool) or min_tokens < 1:
+        raise ValueError("min_tokens must be a positive integer")
 
     budget = _DuplicateBudget(MAX_DUPLICATE_OUTPUT_ITEMS, MAX_DUPLICATE_WORK)
     segments: list[tuple[int, Segment]] = [
@@ -352,10 +355,11 @@ def _extend_blocks(
             for first, second in zip(ordered, ordered[1:], strict=False):
                 limit = min(limit, second - first)
         reference_ids, reference_position, _segment = starts[0]
+        other_starts = starts[1:]
         while length < limit:
             budget.reserve(work=len(starts))
             token = reference_ids[reference_position + length]
-            if any(ids[position + length] != token for ids, position, _segment in starts[1:]):
+            if any(ids[position + length] != token for ids, position, _segment in other_starts):
                 break
             length += 1
 
