@@ -161,7 +161,8 @@ matching top-level filter; empty fields inherit as before.
 `group_by` must be a relative slash-separated path with exactly one `*` segment and literal
 surrounding segments. Empty, `.` or `..` segments, absolute paths, and other glob syntax (`?`,
 `[]`, or partial/repeated wildcards) are refused before counting. Literal suffixes such as
-`roles/*/tasks` are supported.
+`roles/*/tasks` are supported. A grouped report prepares its match pattern once before counting
+and reuses it for every file.
 
 Grouped reports support plain, Rich, and JSON output. Rich remains optional and falls back to plain output when Rich
 is unavailable or disabled. A pattern such as `roles/*` groups matching files by `roles/<name>`. Files that do not

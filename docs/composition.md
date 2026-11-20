@@ -105,8 +105,9 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
 Discovery records each selected source's root, parent-directory, and regular-file identities. Reads
 open components relative to checked directory descriptors without following links below the selected
 root (the root itself may be a symlink). Files changed since admission, including regular-file
-replacements, are refused. Leaf opens are nonblocking and descriptors must be regular files before
-any bytes are read, so a substituted FIFO cannot wait for a writer. Platforms without
+replacements, are refused. The walk holds at most two directory descriptors at a time, regardless
+of path depth, and releases the last one before reading. Leaf opens are nonblocking and descriptors
+must be regular files before any bytes are read, so a substituted FIFO cannot wait for a writer. Platforms without
 descriptor-relative opening, `O_NOFOLLOW`, `O_DIRECTORY`, or `O_NONBLOCK` refuse source analysis; Windows lacks them, so composition
 analysis is unsupported there.
 

@@ -82,26 +82,33 @@ def open_source(
     if not all(hasattr(os, name) for name in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK")):
         raise OSError("safe source opening is unavailable on this platform")
     with ExitStack() as stack:
+        parent = None
         try:
-            directory_flags = os.O_RDONLY | os.O_DIRECTORY
-            parent = os.open(root, directory_flags)
-            stack.callback(os.close, parent)
-            _check(os.fstat(parent), expected[0], directory=True)
-            for index, part in enumerate(parts[:-1], start=1):
-                parent = os.open(part, directory_flags | os.O_NOFOLLOW, dir_fd=parent)
-                stack.callback(os.close, parent)
-                _check(os.fstat(parent), expected[index], directory=True)
-            descriptor = os.open(
-                parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-            )
-        except (NotImplementedError, TypeError) as exc:
-            raise OSError("safe source opening is unavailable on this platform") from exc
-        try:
-            handle = os.fdopen(descriptor, "rb")
-        except BaseException:
-            os.close(descriptor)
-            raise
-        stack.enter_context(handle)
-        _check(os.fstat(handle.fileno()), expected[-1], directory=False)
+            try:
+                directory_flags = os.O_RDONLY | os.O_DIRECTORY
+                parent = os.open(root, directory_flags)
+                _check(os.fstat(parent), expected[0], directory=True)
+                for index, part in enumerate(parts[:-1], start=1):
+                    previous = parent
+                    parent = os.open(part, directory_flags | os.O_NOFOLLOW, dir_fd=previous)
+                    try:
+                        _check(os.fstat(parent), expected[index], directory=True)
+                    finally:
+                        os.close(previous)
+                descriptor = os.open(
+                    parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+                )
+            except (NotImplementedError, TypeError) as exc:
+                raise OSError("safe source opening is unavailable on this platform") from exc
+            try:
+                handle = os.fdopen(descriptor, "rb")
+            except BaseException:
+                os.close(descriptor)
+                raise
+            stack.enter_context(handle)
+            _check(os.fstat(handle.fileno()), expected[-1], directory=False)
+        finally:
+            if parent is not None:
+                os.close(parent)
         yield handle
         _check(os.fstat(handle.fileno()), expected[-1], directory=False)

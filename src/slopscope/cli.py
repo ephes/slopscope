@@ -999,7 +999,7 @@ def _run_profile(
     err: TextIO,
 ) -> int:
     try:
-        selected_profile = profile.find_profile(slopscope_config, args.profile)
+        selected_profile, group = profile._find_prepared_profile(slopscope_config, args.profile)
     except profile.ProfileError as exc:
         print(display_text(f"slopscope: {exc}"), file=err)
         return 2
@@ -1020,10 +1020,11 @@ def _run_profile(
         profile_engine = "python"
 
     try:
-        report = profile.build_profile_report(
+        report = profile._build_prepared_profile_report(
             path=path,
             slopscope_config=slopscope_config,
             selected_profile=selected_profile,
+            group=group,
             engine=profile_engine,
             top=args.top,
         )

@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Compile the `group_by` pattern once per grouped profile report and reuse it for all file rows.
+
+- Release ancestor directory descriptors during source opening for composition and size-limits,
+  keeping directory descriptor use constant for deep paths.
+
 - Bound allowlist publication staging to 128 MiB across serialized outputs and recovery bytes.
   Oversized mutations fail before staging or replacing any allowlist.
 
