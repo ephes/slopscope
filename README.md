@@ -369,7 +369,9 @@ Top-level values are used only when the profile field is empty. Top-level `exclu
 
 The public aggregation helpers normalize configured paths once per call, before reading file rows.
 Generator policies give the same source/test, area, and directory totals as tuple policies.
-Configured rules are matched in their supplied order. Individual aggregate helpers stream file rows.
+Configured rules are matched in their supplied order. The combined file report updates all three
+sections in one pass over the file rows and retains only section totals. Individual aggregate helpers
+also stream file rows.
 
 Default rendered sections are:
 

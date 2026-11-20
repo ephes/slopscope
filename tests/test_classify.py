@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 import pytest
@@ -261,3 +262,67 @@ def test_file_aggregation_normalizes_each_path_rule_once(monkeypatch: pytest.Mon
         ),
         1,
     )
+
+
+def test_file_report_classifies_rows_as_they_arrive(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [
+        row(path, index % 5)
+        for index in range(200)
+        for path in (
+            f"lib/core/task{index}.py",
+            f"lib/core/test_task{index}.py",
+            f"lib/core/checks/unit/example{index}.py",
+            f"docs/reference/guide{index}.md",
+            f"tools/build/task{index}.py",
+            f"shells/desktop/app/task{index}.py",
+            f"misc/task{index}.py",
+            f"test_root{index}.py",
+            "lib",
+            "checks",
+        )
+    ]
+    source_dirs = ("lib", "lib/core")
+    test_dirs = ("checks/unit", "checks")
+    named_areas = ("tools/build", "tools")
+    nested_bucket_dirs = ("shells/desktop", "shells")
+    expected = FileAggregateReport(
+        source_tests=classify.aggregate_source_tests(
+            iter(rows), source_dirs=source_dirs, test_dirs=test_dirs
+        ),
+        area_rows=classify.aggregate_areas(
+            iter(rows), source_dirs=source_dirs, test_dirs=test_dirs, named_areas=named_areas
+        ),
+        directory_rows=classify.aggregate_directories(
+            iter(rows),
+            source_dirs=source_dirs,
+            test_dirs=test_dirs,
+            nested_bucket_dirs=nested_bucket_dirs,
+        ),
+    )
+    checks = 0
+    checks_before_yield: list[int] = []
+    match_subpath = classify._first_matching_subpath_span
+
+    def count_test_dir_checks(
+        parts: tuple[str, ...], paths: Iterable[tuple[str, ...]]
+    ) -> tuple[int, int] | None:
+        nonlocal checks
+        checks += 1
+        return match_subpath(parts, paths)
+
+    def file_rows() -> Iterator[FileRow]:
+        for item in rows:
+            checks_before_yield.append(checks)
+            yield item
+
+    monkeypatch.setattr(classify, "_first_matching_subpath_span", count_test_dir_checks)
+    actual = classify.build_file_aggregate_report(
+        file_rows(),
+        source_dirs=iter(source_dirs),
+        test_dirs=iter(test_dirs),
+        named_areas=iter(named_areas),
+        nested_bucket_dirs=iter(nested_bucket_dirs),
+    )
+    assert actual == expected
+    assert checks == len(rows)
+    assert checks_before_yield == list(range(len(rows)))

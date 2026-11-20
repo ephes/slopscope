@@ -15,6 +15,7 @@ DEFAULT_NESTED_BUCKET_DIRS: tuple[str, ...] = ()
 
 _DOCS_PREFIX = ("docs",)
 _PathParts = tuple[str, ...]
+_FileTotals = dict[str, tuple[int, int]]
 
 SourceTestKind = Literal["source", "tests", "other"]
 
@@ -30,9 +31,10 @@ def is_test_path(
 
 
 def _is_test_path(parts: _PathParts, test_dirs: Iterable[_PathParts]) -> bool:
-    if _first_matching_subpath_span(parts, test_dirs) is not None:
-        return True
+    return _first_matching_subpath_span(parts, test_dirs) is not None or _is_test_filename(parts)
 
+
+def _is_test_filename(parts: _PathParts) -> bool:
     filename = parts[-1].lower() if parts else ""
     return (
         filename.startswith("test_")
@@ -58,9 +60,15 @@ def classify_source_test(
 def _classify_source_test(
     parts: _PathParts, source_dirs: Iterable[_PathParts], test_dirs: Iterable[_PathParts]
 ) -> SourceTestKind:
-    if _is_test_path(parts, test_dirs):
+    is_test = _is_test_path(parts, test_dirs)
+    source_prefix = None if is_test else _first_matching_prefix(parts, source_dirs)
+    return _source_test_kind(is_test, source_prefix)
+
+
+def _source_test_kind(is_test: bool, source_prefix: _PathParts | None) -> SourceTestKind:
+    if is_test:
         return "tests"
-    if _first_matching_prefix(parts, source_dirs) is not None:
+    if source_prefix is not None:
         return "source"
     return "other"
 
@@ -125,11 +133,20 @@ def _bucket_directory(
         return "."
 
     test_span = _first_matching_subpath_span(parts, test_dirs)
+    source_prefix = None if test_span is not None else _first_matching_prefix(parts, source_dirs)
+    return _bucket_for_matches(parts, test_span, source_prefix, nested_bucket_dirs)
+
+
+def _bucket_for_matches(
+    parts: _PathParts,
+    test_span: tuple[int, int] | None,
+    source_prefix: _PathParts | None,
+    nested_bucket_dirs: Iterable[_PathParts],
+) -> str:
     if test_span is not None:
         start, end = test_span
         return _bucket_from_match(parts, start=start, end=end)
 
-    source_prefix = _first_matching_prefix(parts, source_dirs)
     if source_prefix is not None:
         return _bucket_from_match(parts, start=0, end=len(source_prefix) - 1)
 
@@ -151,38 +168,15 @@ def aggregate_source_tests(
 ) -> SourceTestSummary:
     """Aggregate source and test totals from file rows."""
 
-    return _aggregate_source_tests(
-        file_rows,
-        tuple(_iter_configured_parts(source_dirs)),
-        tuple(_iter_configured_parts(test_dirs)),
-    )
+    source_prefixes = tuple(_iter_configured_parts(source_dirs))
+    test_paths = tuple(_iter_configured_parts(test_dirs))
 
-
-def _aggregate_source_tests(
-    file_rows: Iterable[FileRow],
-    source_dirs: tuple[_PathParts, ...],
-    test_dirs: tuple[_PathParts, ...],
-) -> SourceTestSummary:
-    source_files = 0
-    source_code = 0
-    test_files = 0
-    test_code = 0
-
+    totals: _FileTotals = {}
     for row in file_rows:
-        kind = _classify_source_test(_path_parts(row.path), source_dirs, test_dirs)
-        if kind == "source":
-            source_files += 1
-            source_code += row.code
-        elif kind == "tests":
-            test_files += 1
-            test_code += row.code
-
-    return SourceTestSummary(
-        source_files=source_files,
-        source_code=source_code,
-        test_files=test_files,
-        test_code=test_code,
-    )
+        kind = _classify_source_test(_path_parts(row.path), source_prefixes, test_paths)
+        if kind != "other":
+            _add_file_total(totals, kind, row.code)
+    return _source_test_summary(totals)
 
 
 def aggregate_areas(
@@ -194,30 +188,17 @@ def aggregate_areas(
 ) -> tuple[AreaRow, ...]:
     """Aggregate repository area totals from file rows."""
 
-    return _aggregate_areas(
-        file_rows,
-        tuple(_iter_configured_parts(source_dirs)),
-        tuple(_iter_configured_parts(test_dirs)),
-        tuple(_iter_named_area_prefixes(named_areas)),
-    )
+    source_prefixes = tuple(_iter_configured_parts(source_dirs))
+    test_paths = tuple(_iter_configured_parts(test_dirs))
+    area_prefixes = tuple(_iter_named_area_prefixes(named_areas))
 
-
-def _aggregate_areas(
-    file_rows: Iterable[FileRow],
-    source_dirs: tuple[_PathParts, ...],
-    test_dirs: tuple[_PathParts, ...],
-    named_areas: tuple[tuple[str, _PathParts], ...],
-) -> tuple[AreaRow, ...]:
-    totals: dict[str, tuple[int, int]] = {}
+    totals: _FileTotals = {}
     for row in file_rows:
         parts = _path_parts(row.path)
-        kind = _classify_source_test(parts, source_dirs, test_dirs)
-        area = _area_for_kind(parts, kind, named_areas)
-        files, code = totals.get(area, (0, 0))
-        totals[area] = (files + 1, code + row.code)
-
-    rows = [AreaRow(name=area, files=files, code=code) for area, (files, code) in totals.items()]
-    return tuple(sorted(rows, key=_aggregate_sort_key))
+        kind = _classify_source_test(parts, source_prefixes, test_paths)
+        area = _area_for_kind(parts, kind, area_prefixes)
+        _add_file_total(totals, area, row.code)
+    return _area_rows(totals)
 
 
 def aggregate_directories(
@@ -229,33 +210,17 @@ def aggregate_directories(
 ) -> tuple[DirectoryRow, ...]:
     """Aggregate directory bucket totals from file rows."""
 
-    return _aggregate_directories(
-        file_rows,
-        tuple(_iter_configured_parts(source_dirs)),
-        tuple(_iter_configured_parts(test_dirs)),
-        tuple(_iter_configured_parts(nested_bucket_dirs)),
-    )
+    source_prefixes = tuple(_iter_configured_parts(source_dirs))
+    test_paths = tuple(_iter_configured_parts(test_dirs))
+    nested_prefixes = tuple(_iter_configured_parts(nested_bucket_dirs))
 
-
-def _aggregate_directories(
-    file_rows: Iterable[FileRow],
-    source_dirs: tuple[_PathParts, ...],
-    test_dirs: tuple[_PathParts, ...],
-    nested_bucket_dirs: tuple[_PathParts, ...],
-) -> tuple[DirectoryRow, ...]:
-    totals: dict[str, tuple[int, int]] = {}
+    totals: _FileTotals = {}
     for row in file_rows:
         bucket = _bucket_directory(
-            _path_parts(row.path), source_dirs, test_dirs, nested_bucket_dirs
+            _path_parts(row.path), source_prefixes, test_paths, nested_prefixes
         )
-        files, code = totals.get(bucket, (0, 0))
-        totals[bucket] = (files + 1, code + row.code)
-
-    rows = [
-        DirectoryRow(name=bucket, files=files, code=code)
-        for bucket, (files, code) in totals.items()
-    ]
-    return tuple(sorted(rows, key=_aggregate_sort_key))
+        _add_file_total(totals, bucket, row.code)
+    return _directory_rows(totals)
 
 
 def build_file_aggregate_report(
@@ -273,12 +238,61 @@ def build_file_aggregate_report(
     area_prefixes = tuple(_iter_named_area_prefixes(named_areas))
     nested_prefixes = tuple(_iter_configured_parts(nested_bucket_dirs))
 
-    rows = tuple(file_rows)
+    source_test_totals: _FileTotals = {}
+    area_totals: _FileTotals = {}
+    directory_totals: _FileTotals = {}
+    for row in file_rows:
+        parts = _path_parts(row.path)
+        test_span = _first_matching_subpath_span(parts, test_paths)
+        source_prefix = (
+            None if test_span is not None else _first_matching_prefix(parts, source_prefixes)
+        )
+        kind = _source_test_kind(test_span is not None or _is_test_filename(parts), source_prefix)
+        area = _area_for_kind(parts, kind, area_prefixes)
+        bucket = (
+            "."
+            if len(parts) <= 1
+            else _bucket_for_matches(parts, test_span, source_prefix, nested_prefixes)
+        )
+        if kind != "other":
+            _add_file_total(source_test_totals, kind, row.code)
+        _add_file_total(area_totals, area, row.code)
+        _add_file_total(directory_totals, bucket, row.code)
+
     return FileAggregateReport(
-        source_tests=_aggregate_source_tests(rows, source_prefixes, test_paths),
-        area_rows=_aggregate_areas(rows, source_prefixes, test_paths, area_prefixes),
-        directory_rows=_aggregate_directories(rows, source_prefixes, test_paths, nested_prefixes),
+        source_tests=_source_test_summary(source_test_totals),
+        area_rows=_area_rows(area_totals),
+        directory_rows=_directory_rows(directory_totals),
     )
+
+
+def _add_file_total(totals: _FileTotals, name: str, code: int) -> None:
+    files, previous_code = totals.get(name, (0, 0))
+    totals[name] = (files + 1, previous_code + code)
+
+
+def _source_test_summary(totals: _FileTotals) -> SourceTestSummary:
+    source_files, source_code = totals.get("source", (0, 0))
+    test_files, test_code = totals.get("tests", (0, 0))
+    return SourceTestSummary(
+        source_files=source_files,
+        source_code=source_code,
+        test_files=test_files,
+        test_code=test_code,
+    )
+
+
+def _area_rows(totals: _FileTotals) -> tuple[AreaRow, ...]:
+    rows = [AreaRow(name=area, files=files, code=code) for area, (files, code) in totals.items()]
+    return tuple(sorted(rows, key=_aggregate_sort_key))
+
+
+def _directory_rows(totals: _FileTotals) -> tuple[DirectoryRow, ...]:
+    rows = [
+        DirectoryRow(name=bucket, files=files, code=code)
+        for bucket, (files, code) in totals.items()
+    ]
+    return tuple(sorted(rows, key=_aggregate_sort_key))
 
 
 def _path_parts(path: Path | str) -> _PathParts:

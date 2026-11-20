@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Compute source/test, area, and directory totals in one pass without retaining the input file rows.
+
 - Normalize configured paths once per file aggregation call and reuse them across report sections.
 
 - Reuse the list of copies compared against the reference while extending each duplicate group.
