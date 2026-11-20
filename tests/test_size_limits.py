@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import textwrap
+import tracemalloc
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,6 +114,36 @@ def test_overload_stubs_are_skipped(tmp_path: Path) -> None:
     )
 
     assert measure(tmp_path)["functions"] == {"src/app.py::parse": 2}
+
+
+def test_measure_repeated_definitions_without_temporary_tuple_lists(tmp_path: Path) -> None:
+    path = "src/generated.py"
+    count = 4096
+    stub = "class Service:\n    @overload\n    def run(self, value: int) -> int: ...\n"
+    short = stub + "    def run(self, value): return value\n"
+    long = stub + "    async def run(self, value):\n        return value\n"
+    write(tmp_path, path, "from typing import overload\n" + (short + long) * (count // 2))
+    analysis = composition.analyze_file(tmp_path, path, measure_only=True)
+
+    # Isolate the keying allocations from parsing and retaining the definition records.
+    with patch.object(composition, "analyze_file", return_value=analysis):
+        tracemalloc.start()
+        try:
+            units = measure(tmp_path)
+            retained, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+    assert list(units["classes"].items()) == [
+        (f"{path}::Service" + (f"#{i}" if i > 1 else ""), 4 if i % 2 else 5)
+        for i in range(1, count + 1)
+    ]
+    assert list(units["functions"].items()) == [
+        (f"{path}::Service.run" + (f"#{i}" if i > 1 else ""), 1 if i % 2 else 2)
+        for i in range(1, count + 1)
+    ]
+    # Allow temporary storage for dict resizing, below even one tuple list.
+    assert peak - retained < count * 48
 
 
 def test_measure_skips_composition_detectors(tmp_path: Path) -> None:

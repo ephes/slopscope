@@ -243,6 +243,10 @@ def compare(
                 f"detector {detector.name} version differs: baseline "
                 f"{baseline_detectors.get(detector.name)!r}, current {detector.version}"
             )
+    current_detector_names = {detector.name for detector in report.detectors}
+    for name in baseline_detectors:
+        if name not in current_detector_names:
+            warnings.append(f"detector {name} is present only in the baseline")
     baseline_settings = baseline.get("settings")
     baseline_settings = baseline_settings if isinstance(baseline_settings, dict) else {}
     for name, value in report.settings.as_mapping().items():

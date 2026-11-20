@@ -127,7 +127,7 @@ class DefinitionSize:
 
 @dataclass(frozen=True)
 class FileAnalysis:
-    """Composition result for one parsed file, before path classification."""
+    """Composition result before path classification, with definitions in source order."""
 
     counts: CompositionCounts
     line_categories: tuple[str, ...]
@@ -762,6 +762,7 @@ class _LineClassifier:
         self.first_lines[id(stmt)] = first
         self.claim_header(first, stmt.body, DEFINITION, _header_nodes(stmt))
 
+        # Record the enclosing definition before visiting nested definitions.
         qualified_name = ".".join((*self.scope, stmt.name))
         if isinstance(stmt, ast.ClassDef):
             self.classes.append(
