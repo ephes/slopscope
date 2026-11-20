@@ -213,6 +213,46 @@ def test_invalid_baselines_exit_2(tmp_path: Path, content: str | None, message: 
     assert message in stderr
 
 
+@pytest.mark.parametrize(
+    ("schema_version", "marker"),
+    [
+        (composition.SCHEMA_VERSION, composition.SCHEMA_VERSION),
+        (composition.SCHEMA_VERSION, float(composition.SCHEMA_VERSION)),
+        (composition.SCHEMA_VERSION, str(composition.SCHEMA_VERSION)),
+        (1, 1),
+        (1, True),
+    ],
+    ids=["current-integer", "float", "string", "version-one-integer", "boolean"],
+)
+def test_baseline_requires_integer_schema_version(
+    tmp_path: Path, schema_version: int, marker: object
+) -> None:
+    repository = make_repository(tmp_path)
+    exit_code, report, stderr = run_cli(["--composition", "--format", "json", str(repository)])
+    assert (exit_code, stderr) == (0, "")
+    data = json.loads(report)
+    data["schema_version"] = marker
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(data), encoding="utf-8")
+
+    if type(marker) is int:
+        assert (
+            composition_baseline.load_baseline(
+                baseline, expected_report_type="composition", schema_version=schema_version
+            )
+            == data
+        )
+    else:
+        with pytest.raises(composition_baseline.BaselineError) as error:
+            composition_baseline.load_baseline(
+                baseline, expected_report_type="composition", schema_version=schema_version
+            )
+        assert str(error.value) == (
+            f"baseline file {baseline} has schema_version {marker!r}, "
+            f"this version of slopscope writes {schema_version}"
+        )
+
+
 @pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])
 def test_detector_version_mismatch_warns_and_marks_not_comparable(
     tmp_path: Path, detector: str, old_version: int
@@ -890,6 +930,36 @@ def test_duplicate_budget_preserves_prior_outputs(
     assert "incomplete analysis" in err and "duplicate" in err
     assert snapshot.read_bytes() == b"previous snapshot"
     assert allowlist.read_bytes() == b"previous allowlist"
+
+
+def test_baseline_refuses_short_read_with_stable_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    complete_report = baseline.read_bytes()
+    baseline.write_bytes(complete_report + b"\n  ")
+    real_fdopen = os.fdopen
+
+    def fdopen(fd: int, mode: str) -> BinaryIO:
+        handle = cast(BinaryIO, real_fdopen(fd, mode))
+        read = handle.read
+
+        def short_read(size: int) -> bytes:
+            assert size == composition_baseline.MAX_BASELINE_BYTES + 1
+            return read(len(complete_report))
+
+        monkeypatch.setattr(handle, "read", short_read)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    with pytest.raises(composition_baseline.BaselineError) as error:
+        composition_baseline.load_baseline(
+            baseline, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    assert str(error.value) == f"baseline file {baseline} changed while reading"
 
 
 @pytest.mark.parametrize("replace_path", [False, True])

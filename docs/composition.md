@@ -517,15 +517,17 @@ identity are not preserved. A read-only file can be replaced when its parent dir
 `--baseline PATH` loads an earlier snapshot and adds a comparison. Inputs must be regular files of at most
 16 MiB (16,777,216 bytes), including multi-project snapshots. The opened descriptor is checked before a bounded
 read; special files such as FIFOs are refused without waiting for a writer. Symlinks to regular files remain
-supported. Descriptor identity, size, and timestamps are compared after the read, before decoding or comparison;
-in-place changes return exit code 2 and preserve the prior snapshot. Atomic replacement of the pathname is
-supported: the reader continues using the opened inode (unlink-only ctime changes are allowed).
+supported. After the read and before decoding, the reader verifies descriptor identity, size, and timestamps and
+checks that the number of bytes read matches the descriptor's size. In-place changes and incomplete reads return
+exit code 2 and preserve the prior snapshot. If the pathname is atomically replaced, the reader continues
+using the opened inode and allows unlink-only ctime changes.
 Type or size refusals also return exit code 2 without changing baseline or snapshot bytes.
 
 Comparison rules:
 
-- A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
-  different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
+- A baseline must match the report's `report_type` and provide the current `schema_version` as a JSON integer.
+  Incompatible baselines (for example a multi-project snapshot for a single-path report), non-integer schema
+  markers, and missing or invalid files return a `slopscope:` error and exit code 2.
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
   JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
