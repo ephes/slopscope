@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Require a JSON integer for the composition baseline schema version. Float, boolean, and string markers
+  return exit code 2.
+
 - Compile the `group_by` pattern once per grouped profile report and reuse it for all file rows.
 
 - Release ancestor directory descriptors during source opening for composition and size-limits,

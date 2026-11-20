@@ -118,7 +118,7 @@ def load_baseline(
             f"expected {expected_report_type!r}"
         )
     baseline_schema = data.get("schema_version")
-    if baseline_schema != schema_version:
+    if type(baseline_schema) is not int or baseline_schema != schema_version:
         raise BaselineError(
             f"baseline file {path} has schema_version {baseline_schema!r}, "
             f"this version of slopscope writes {schema_version}"

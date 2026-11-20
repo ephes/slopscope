@@ -524,8 +524,9 @@ Type or size refusals also return exit code 2 without changing baseline or snaps
 
 Comparison rules:
 
-- A baseline with a different `report_type` (for example a multi-project snapshot for a single-path report) or a
-  different `schema_version` is rejected with a `slopscope:` error and exit code 2, as are missing or invalid files.
+- A baseline must match the report's `report_type` and provide the current `schema_version` as a JSON integer.
+  Incompatible baselines (for example a multi-project snapshot for a single-path report), non-integer schema
+  markers, and missing or invalid files return a `slopscope:` error and exit code 2.
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
   JSON also fail with a concise filename diagnostic and exit code 2, without a report or
   snapshot write; existing baseline and snapshot files remain unchanged.
