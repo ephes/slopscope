@@ -4,6 +4,7 @@ import io
 import textwrap
 import tokenize
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -167,6 +168,12 @@ def test_find_duplicates_is_deterministic(tmp_path: Path) -> None:
     )
 
     assert first == second
+
+
+@pytest.mark.parametrize("threshold", [0, -1, 1.0, True])
+def test_find_duplicates_rejects_invalid_threshold_before_reading_files(threshold: Any) -> None:
+    with pytest.raises(ValueError, match="^min_tokens must be a positive integer$"):
+        composition_duplication.find_duplicates([], min_tokens=threshold)
 
 
 def test_copies_that_share_more_are_reported_as_their_own_longer_block() -> None:

@@ -314,8 +314,9 @@ Duplicate detection works on tokens, so layout, comments, and blank lines do not
 1. Each file becomes a stream of code tokens. Comments, newlines, indentation tokens, and docstrings are removed, and
    every docstring ends the stream, so a match never spans a docstring. Tokens are compared exactly: renamed variables
    or changed literals are different code.
-2. Every token that starts a physical line is an anchor. The 50 tokens from each anchor form a window. Windows are
-   grouped by hash and each group is verified token by token, so a hash collision never reports a false duplicate.
+2. Every token that starts a physical line is an anchor. The configured number of tokens from each anchor
+   (50 by default) forms a window. Windows are grouped by hash and each group is verified token by token,
+   so a hash collision never reports a false duplicate.
 3. A verified group with two or more windows is a duplicated block. Within one file, a window that overlaps an earlier
    window of the same group is dropped, so copies never overlap. The block is extended to the right while every copy
    still agrees, without letting copies in the same file run into each other. Where copies stop agreeing, the copies
@@ -332,6 +333,9 @@ counts too: when two files share a block, both files report its lines.
 
 Largest duplicate blocks are ranked by the physical lines spanned by their longest copy, then by number of copies and
 tokens, and list up to five locations each.
+
+Direct callers of `slopscope.composition_duplication.find_duplicates` can set `min_tokens` as low as 1.
+Zero, negative values, booleans, and other non-integer inputs raise `ValueError` before anchor indexing.
 
 ### Duplicate expansion limits
 
