@@ -283,6 +283,52 @@ def test_caller_type_error_is_not_reported_as_platform_failure(tmp_path: Path) -
         raise TypeError("caller bug")
 
 
+@pytest.mark.parametrize("replace_directory", [False, True])
+def test_deep_source_open_bounds_live_directory_descriptors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_directory: bool
+) -> None:
+    source = Path(*(["pkg"] * 24), "app.py")
+    (tmp_path / source).parent.mkdir(parents=True)
+    (tmp_path / source).write_bytes(b"x = 1\n")
+    admission = _source.admit(tmp_path, source.as_posix())
+    if replace_directory:
+        directory = (tmp_path / source).parent
+        directory.rename(directory.with_name("previous"))
+        directory.mkdir()
+
+    live: set[int] = set()
+    peak = 0
+    real_open, real_close = os.open, os.close
+
+    def track_open(name: Path | str, flags: int, *, dir_fd: int | None = None) -> int:
+        nonlocal peak
+        fd = real_open(name, flags, dir_fd=dir_fd)
+        if flags & os.O_DIRECTORY:
+            live.add(fd)
+            peak = max(peak, len(live))
+        return fd
+
+    def track_close(fd: int) -> None:
+        real_close(fd)
+        live.discard(fd)
+
+    monkeypatch.setattr(os, "open", track_open)
+    monkeypatch.setattr(os, "close", track_close)
+    if replace_directory:
+        with (
+            pytest.raises(OSError, match="source changed since discovery"),
+            _source.open_source(tmp_path, source.as_posix(), admission),
+        ):
+            pytest.fail("changed source directory must be refused")
+    else:
+        with _source.open_source(tmp_path, source.as_posix(), admission) as handle:
+            assert not live
+            assert handle.read() == b"x = 1\n"
+
+    assert not live
+    assert peak == 2
+
+
 def test_fdopen_failure_closes_leaf_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
