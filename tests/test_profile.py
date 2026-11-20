@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from slopscope import cloc, config, fallback, profile
+from slopscope import cli, cloc, config, fallback, profile
 from slopscope.report import FileRow, GroupedProfileReport, GroupedRow, ProfileTotalReport
 
 
@@ -228,10 +231,13 @@ def test_cloc_profile_failure_is_preserved(monkeypatch: pytest.MonkeyPatch, tmp_
 
 def test_grouped_profile_sorts_and_limits_rows() -> None:
     selected = config.ProfileConfig(name="roles", group_by="roles/*", top=2)
+    group = profile._prepare_group_pattern(config.SlopscopeConfig(), selected)
+    assert group is not None
 
     report = profile._build_grouped_report(
         path=Path("."),
         selected_profile=selected,
+        group=group,
         engine="python",
         file_rows=(
             FileRow(language="YAML", path="roles/api/tasks.yml", blank=0, comment=0, code=5),
@@ -261,10 +267,13 @@ def test_grouped_profile_sorts_and_limits_rows() -> None:
 
 def test_grouped_profile_total_is_all_matched_rows_not_visible_top() -> None:
     selected = config.ProfileConfig(name="roles", group_by="roles/*", top=1)
+    group = profile._prepare_group_pattern(config.SlopscopeConfig(), selected)
+    assert group is not None
 
     report = profile._build_grouped_report(
         path=Path("."),
         selected_profile=selected,
+        group=group,
         engine="python",
         file_rows=(
             FileRow(language="YAML", path="roles/web/tasks.yml", blank=0, comment=0, code=8),
@@ -276,6 +285,42 @@ def test_grouped_profile_total_is_all_matched_rows_not_visible_top() -> None:
 
     assert report.rows == (GroupedRow(name="roles/web", files=1, code=8),)
     assert report.total == 13
+
+
+def test_grouped_profile_compiles_pattern_once_for_wide_tree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    disable_git_discovery(monkeypatch)
+    (tmp_path / "pyproject.toml").write_text(
+        '[[tool.slopscope.profiles]]\nname = "roles"\n'
+        'group_by = "roles/*/tasks"\ninclude_languages = ["YAML"]\ntop = 2\n',
+        encoding="utf-8",
+    )
+    for index in range(32):
+        role = tmp_path / "roles" / f"role{index:02d}"
+        (role / "tasks").mkdir(parents=True)
+        (role / "tasks" / "main.yml").write_text("task\n", encoding="utf-8")
+        (role / "other.yml").write_text("ignored\n", encoding="utf-8")
+    (tmp_path / "roles/role31/tasks/extra.yml").write_text("two\nlines\n", encoding="utf-8")
+
+    out, err = io.StringIO(), io.StringIO()
+    with patch.object(
+        profile, "_group_wildcard_index", wraps=profile._group_wildcard_index
+    ) as check:
+        result = cli.run(
+            ["--engine", "python", "--format", "json", "--profile", "roles", str(tmp_path)],
+            stdout=out,
+            stderr=err,
+        )
+
+    assert result == 0, err.getvalue()
+    report = json.loads(out.getvalue())
+    assert report["rows"] == [
+        {"name": "roles/role31", "files": 2, "code": 3},
+        {"name": "roles/role00", "files": 1, "code": 1},
+    ]
+    assert report["total"] == 34
+    assert check.call_count == 1
 
 
 def test_invalid_group_by_pattern_is_usage_error(

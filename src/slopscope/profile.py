@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope import cloc, fallback, paths
@@ -25,16 +26,31 @@ class ProfileCountError(Exception):
 ProfileReport = ProfileTotalReport | GroupedProfileReport
 
 
+@dataclass(frozen=True)
+class _GroupPattern:
+    pattern: str
+    wildcard_index: int
+    prefix: tuple[str, ...]
+    suffix: tuple[str, ...]
+
+
 def find_profile(
     slopscope_config: config_module.SlopscopeConfig,
     name: str,
 ) -> config_module.ProfileConfig:
     """Find a named profile and validate its effective policy before engine selection."""
 
+    selected, _ = _find_prepared_profile(slopscope_config, name)
+    return selected
+
+
+def _find_prepared_profile(
+    slopscope_config: config_module.SlopscopeConfig,
+    name: str,
+) -> tuple[config_module.ProfileConfig, _GroupPattern | None]:
     for configured_profile in slopscope_config.profiles:
         if configured_profile.name == name:
-            _validate_effective_profile(slopscope_config, configured_profile)
-            return configured_profile
+            return configured_profile, _prepare_group_pattern(slopscope_config, configured_profile)
     raise ProfileError(f"no configured profile named {name!r}")
 
 
@@ -48,7 +64,26 @@ def build_profile_report(
 ) -> ProfileReport:
     """Build a total or grouped report for one configured profile."""
 
-    _validate_effective_profile(slopscope_config, selected_profile)
+    group = _prepare_group_pattern(slopscope_config, selected_profile)
+    return _build_prepared_profile_report(
+        path=path,
+        slopscope_config=slopscope_config,
+        selected_profile=selected_profile,
+        group=group,
+        engine=engine,
+        top=top,
+    )
+
+
+def _build_prepared_profile_report(
+    *,
+    path: Path,
+    slopscope_config: config_module.SlopscopeConfig,
+    selected_profile: config_module.ProfileConfig,
+    group: _GroupPattern | None,
+    engine: str,
+    top: int | None,
+) -> ProfileReport:
     file_rows = _build_profile_file_rows(
         path=path,
         slopscope_config=slopscope_config,
@@ -57,10 +92,11 @@ def build_profile_report(
     )
     effective_top = top if top is not None else selected_profile.top
 
-    if selected_profile.group_by is not None:
+    if group is not None:
         return _build_grouped_report(
             path=path,
             selected_profile=selected_profile,
+            group=group,
             engine=_report_engine(selected_profile=selected_profile, engine=engine),
             file_rows=file_rows,
             top=effective_top,
@@ -156,19 +192,15 @@ def _build_grouped_report(
     *,
     path: Path,
     selected_profile: config_module.ProfileConfig,
+    group: _GroupPattern,
     engine: str,
     file_rows: Sequence[FileRow],
     top: int | None,
 ) -> GroupedProfileReport:
-    group_by = selected_profile.group_by
-    if group_by is None:
-        raise AssertionError("grouped profile report requires group_by")
-    _group_wildcard_index(group_by)
-
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
         relative_path = paths.row_filter_path(row.path, root=path)
-        group_name = _group_name(relative_path, group_by)
+        group_name = _group_name(relative_path, group)
         if group_name is None:
             continue
         files, code = totals.get(group_name, (0, 0))
@@ -181,7 +213,7 @@ def _build_grouped_report(
         profile=selected_profile.name,
         engine=engine,
         path=path,
-        group_by=group_by,
+        group_by=group.pattern,
         rows=visible_rows,
         total=sum(row.code for row in rows),
         top=top,
@@ -189,24 +221,17 @@ def _build_grouped_report(
     )
 
 
-def _group_name(path: Path | str, pattern: str) -> str | None:
+def _group_name(path: Path | str, group: _GroupPattern) -> str | None:
     path_parts = _path_parts(path)
-    pattern_parts = _path_parts(pattern)
-    wildcard_index = _group_wildcard_index(pattern)
-    prefix = pattern_parts[:wildcard_index]
-    suffix = pattern_parts[wildcard_index + 1 :]
-    if len(path_parts) <= wildcard_index:
+    group_end = group.wildcard_index + 1
+    if len(path_parts) < group_end:
         return None
-    if prefix and path_parts[: len(prefix)] != prefix:
+    if path_parts[: len(group.prefix)] != group.prefix:
         return None
-    if suffix:
-        suffix_start = wildcard_index + 1
-        if len(path_parts) < suffix_start + len(suffix):
-            return None
-        if path_parts[suffix_start : suffix_start + len(suffix)] != suffix:
-            return None
+    if path_parts[group_end : group_end + len(group.suffix)] != group.suffix:
+        return None
 
-    return "/".join(path_parts[: wildcard_index + 1])
+    return "/".join(path_parts[:group_end])
 
 
 def _group_wildcard_index(pattern: str) -> int:
@@ -223,11 +248,11 @@ def _group_wildcard_index(pattern: str) -> int:
     return wildcard_indexes[0]
 
 
-def _validate_effective_profile(
+def _prepare_group_pattern(
     slopscope_config: config_module.SlopscopeConfig,
     selected_profile: config_module.ProfileConfig,
-) -> None:
-    """Admit inherited policy before engine selection, discovery, or counting."""
+) -> _GroupPattern | None:
+    """Validate effective profile policy and compile any grouping pattern."""
 
     context = f"profile {selected_profile.name[:80]!r}"
     include = _effective_include_languages(
@@ -238,11 +263,17 @@ def _validate_effective_profile(
     )
     if set(include).intersection(exclude):
         raise ProfileError(f"{context}: include_languages and exclude_languages must not overlap")
-    if selected_profile.group_by is not None:
-        try:
-            _group_wildcard_index(selected_profile.group_by)
-        except ProfileError as exc:
-            raise ProfileError(f"{context}: {exc}") from exc
+    pattern = selected_profile.group_by
+    if pattern is None:
+        return None
+    try:
+        wildcard_index = _group_wildcard_index(pattern)
+    except ProfileError as exc:
+        raise ProfileError(f"{context}: {exc}") from exc
+    parts = _path_parts(pattern)
+    return _GroupPattern(
+        pattern, wildcard_index, parts[:wildcard_index], parts[wildcard_index + 1 :]
+    )
 
 
 def _effective_include_languages(

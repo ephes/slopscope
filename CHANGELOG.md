@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Compile the `group_by` pattern once per grouped profile report and reuse it for all file rows.
+
 - Release ancestor directory descriptors during source opening for composition and size-limits,
   keeping directory descriptor use constant for deep paths.
 
