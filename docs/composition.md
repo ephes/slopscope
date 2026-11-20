@@ -538,8 +538,8 @@ Comparison rules:
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
   `max_total_anchors`, which only control presentation or admission) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
-  changed rules or settings alone. Detectors present on either side only trigger a warning, and deltas
-  are still reported. A different Python version is
+  changed rules or settings alone. A detector present on only one side also prints a warning and marks the
+  comparison as not comparable; deltas are still reported. A different Python version is
   reported as a warning but stays comparable.
 - Deltas are computed for `total`, `source`, `tests`, and `other`, for files, physical, code, statements, continuation
   lines, duplicated lines, and every category, tag, marker, construct, and test placement.
