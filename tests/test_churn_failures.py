@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
 import subprocess
@@ -13,6 +14,55 @@ import pytest
 
 from slopscope import _capture, cli, fallback
 from slopscope import composition_churn as churn
+
+
+@pytest.mark.parametrize(
+    "launch_index,error_code,error_source,reason",
+    [
+        (0, errno.ENOENT, "missing executable", "git was not found"),
+        (0, errno.EACCES, "executable", "could not start git (EACCES)"),
+        (0, errno.ENOENT, "working directory", "could not start git (ENOENT)"),
+        (1, errno.ENOENT, "executable", "could not start git (ENOENT)"),
+        (2, errno.EAGAIN, "executable", "could not start git (EAGAIN)"),
+        (2, errno.ENOENT, "missing executable", "git was not found"),
+    ],
+)
+def test_git_launch_error_skips_churn_with_distinct_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    launch_index: int,
+    error_code: int,
+    error_source: str,
+    reason: str,
+) -> None:
+    from unittest.mock import Mock
+
+    executable = str(tmp_path / "git") if error_source == "missing executable" else sys.executable
+    filename = str(tmp_path / "missing-cwd") if error_source == "working directory" else executable
+    failure = OSError(error_code, "unbounded startup details\n" * 100, filename)
+    commit = "a" * 40
+    outputs = [b"true\n", commit.encode("ascii") + b"\n"]
+    popen = Mock(side_effect=[Mock() for _ in range(launch_index)] + [failure])
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        churn,
+        "capture_process",
+        Mock(side_effect=[subprocess.CompletedProcess([], 0, out, b"") for out in outputs]),
+    )
+
+    result = churn.collect_churn(
+        tmp_path,
+        ref="trunk",
+        months=3,
+        excluded_paths=(),
+        today=date(2026, 3, 20),
+        executable=executable,
+    )
+
+    assert (result.status, result.reason, result.rows) == ("skipped", reason, ())
+    assert (result.ref, result.months, result.since) == ("trunk", 3, "2026-01")
+    assert result.commit == (commit if launch_index == 2 else None)
+    assert popen.call_count == launch_index + 1
 
 
 @pytest.mark.parametrize(

@@ -596,8 +596,10 @@ analyzed path.
   repositories, no fsmonitor, and no signature verification programs. Other command-running settings in an
   untrusted `.git` directory (for example a promisor remote on Git older than 2.45) are outside this
   guarantee.
-- Outside a Git repository, with an unknown ref, or without Git, churn is skipped: the report says why, stderr gets a
-  `slopscope: skipping churn:` notice, and the exit code does not change.
+- Outside a Git repository, with an unknown ref, without Git, or when Git fails to start, the report
+  records why churn was skipped and stderr gets a `slopscope: skipping churn:` notice. The exit code
+  stays the same. A missing executable reports `git was not found`. Other launch failures report
+  `could not start git` with a short OS error code. If the ref already resolved, the report keeps its commit SHA.
 
 This is churn, not growth: net lines per month mix new code with rewrites, moves between kinds, and deletions.
 

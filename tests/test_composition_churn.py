@@ -275,7 +275,7 @@ def test_cli_churn_timeout_kills_children_without_retry(
 
     def slow_git(
         executable: str, path: Path, arguments: list[str]
-    ) -> subprocess.CompletedProcess[bytes] | None:
+    ) -> subprocess.CompletedProcess[bytes]:
         return original_git(str(wrapper), path, arguments)
 
     monkeypatch.setattr(composition_churn, "_git", slow_git)
@@ -312,7 +312,7 @@ def test_unsupported_since_filter_retries_successfully(
 
     def old_git(
         executable: str, path: Path, arguments: list[str]
-    ) -> subprocess.CompletedProcess[bytes] | None:
+    ) -> subprocess.CompletedProcess[bytes]:
         if arguments[0] == "log":
             logs.append(arguments)
             if any(arg.startswith("--since-as-filter=") for arg in arguments):
