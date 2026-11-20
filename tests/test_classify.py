@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from collections import Counter
+from pathlib import Path
+
+import pytest
+
 from slopscope import classify
 from slopscope.report import AreaRow, DirectoryRow, FileAggregateReport, FileRow, SourceTestSummary
 
@@ -202,3 +207,57 @@ def test_aggregation_snapshots_generator_policies() -> None:
         assert aggregate(
             iter(rows), **{name: iter(value) for name, value in selected.items()}
         ) == aggregate(iter(rows), **selected)
+
+
+def test_file_aggregation_normalizes_each_path_rule_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    normalized: Counter[Path | str] = Counter()
+    configured_parts = classify._configured_parts
+
+    def count_normalization(path: Path | str) -> tuple[str, ...]:
+        normalized[path] += 1
+        return configured_parts(path)
+
+    monkeypatch.setattr(classify, "_configured_parts", count_normalization)
+    rows = (
+        item
+        for index in range(64)
+        for item in (
+            row(f"lib/core/sub/file{index}.py", 4),
+            row(f"lib/core/checks/unit/file{index}.py", 3),
+            row(f"guide/howto/file{index}.md", 2),
+            row(f"shells/desk/app/file{index}.py", 1),
+        )
+    )
+    report = classify.build_file_aggregate_report(
+        rows,
+        source_dirs=iter(("./lib", "lib/core")),
+        test_dirs=iter(("checks", "checks/unit")),
+        named_areas=iter(("./guide", "guide/howto")),
+        nested_bucket_dirs=iter(("shells", "shells/desk")),
+    )
+    assert report.source_tests == SourceTestSummary(64, 256, 64, 192)
+    assert report.area_rows == (
+        AreaRow("src", 64, 256),
+        AreaRow("tests", 64, 192),
+        AreaRow("./guide", 64, 128),
+        AreaRow("tooling", 64, 64),
+    )
+    assert report.directory_rows == (
+        DirectoryRow("lib/core", 64, 256),
+        DirectoryRow("checks/unit", 64, 192),
+        DirectoryRow("guide", 64, 128),
+        DirectoryRow("shells/desk", 64, 64),
+    )
+    assert normalized == dict.fromkeys(
+        (
+            "./lib",
+            "lib/core",
+            "checks",
+            "checks/unit",
+            "./guide",
+            "guide/howto",
+            "shells",
+            "shells/desk",
+        ),
+        1,
+    )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +12,9 @@ DEFAULT_SOURCE_DIRS = ("src",)
 DEFAULT_TEST_DIRS = ("tests",)
 DEFAULT_NAMED_AREAS = ("scripts", "examples", "specs")
 DEFAULT_NESTED_BUCKET_DIRS: tuple[str, ...] = ()
+
+_DOCS_PREFIX = ("docs",)
+_PathParts = tuple[str, ...]
 
 SourceTestKind = Literal["source", "tests", "other"]
 
@@ -23,8 +26,11 @@ def is_test_path(
 ) -> bool:
     """Return whether a path should be classified as tests."""
 
-    parts = _path_parts(path)
-    if _matches_any_subpath(parts, test_dirs):
+    return _is_test_path(_path_parts(path), _iter_configured_parts(test_dirs))
+
+
+def _is_test_path(parts: _PathParts, test_dirs: Iterable[_PathParts]) -> bool:
+    if _first_matching_subpath_span(parts, test_dirs) is not None:
         return True
 
     filename = parts[-1].lower() if parts else ""
@@ -44,10 +50,17 @@ def classify_source_test(
 ) -> SourceTestKind:
     """Classify a path as source, tests, or neither."""
 
-    parts = _path_parts(path)
-    if is_test_path(path, test_dirs=test_dirs):
+    return _classify_source_test(
+        _path_parts(path), _iter_configured_parts(source_dirs), _iter_configured_parts(test_dirs)
+    )
+
+
+def _classify_source_test(
+    parts: _PathParts, source_dirs: Iterable[_PathParts], test_dirs: Iterable[_PathParts]
+) -> SourceTestKind:
+    if _is_test_path(parts, test_dirs):
         return "tests"
-    if _matches_any_prefix(parts, source_dirs):
+    if _first_matching_prefix(parts, source_dirs) is not None:
         return "source"
     return "other"
 
@@ -62,15 +75,24 @@ def classify_area(
     """Classify a path into the default repository areas."""
 
     parts = _path_parts(path)
-    if is_test_path(path, test_dirs=test_dirs):
+    kind = _classify_source_test(
+        parts, _iter_configured_parts(source_dirs), _iter_configured_parts(test_dirs)
+    )
+    return _area_for_kind(parts, kind, _iter_named_area_prefixes(named_areas))
+
+
+def _area_for_kind(
+    parts: _PathParts, kind: SourceTestKind, named_areas: Iterable[tuple[str, _PathParts]]
+) -> str:
+    if kind == "tests":
         return "tests"
-    if _matches_any_prefix(parts, source_dirs):
+    if kind == "source":
         return "src"
-    if _matches_prefix(parts, _configured_parts("docs")):
+    if _matches_prefix(parts, _DOCS_PREFIX):
         return "docs"
 
-    for area in named_areas:
-        if _matches_prefix(parts, _configured_parts(area)):
+    for area, prefix in named_areas:
+        if _matches_prefix(parts, prefix):
             return area
 
     return "tooling"
@@ -85,7 +107,20 @@ def bucket_directory(
 ) -> str:
     """Return the directory bucket for a file path."""
 
-    parts = _path_parts(path)
+    return _bucket_directory(
+        _path_parts(path),
+        _iter_configured_parts(source_dirs),
+        _iter_configured_parts(test_dirs),
+        _iter_configured_parts(nested_bucket_dirs),
+    )
+
+
+def _bucket_directory(
+    parts: _PathParts,
+    source_dirs: Iterable[_PathParts],
+    test_dirs: Iterable[_PathParts],
+    nested_bucket_dirs: Iterable[_PathParts],
+) -> str:
     if len(parts) <= 1:
         return "."
 
@@ -98,9 +133,8 @@ def bucket_directory(
     if source_prefix is not None:
         return _bucket_from_match(parts, start=0, end=len(source_prefix) - 1)
 
-    docs_prefix = _configured_parts("docs")
-    if _matches_prefix(parts, docs_prefix):
-        return _bucket_from_match(parts, start=0, end=len(docs_prefix) - 1)
+    if _matches_prefix(parts, _DOCS_PREFIX):
+        return _bucket_from_match(parts, start=0, end=len(_DOCS_PREFIX) - 1)
 
     nested_prefix = _first_matching_prefix(parts, nested_bucket_dirs)
     if nested_prefix is not None:
@@ -117,16 +151,25 @@ def aggregate_source_tests(
 ) -> SourceTestSummary:
     """Aggregate source and test totals from file rows."""
 
-    source_dirs = tuple(source_dirs)
-    test_dirs = tuple(test_dirs)
+    return _aggregate_source_tests(
+        file_rows,
+        tuple(_iter_configured_parts(source_dirs)),
+        tuple(_iter_configured_parts(test_dirs)),
+    )
 
+
+def _aggregate_source_tests(
+    file_rows: Iterable[FileRow],
+    source_dirs: tuple[_PathParts, ...],
+    test_dirs: tuple[_PathParts, ...],
+) -> SourceTestSummary:
     source_files = 0
     source_code = 0
     test_files = 0
     test_code = 0
 
     for row in file_rows:
-        kind = classify_source_test(row.path, source_dirs=source_dirs, test_dirs=test_dirs)
+        kind = _classify_source_test(_path_parts(row.path), source_dirs, test_dirs)
         if kind == "source":
             source_files += 1
             source_code += row.code
@@ -151,18 +194,25 @@ def aggregate_areas(
 ) -> tuple[AreaRow, ...]:
     """Aggregate repository area totals from file rows."""
 
-    source_dirs = tuple(source_dirs)
-    test_dirs = tuple(test_dirs)
-    named_areas = tuple(named_areas)
+    return _aggregate_areas(
+        file_rows,
+        tuple(_iter_configured_parts(source_dirs)),
+        tuple(_iter_configured_parts(test_dirs)),
+        tuple(_iter_named_area_prefixes(named_areas)),
+    )
 
+
+def _aggregate_areas(
+    file_rows: Iterable[FileRow],
+    source_dirs: tuple[_PathParts, ...],
+    test_dirs: tuple[_PathParts, ...],
+    named_areas: tuple[tuple[str, _PathParts], ...],
+) -> tuple[AreaRow, ...]:
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
-        area = classify_area(
-            row.path,
-            source_dirs=source_dirs,
-            test_dirs=test_dirs,
-            named_areas=named_areas,
-        )
+        parts = _path_parts(row.path)
+        kind = _classify_source_test(parts, source_dirs, test_dirs)
+        area = _area_for_kind(parts, kind, named_areas)
         files, code = totals.get(area, (0, 0))
         totals[area] = (files + 1, code + row.code)
 
@@ -179,17 +229,24 @@ def aggregate_directories(
 ) -> tuple[DirectoryRow, ...]:
     """Aggregate directory bucket totals from file rows."""
 
-    source_dirs = tuple(source_dirs)
-    test_dirs = tuple(test_dirs)
-    nested_bucket_dirs = tuple(nested_bucket_dirs)
+    return _aggregate_directories(
+        file_rows,
+        tuple(_iter_configured_parts(source_dirs)),
+        tuple(_iter_configured_parts(test_dirs)),
+        tuple(_iter_configured_parts(nested_bucket_dirs)),
+    )
 
+
+def _aggregate_directories(
+    file_rows: Iterable[FileRow],
+    source_dirs: tuple[_PathParts, ...],
+    test_dirs: tuple[_PathParts, ...],
+    nested_bucket_dirs: tuple[_PathParts, ...],
+) -> tuple[DirectoryRow, ...]:
     totals: dict[str, tuple[int, int]] = {}
     for row in file_rows:
-        bucket = bucket_directory(
-            row.path,
-            source_dirs=source_dirs,
-            test_dirs=test_dirs,
-            nested_bucket_dirs=nested_bucket_dirs,
+        bucket = _bucket_directory(
+            _path_parts(row.path), source_dirs, test_dirs, nested_bucket_dirs
         )
         files, code = totals.get(bucket, (0, 0))
         totals[bucket] = (files + 1, code + row.code)
@@ -211,73 +268,59 @@ def build_file_aggregate_report(
 ) -> FileAggregateReport:
     """Build all internal aggregate sections from file rows."""
 
-    source_dirs = tuple(source_dirs)
-    test_dirs = tuple(test_dirs)
-    named_areas = tuple(named_areas)
-    nested_bucket_dirs = tuple(nested_bucket_dirs)
+    source_prefixes = tuple(_iter_configured_parts(source_dirs))
+    test_paths = tuple(_iter_configured_parts(test_dirs))
+    area_prefixes = tuple(_iter_named_area_prefixes(named_areas))
+    nested_prefixes = tuple(_iter_configured_parts(nested_bucket_dirs))
 
     rows = tuple(file_rows)
     return FileAggregateReport(
-        source_tests=aggregate_source_tests(
-            rows,
-            source_dirs=source_dirs,
-            test_dirs=test_dirs,
-        ),
-        area_rows=aggregate_areas(
-            rows,
-            source_dirs=source_dirs,
-            test_dirs=test_dirs,
-            named_areas=named_areas,
-        ),
-        directory_rows=aggregate_directories(
-            rows,
-            source_dirs=source_dirs,
-            test_dirs=test_dirs,
-            nested_bucket_dirs=nested_bucket_dirs,
-        ),
+        source_tests=_aggregate_source_tests(rows, source_prefixes, test_paths),
+        area_rows=_aggregate_areas(rows, source_prefixes, test_paths, area_prefixes),
+        directory_rows=_aggregate_directories(rows, source_prefixes, test_paths, nested_prefixes),
     )
 
 
-def _path_parts(path: Path | str) -> tuple[str, ...]:
+def _path_parts(path: Path | str) -> _PathParts:
     file_path = Path(path)
     return tuple(part for part in file_path.parts if part not in ("", ".", file_path.anchor))
 
 
-def _configured_parts(path: Path | str) -> tuple[str, ...]:
+def _configured_parts(path: Path | str) -> _PathParts:
     """Normalize a configured path-like value for path comparisons."""
 
     return _path_parts(path)
 
 
-def _matches_prefix(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+def _iter_configured_parts(paths: Iterable[str]) -> Iterator[_PathParts]:
+    for path in paths:
+        yield _configured_parts(path)
+
+
+def _iter_named_area_prefixes(areas: Iterable[str]) -> Iterator[tuple[str, _PathParts]]:
+    for area in areas:
+        yield area, _configured_parts(area)
+
+
+def _matches_prefix(parts: _PathParts, prefix: _PathParts) -> bool:
     return bool(prefix) and len(parts) >= len(prefix) and parts[: len(prefix)] == prefix
 
 
-def _matches_any_prefix(parts: tuple[str, ...], prefixes: Iterable[str]) -> bool:
-    return _first_matching_prefix(parts, prefixes) is not None
-
-
 def _first_matching_prefix(
-    parts: tuple[str, ...],
-    prefixes: Iterable[str],
-) -> tuple[str, ...] | None:
+    parts: _PathParts,
+    prefixes: Iterable[_PathParts],
+) -> _PathParts | None:
     for prefix in prefixes:
-        prefix_parts = _configured_parts(prefix)
-        if _matches_prefix(parts, prefix_parts):
-            return prefix_parts
+        if _matches_prefix(parts, prefix):
+            return prefix
     return None
 
 
-def _matches_any_subpath(parts: tuple[str, ...], paths: Iterable[str]) -> bool:
-    return _first_matching_subpath_span(parts, paths) is not None
-
-
 def _first_matching_subpath_span(
-    parts: tuple[str, ...],
-    paths: Iterable[str],
+    parts: _PathParts,
+    paths: Iterable[_PathParts],
 ) -> tuple[int, int] | None:
-    for path in paths:
-        path_parts = _configured_parts(path)
+    for path_parts in paths:
         if not path_parts or len(path_parts) > len(parts):
             continue
 
@@ -288,7 +331,7 @@ def _first_matching_subpath_span(
     return None
 
 
-def _bucket_from_match(parts: tuple[str, ...], *, start: int, end: int) -> str:
+def _bucket_from_match(parts: _PathParts, *, start: int, end: int) -> str:
     bucket_parts = parts[start : end + 1]
     next_index = end + 1
     if next_index < len(parts) - 1:
