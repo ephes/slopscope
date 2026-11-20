@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, SupportsIndex, cast
 
 import pytest
 
@@ -465,6 +465,49 @@ def test_baseline_duplicate_identity_exits_2(tmp_path: Path, section: str) -> No
     assert out == ""
     assert "duplicate" in err
     assert section in err
+
+
+def test_multi_project_validation_reuses_metric_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    split_metrics: list[str] = []
+
+    class TrackedMetric(str):
+        def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
+            split_metrics.append(self)
+            return super().split(sep, maxsplit)
+
+    monkeypatch.setattr(
+        composition_baseline, "METRICS", tuple(map(TrackedMetric, composition_baseline.METRICS))
+    )
+    report_type = composition_baseline.PROJECTS_REPORT_TYPE
+    last_counts: dict[str, int | None] = {}
+    projects = [
+        {
+            "name": f"project-{index}",
+            "report": {
+                "analyzer": {},
+                "detectors": [],
+                "total": {"categories": {"blank": 0}},
+                "kinds": [{"name": "source", "categories": last_counts if index == 99 else {}}],
+            },
+        }
+        for index in range(100)
+    ]
+    data = {"report_type": report_type, "schema_version": 1, "projects": projects}
+    path = tmp_path / "baseline.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert (
+        composition_baseline.load_baseline(path, expected_report_type=report_type, schema_version=1)
+        == data
+    )
+    assert not split_metrics
+
+    last_counts["blank"] = None
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(composition_baseline.BaselineError) as error:
+        composition_baseline.load_baseline(path, expected_report_type=report_type, schema_version=1)
+    assert str(error.value).endswith("projects[99].report kinds[0].categories.blank")
 
 
 @pytest.mark.parametrize("metric", ["code", "categories.blank"])

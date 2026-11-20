@@ -557,6 +557,8 @@ Comparison rules:
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
+  Validation reuses the same metric paths for every project's total and kind counts and formats field paths only
+  when a metric or group is invalid.
 - `--baseline` and `--snapshot` must name distinct files, including through symlink or hardlink aliases.
   To refresh a baseline, write a separate snapshot and explicitly replace the baseline after reviewing it.
 

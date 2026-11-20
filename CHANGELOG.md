@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reuse precompiled metric paths during composition baseline validation and format field diagnostics
+  only for invalid metrics or groups.
+
 - Write size-limit measurements directly from source-ordered definitions, avoiding temporary tuple lists
   and preserving allowlist keys and overload filtering.
 

@@ -43,6 +43,7 @@ METRICS = (
     *(f"constructs.{name}" for name in COMPOSITION_CONSTRUCTS),
     *(f"test_placement.{name}" for name in COMPOSITION_TEST_PLACEMENTS),
 )
+_METRIC_PATHS = tuple(tuple(metric.split(".")) for metric in METRICS)
 
 
 # Settings that only change what is listed, not what is counted.
@@ -188,20 +189,20 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
 def _validate_metrics(data: dict[str, Any], *, path: Path, where: str) -> None:
     """Absent metrics remain unknown; present comparison counts must be nonnegative integers."""
 
-    for metric in METRICS:
+    for parts in _METRIC_PATHS:
         value = data
-        parts = metric.split(".")
         for index, part in enumerate(parts):
             if part not in value:
                 break
             item = value[part]
-            field = f"{where}.{'.'.join(parts[: index + 1])}"
             if index < len(parts) - 1:
-                if not isinstance(item, dict):
-                    raise BaselineError(f"baseline file {path} has an invalid {field}")
-                value = item
-            elif isinstance(item, bool) or not isinstance(item, int) or item < 0:
-                raise BaselineError(f"baseline file {path} has an invalid {field}")
+                if isinstance(item, dict):
+                    value = item
+                    continue
+            elif isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+                break
+            field = f"{where}.{'.'.join(parts[: index + 1])}"
+            raise BaselineError(f"baseline file {path} has an invalid {field}")
 
 
 def project_baselines(data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
