@@ -367,9 +367,11 @@ Profile execution supports:
 When a profile sets its own language filters or include globs, those profile values are used for that profile.
 Top-level values are used only when the profile field is empty. Top-level `exclude_dirs` always apply.
 
-The public aggregation helpers snapshot classification policy iterables once per call. Generator
-policies therefore give the same source/test, area, and directory totals as tuple policies;
-individual aggregate helpers still stream file rows.
+The public aggregation helpers normalize configured paths once per call, before reading file rows.
+Generator policies give the same source/test, area, and directory totals as tuple policies.
+Configured rules are matched in their supplied order. The combined file report updates all three
+sections in one pass over the file rows and retains only section totals. Individual aggregate helpers
+also stream file rows.
 
 Default rendered sections are:
 
