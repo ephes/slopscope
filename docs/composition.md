@@ -571,6 +571,9 @@ Comparison rules:
   must be objects. Detector entries require string `name` and `kind` fields and a nonnegative integer
   `version`. Kind and project entries require string names. Detector, kind, and project names must be
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
+  Calling `slopscope.composition_baseline.compare()` with a mapping applies the same count and
+  metric-group checks to the total and kind scopes, raising `BaselineError` with the offending
+  field path. Missing counts remain unknown.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
   Validation reuses the same metric paths for every project's total and kind counts and formats field paths only

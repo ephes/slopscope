@@ -426,6 +426,45 @@ def test_snapshot_and_baseline_require_composition(
     assert f"{flag} requires --composition" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "baseline,field",
+    [
+        ({"total": {"files": -1}}, "report total.files"),
+        ({"total": {"files": True}}, "report total.files"),
+        ({"total": {"tags": None}}, "report total.tags"),
+        (
+            {"kinds": [{"name": "source", "categories": {"import": -1}}]},
+            "report kinds[0].categories.import",
+        ),
+    ],
+)
+def test_direct_baseline_comparison_refuses_invalid_counts(
+    tmp_path: Path, baseline: dict[str, object], field: str
+) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+
+    with pytest.raises(composition_baseline.BaselineError) as error:
+        composition_baseline.compare(report, baseline, path=snapshot)
+    assert str(error.value) == f"baseline file {snapshot} has an invalid {field}"
+
+
+def test_direct_baseline_comparison_preserves_missing_counts(tmp_path: Path) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    baseline = {"total": {"files": 0}, "kinds": [{"name": "source", "categories": {}}]}
+
+    comparison = composition_baseline.compare(report, baseline, path=tmp_path / "before.json")
+
+    scopes = {
+        scope.name: {metric.metric: metric for metric in scope.metrics}
+        for scope in comparison.scopes
+    }
+    assert scopes["total"]["files"].delta == report.total.files
+    assert scopes["total"]["code"].baseline is None
+    assert scopes["total"]["code"].delta is None
+    assert scopes["source"]["categories.import"].delta is None
+
+
 def test_schema_version_is_current() -> None:
     assert composition.SCHEMA_VERSION == 4
 
