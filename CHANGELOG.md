@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Require integer analyzer versions and string Python versions when present in composition baselines.
+
 - Reject discovery identity chains of the wrong length before opening sources in composition and
   size-limits.
 

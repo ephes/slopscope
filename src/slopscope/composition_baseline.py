@@ -63,7 +63,7 @@ _PRESENTATION_SETTINGS = frozenset(
 
 
 class BaselineError(Exception):
-    """User-facing baseline loading error."""
+    """User-facing baseline error."""
 
 
 class _NonFiniteNumberError(ValueError):
@@ -173,8 +173,10 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
 
     if not isinstance(data, dict):
         raise fail("object")
-    if not isinstance(data.get("analyzer"), dict):
+    analyzer = data.get("analyzer")
+    if not isinstance(analyzer, dict):
         raise fail("analyzer")
+    _analyzer_versions(analyzer, path=path, where=where)
     detectors = data.get("detectors")
     if not isinstance(detectors, list) or not all(isinstance(item, dict) for item in detectors):
         raise fail("detectors")
@@ -205,6 +207,18 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
         _validate_metrics(kind, path=path, where=f"{where} kinds[{index}]")
+
+
+def _analyzer_versions(
+    analyzer: Mapping[str, Any], *, path: Path, where: str
+) -> tuple[int | None, str | None]:
+    version = analyzer.get("version")
+    if "version" in analyzer and type(version) is not int:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.version")
+    python_version = analyzer.get("python_version")
+    if "python_version" in analyzer and type(python_version) is not str:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.python_version")
+    return version, python_version
 
 
 def _validate_metrics(data: dict[str, Any], *, path: Path, where: str) -> None:
@@ -246,9 +260,9 @@ def compare(
 
     warnings: list[str] = []
     analyzer = baseline.get("analyzer")
-    analyzer = analyzer if isinstance(analyzer, dict) else {}
-    baseline_analyzer_version = analyzer.get("version")
-    baseline_python_version = analyzer.get("python_version")
+    baseline_analyzer_version, baseline_python_version = _analyzer_versions(
+        analyzer if isinstance(analyzer, Mapping) else {}, path=path, where="report"
+    )
     if baseline_analyzer_version != report.analyzer_version:
         warnings.append(
             f"analyzer version differs: baseline {baseline_analyzer_version!r}, "
@@ -296,12 +310,8 @@ def compare(
     ]
     return CompositionComparison(
         path=path,
-        analyzer_version=baseline_analyzer_version
-        if isinstance(baseline_analyzer_version, int)
-        else None,
-        python_version=baseline_python_version
-        if isinstance(baseline_python_version, str)
-        else None,
+        analyzer_version=baseline_analyzer_version,
+        python_version=baseline_python_version,
         comparable=comparable,
         warnings=tuple(warnings),
         scopes=tuple(scopes),

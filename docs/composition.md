@@ -547,6 +547,9 @@ Comparison rules:
   `NaN`, `Infinity`, `-Infinity`, and floating-point literals that overflow also return exit code 2
   before comparison, including in unused extension fields. Unknown fields with valid JSON are accepted.
 
+- When present, `analyzer.version` must be an integer and `analyzer.python_version` must be a string.
+  This applies to both snapshot loading and direct comparisons. Older snapshots may omit these fields;
+  missing versions retain the comparison warnings and appear as `null` in the result.
 - A different analyzer version, detector inventory or version, or counting setting (every `settings` entry except
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
   `max_total_anchors`, which only control presentation or admission) prints a
