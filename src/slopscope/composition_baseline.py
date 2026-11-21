@@ -206,7 +206,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
-    _read_metrics(data["total"], path=path, where=f"{where} total")
+    total_counts = _read_metrics(data["total"], path=path, where=f"{where} total")
     seen_kinds: set[str] = set()
     for index, kind in enumerate(kinds):
         name = kind.get("name")
@@ -215,7 +215,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
         if name in seen_kinds:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
-        _read_metrics(kind, path=path, where=f"{where} kinds[{index}]")
+        _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
 
 
 def _analyzer_versions(
@@ -249,6 +249,20 @@ def _read_metrics(data: Mapping[str, Any], *, path: Path, where: str) -> dict[st
                 break
             field = f"{where}.{'.'.join(parts[: index + 1])}"
             raise BaselineError(f"baseline file {path} has an invalid {field}")
+    return counts
+
+
+def _read_kind_metrics(
+    kind: Mapping[str, Any], total_counts: Mapping[str, int], *, path: Path, where: str
+) -> dict[str, int]:
+    counts = _read_metrics(kind, path=path, where=where)
+    for metric in ("files", "physical", "code"):
+        count = counts.get(metric)
+        total = total_counts.get(metric)
+        if count is not None and total is not None and count > total:
+            raise BaselineError(
+                f"baseline file {path} has an invalid {where}.{metric} (exceeds total.{metric})"
+            )
     return counts
 
 
@@ -317,7 +331,9 @@ def compare(
         _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
     )
     baseline_kinds = {
-        str(kind.get("name")): _read_metrics(kind, path=path, where=f"report kinds[{index}]")
+        str(kind.get("name")): _read_kind_metrics(
+            kind, total_counts, path=path, where=f"report kinds[{index}]"
+        )
         for index, kind in enumerate(baseline.get("kinds", []))
         if isinstance(kind, Mapping)
     }

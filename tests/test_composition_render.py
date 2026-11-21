@@ -78,12 +78,12 @@ def test_human_baseline_unknown_and_signed_deltas(
     report = replace(report, python_version="3.13.0")
     baseline = json.loads(render.render_composition_json(report))
     baseline["analyzer"]["python_version"] = "3.11.0"
-    baseline["total"]["files"] = 2
+    baseline["total"]["files"] = 4
     baseline["kinds"][0]["files"] = 3  # source: negative, tests: unknown, other: known zero
     del baseline["kinds"][1]["files"]
-    baseline["total"]["code"] = 7
-    baseline["kinds"][0]["code"] = 9
-    baseline["kinds"][1]["code"] = 4
+    baseline["total"].update(physical=13, code=13)
+    baseline["kinds"][0].update(physical=9, code=9)
+    baseline["kinds"][1].update(physical=4, code=4)
     current_counts = composition.analyze_source("x = 1\ny = 2\n").counts
     report = replace(report, total=replace(report.total, files=5, counts=current_counts))
     if detector_mismatch:
@@ -93,8 +93,8 @@ def test_human_baseline_unknown_and_signed_deltas(
     assert "Changes Since Baseline" in lines
     assert "Baseline: before.json" in lines
     assert "Metric Current Δ Total Δ Source Δ Tests Δ Other" in lines
-    assert "files 5 +3 -3 - +0" in lines
-    assert "code 2 -5 -9 -4 +0" in lines
+    assert "files 5 +1 -3 - +0" in lines
+    assert "code 2 -11 -9 -4 +0" in lines
     assert "statements 2 +2 +0 +0 +0" in lines
     assert "Warning: Python version differs: baseline '3.11.0', current '3.13.0'" in lines
     warning = "Warning: not directly comparable with this baseline; see the warnings below."

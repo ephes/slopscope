@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject composition baselines with per-kind file, physical-line, or code-line counts above
+  the corresponding report totals. Missing counts still produce unknown deltas.
+
 - Require every nested report in a multi-project composition baseline to declare the
   single-report type and the current integer schema version.
 

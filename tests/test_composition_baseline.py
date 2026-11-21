@@ -482,6 +482,10 @@ def test_snapshot_and_baseline_require_composition(
             {"kinds": [{"name": "source", "categories": {"import": -1}}]},
             "report kinds[0].categories.import",
         ),
+        (
+            {"total": {"files": 1}, "kinds": [{"name": "source", "files": 2}]},
+            "report kinds[0].files (exceeds total.files)",
+        ),
     ],
 )
 def test_direct_baseline_comparison_refuses_invalid_counts(
@@ -722,6 +726,37 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
     assert code == 0
     assert err == ""
     assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+
+
+@pytest.mark.parametrize("metric", ["files", "physical", "code"])
+def test_baseline_kind_count_cannot_exceed_total(tmp_path: Path, metric: str) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "snapshot.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
+    data = json.loads(snapshot.read_text())
+    index, source = next(
+        (index, kind) for index, kind in enumerate(data["kinds"]) if kind["name"] == "source"
+    )
+    source[metric] = data["total"][metric] + 1
+    snapshot.write_text(json.dumps(data))
+    compare_options = options + ["--baseline", str(snapshot)]
+    code, out, err = run_cli(compare_options)
+    assert code == 2
+    assert out == ""
+    assert f"kinds[{index}].{metric} (exceeds total.{metric})" in err
+
+    del source[metric]
+    data["kinds"].append({"name": "legacy", metric: data["total"][metric]})
+    snapshot.write_text(json.dumps(data))
+    code, out, err = run_cli(compare_options)
+    assert code == 0
+    assert err == ""
+    comparison = json.loads(out)["baseline"]
+    assert comparison["comparable"] is True
+    delta = comparison["deltas"]["source"][metric]
+    assert delta["baseline"] is None
+    assert delta["delta"] is None
 
 
 @pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
