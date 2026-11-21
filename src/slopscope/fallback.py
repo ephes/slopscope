@@ -70,6 +70,7 @@ LANGUAGES_BY_FILENAME = {
 
 GIT_DISCOVERY_TIMEOUT_SECONDS = 30.0
 MAX_GIT_DISCOVERY_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_GIT_DISCOVERY_PATHS = 100_000
 MAX_DISCOVERY_ENTRIES = 200_000
 MAX_DISCOVERY_FILES = 100_000
 MAX_DISCOVERY_DIRECTORIES = 20_000  # Includes the selected root and queued directories.
@@ -131,13 +132,28 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
 
 
 def parse_git_ls_files_output(output: bytes) -> list[Path]:
-    """Parse NUL-delimited git file output as relative paths."""
+    """Parse a bounded list of distinct relative paths from NUL-delimited Git output."""
 
     if output and not output.endswith(b"\0"):
         raise GitDiscoveryError("Git file discovery output is missing its final NUL")
 
     # Deduplicate the exact spelling, without case folding or Unicode normalization.
-    return [Path(os.fsdecode(part)) for part in dict.fromkeys(output.split(b"\0")) if part]
+    seen: set[bytes] = set()
+    paths: list[Path] = []
+    start = 0
+    while start < len(output):
+        end = output.index(b"\0", start)
+        part = output[start:end]
+        start = end + 1
+        if not part or part in seen:
+            continue
+        if len(paths) >= MAX_GIT_DISCOVERY_PATHS:
+            raise GitDiscoveryError(
+                f"Git file discovery tracked path limit exceeded ({MAX_GIT_DISCOVERY_PATHS})"
+            )
+        seen.add(part)
+        paths.append(Path(os.fsdecode(part)))
+    return paths
 
 
 def discover_files(
