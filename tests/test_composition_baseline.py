@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -991,6 +992,34 @@ def test_duplicate_budget_preserves_prior_outputs(
     assert allowlist.read_bytes() == b"previous allowlist"
 
 
+def test_baseline_buffer_setup_failure_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text("{}", encoding="utf-8")
+    descriptor = -1
+
+    def fail_fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
+        nonlocal descriptor
+        os.fstat(fd)
+        descriptor = fd
+        raise OSError("buffer setup failed")
+
+    monkeypatch.setattr(os, "fdopen", fail_fdopen)
+    with pytest.raises(composition_baseline.BaselineError, match="could not read.*buffer setup"):
+        composition_baseline.load_baseline(
+            baseline, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    assert descriptor >= 0
+    try:
+        os.fstat(descriptor)
+    except OSError as exc:
+        assert exc.errno == errno.EBADF
+    else:
+        os.close(descriptor)
+        pytest.fail("baseline descriptor leaked")
+
+
 def test_baseline_refuses_short_read_with_stable_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1002,8 +1031,8 @@ def test_baseline_refuses_short_read_with_stable_metadata(
     baseline.write_bytes(complete_report + b"\n  ")
     real_fdopen = os.fdopen
 
-    def fdopen(fd: int, mode: str) -> BinaryIO:
-        handle = cast(BinaryIO, real_fdopen(fd, mode))
+    def fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
+        handle = cast(BinaryIO, real_fdopen(fd, mode, closefd=closefd))
         read = handle.read
 
         def short_read(size: int) -> bytes:
@@ -1039,9 +1068,9 @@ def test_baseline_read_generation(
     real_fdopen = os.fdopen
     injected = False
 
-    def fdopen(fd: int, mode: str) -> BinaryIO:
+    def fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
         nonlocal injected
-        handle = cast(BinaryIO, real_fdopen(fd, mode))
+        handle = cast(BinaryIO, real_fdopen(fd, mode, closefd=closefd))
         if (os.fstat(fd).st_dev, os.fstat(fd).st_ino) != (
             baseline.stat().st_dev,
             baseline.stat().st_ino,

@@ -6,6 +6,7 @@ import json
 import os
 import stat
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,10 @@ def load_baseline(
 
     try:
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(path, flags), "rb") as handle:
+        with ExitStack() as stack:
+            descriptor = os.open(path, flags)
+            stack.callback(os.close, descriptor)
+            handle = stack.enter_context(os.fdopen(descriptor, "rb", closefd=False))
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise BaselineError(f"baseline file {path} must be a regular file")

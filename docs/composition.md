@@ -527,7 +527,8 @@ supported. After the read and before decoding, the reader verifies descriptor id
 checks that the number of bytes read matches the descriptor's size. In-place changes and incomplete reads return
 exit code 2 and preserve the prior snapshot. If the pathname is atomically replaced, the reader continues
 using the opened inode and allows unlink-only ctime changes.
-Type or size refusals also return exit code 2 without changing baseline or snapshot bytes.
+Type, size, or read failures also return exit code 2 without changing baseline or snapshot bytes.
+The reader closes the descriptor even if buffered stream setup fails.
 
 Comparison rules:
 
