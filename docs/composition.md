@@ -586,7 +586,8 @@ Comparison rules:
 `--churn` adds Python lines added and removed per month from Git history. It is opt-in, because it runs `git log` in the
 analyzed path.
 
-- The requested ref is resolved once to a commit SHA. Every log command, including the fallback
+- The requested ref is resolved once to a commit SHA. Git must return a single full SHA-1 or SHA-256
+  object ID. Malformed ref output skips churn before reading history. Every log command, including the fallback
   for older Git options, uses that commit even if the ref moves during analysis.
 - It reads the first-parent history of `churn_branch` (default `HEAD`), so a merged branch counts once, as the merge's
   diff against the branch it was merged into, in the month of the merge. No branch name such as `main` is assumed.

@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Skip optional churn when Git returns a malformed commit ID during ref resolution.
+
 - Apply snapshot count validation to direct composition baseline comparisons. Missing counts keep
   their unknown deltas.
 

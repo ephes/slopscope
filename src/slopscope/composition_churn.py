@@ -73,7 +73,10 @@ def collect_churn(
         if verified.returncode != 0:
             return skipped(f"unknown branch or ref {ref!r}")
 
-        commit = verified.stdout.decode("ascii").strip()
+        object_id = re.fullmatch(rb"([0-9a-fA-F]{40}|[0-9a-fA-F]{64})(?:\r?\n)?", verified.stdout)
+        if object_id is None:
+            return skipped("malformed git history: invalid commit ID")
+        commit = object_id[1].decode("ascii")
         log_arguments = [
             "log",
             commit,

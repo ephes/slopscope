@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import io
 import json
+import os
 import subprocess
 import sys
 from datetime import date
@@ -14,6 +15,53 @@ import pytest
 
 from slopscope import _capture, cli, fallback
 from slopscope import composition_churn as churn
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX executable wrapper")
+@pytest.mark.parametrize(
+    "evidence,commit",
+    [
+        (b"\xff\n", None),
+        (b"", None),
+        (b"a" * 40 + b"\n" + b"b" * 40 + b"\n", None),
+        (b"a" * 39 + b"\n", None),
+        (b"g" * 40 + b"\n", None),
+        (b"a" * 40 + b"\n", "a" * 40),
+        (b"b" * 64 + b"\n", "b" * 64),
+    ],
+)
+def test_churn_admits_only_full_git_object_ids(
+    tmp_path: Path, evidence: bytes, commit: str | None
+) -> None:
+    wrapper = tmp_path / "git"
+    log_commit = tmp_path / "log-commit"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "if sys.argv[3] == 'log':\n"
+        f"    Path({str(log_commit)!r}).write_text(sys.argv[4], encoding='ascii')\n"
+        "elif '--verify' in sys.argv:\n"
+        f"    sys.stdout.buffer.write({evidence!r})\n"
+        "else:\n"
+        "    print('true')\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+
+    result = churn.collect_churn(tmp_path, excluded_paths=(), executable=str(wrapper))
+
+    assert result.commit == commit
+    if commit is None:
+        assert (result.status, result.reason, result.rows) == (
+            "skipped",
+            "malformed git history: invalid commit ID",
+            (),
+        )
+        assert not log_commit.exists()
+    else:
+        assert result.status == "ok"
+        assert log_commit.read_text(encoding="ascii") == commit
 
 
 @pytest.mark.parametrize(
@@ -93,9 +141,9 @@ def test_malformed_history_skips_whole_churn(
     def fake_git(
         executable: str, path: Path, arguments: list[str]
     ) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.CompletedProcess(
-            arguments, 0, output if arguments[0] == "log" else b"true\n", b""
-        )
+        outputs = {"log": output, "--verify": b"a" * 40 + b"\n", "--is-inside-work-tree": b"true\n"}
+        command = arguments[0] if arguments[0] == "log" else arguments[1]
+        return subprocess.CompletedProcess(arguments, 0, outputs[command], b"")
 
     monkeypatch.setattr(churn, "_git", fake_git)
     result = churn.collect_churn(tmp_path, excluded_paths=(), today=date(2026, 3, 20))
@@ -123,8 +171,11 @@ def test_fast_git_output_overflow_skips_churn_in_report(
     code = (
         "import sys; "
         "command = sys.argv[1:]; "
-        f"stream = sys.{channel}.buffer; "
-        "stream.write(b'x' * 262144) if command[0] == 'log' else sys.stdout.write('true\\n')"
+        f"stream = sys.{channel}.buffer\n"
+        "if command[0] == 'log':\n"
+        "    stream.write(b'x' * 262144)\n"
+        "else:\n"
+        "    print('a' * 40 if '--verify' in command else 'true')\n"
     )
 
     def fake_popen(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
@@ -261,7 +312,8 @@ def test_reader_exception_never_publishes_partial_output(
     def fake_popen(command: list[str], **kwargs: object) -> object:
         if command[3] == "log":
             return process
-        return Mock(args=command, returncode=0, stdout=io.BytesIO(b"true\n"), stderr=io.BytesIO())
+        output = b"a" * 40 + b"\n" if "--verify" in command else b"true\n"
+        return Mock(args=command, returncode=0, stdout=io.BytesIO(output), stderr=io.BytesIO())
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
