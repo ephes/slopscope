@@ -539,6 +539,8 @@ The reader closes the descriptor even if buffered stream setup fails.
 Comparison rules:
 
 - A baseline must match the report's `report_type` and provide the current `schema_version` as a JSON integer.
+  In a multi-project baseline, each nested project report must have `report_type: "composition"`
+  and the same integer schema version as the enclosing snapshot.
   Incompatible baselines (for example a multi-project snapshot for a single-path report), non-integer schema
   markers, and missing or invalid files return a `slopscope:` error and exit code 2.
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
@@ -573,6 +575,8 @@ Comparison rules:
   must be objects. Detector entries require string `name` and `kind` fields and a nonnegative integer
   `version`. Kind and project entries require string names. Detector, kind, and project names must be
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
+  Each kind's file, physical-line, and code-line counts must be at most the corresponding total
+  when both counts are present. Older kind names remain accepted.
   Calling `slopscope.composition_baseline.compare()` with a mapping applies the same count and
   metric-group checks to the total and kind scopes, raising `BaselineError` with the offending
   field path. Missing counts remain unknown.

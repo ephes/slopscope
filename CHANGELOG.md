@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject composition baselines with per-kind file, physical-line, or code-line counts above
+  the corresponding report totals. Missing counts still produce unknown deltas.
+
+- Require every nested report in a multi-project composition baseline to declare the
+  single-report type and the current integer schema version.
+
 - Parse Git file listings incrementally and refuse more than 100,000 distinct tracked paths
   before filtering. Duplicate index stages still count once toward this limit, which is separate
   from the subprocess output limit.

@@ -433,7 +433,10 @@ analyses retain the same output.
 
 It reuses discovery, excludes, source/test classification, `--config`, `--project`, `--format`, and `--no-color`.
 `--limit N` sets the size of the largest-item lists (default 10). `--snapshot PATH` also writes the JSON report to a
-file, and `--baseline PATH` compares with an earlier snapshot, rejecting snapshots with a different schema version.
+file, and `--baseline PATH` compares with an earlier snapshot. The snapshot and each nested project report
+must have the expected report type and current integer schema version.
+Per-kind file, physical-line, and code-line counts cannot exceed their report totals when both counts
+are present.
 Snapshot publication uses the resolved destination approved during preflight and rechecks its file
 and parent-directory identity before replacement. A changed target is refused, preserving existing
 outputs, including when a snapshot symlink is retargeted during analysis or writing.

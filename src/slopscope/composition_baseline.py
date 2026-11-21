@@ -133,18 +133,7 @@ def load_baseline(
 
     if not isinstance(data, dict):
         raise BaselineError(f"baseline file {path} is not a composition report")
-    report_type = data.get("report_type")
-    if report_type != expected_report_type:
-        raise BaselineError(
-            f"baseline file {path} has report_type {report_type!r}, "
-            f"expected {expected_report_type!r}"
-        )
-    baseline_schema = data.get("schema_version")
-    if type(baseline_schema) is not int or baseline_schema != schema_version:
-        raise BaselineError(
-            f"baseline file {path} has schema_version {baseline_schema!r}, "
-            f"this version of slopscope writes {schema_version}"
-        )
+    _validate_report_header(data, str(path), expected_report_type, schema_version)
     if expected_report_type == PROJECTS_REPORT_TYPE:
         projects = data.get("projects")
         if not isinstance(projects, list):
@@ -159,20 +148,40 @@ def load_baseline(
                     f"baseline file {path} has a duplicate projects[{index}].name: {name!r}"
                 )
             seen_projects.add(name)
-            _validate_report(project.get("report"), path=path, where=f"projects[{index}].report")
+            where = f"projects[{index}].report"
+            nested = project.get("report")
+            if not isinstance(nested, dict):
+                raise BaselineError(f"baseline file {path} has an invalid {where} object")
+            _validate_report_header(nested, f"{path} {where}", SINGLE_REPORT_TYPE, schema_version)
+            _validate_report(nested, path=path, where=where)
     else:
         _validate_report(data, path=path, where="report")
     return data
 
 
-def _validate_report(data: object, *, path: Path, where: str) -> None:
+def _validate_report_header(
+    data: Mapping[str, Any], location: str, expected_report_type: str, schema_version: int
+) -> None:
+    report_type = data.get("report_type")
+    if report_type != expected_report_type:
+        raise BaselineError(
+            f"baseline file {location} has report_type {report_type!r}, "
+            f"expected {expected_report_type!r}"
+        )
+    baseline_schema = data.get("schema_version")
+    if type(baseline_schema) is not int or baseline_schema != schema_version:
+        raise BaselineError(
+            f"baseline file {location} has schema_version {baseline_schema!r}, "
+            f"this version of slopscope writes {schema_version}"
+        )
+
+
+def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None:
     """Check the parts of a single report object that the comparison reads."""
 
     def fail(field: str) -> BaselineError:
         return BaselineError(f"baseline file {path} has an invalid {where} {field}")
 
-    if not isinstance(data, dict):
-        raise fail("object")
     analyzer = data.get("analyzer")
     if not isinstance(analyzer, dict):
         raise fail("analyzer")
@@ -197,7 +206,7 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
-    _read_metrics(data["total"], path=path, where=f"{where} total")
+    total_counts = _read_metrics(data["total"], path=path, where=f"{where} total")
     seen_kinds: set[str] = set()
     for index, kind in enumerate(kinds):
         name = kind.get("name")
@@ -206,7 +215,7 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
         if name in seen_kinds:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
-        _read_metrics(kind, path=path, where=f"{where} kinds[{index}]")
+        _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
 
 
 def _analyzer_versions(
@@ -240,6 +249,20 @@ def _read_metrics(data: Mapping[str, Any], *, path: Path, where: str) -> dict[st
                 break
             field = f"{where}.{'.'.join(parts[: index + 1])}"
             raise BaselineError(f"baseline file {path} has an invalid {field}")
+    return counts
+
+
+def _read_kind_metrics(
+    kind: Mapping[str, Any], total_counts: Mapping[str, int], *, path: Path, where: str
+) -> dict[str, int]:
+    counts = _read_metrics(kind, path=path, where=where)
+    for metric in ("files", "physical", "code"):
+        count = counts.get(metric)
+        total = total_counts.get(metric)
+        if count is not None and total is not None and count > total:
+            raise BaselineError(
+                f"baseline file {path} has an invalid {where}.{metric} (exceeds total.{metric})"
+            )
     return counts
 
 
@@ -308,7 +331,9 @@ def compare(
         _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
     )
     baseline_kinds = {
-        str(kind.get("name")): _read_metrics(kind, path=path, where=f"report kinds[{index}]")
+        str(kind.get("name")): _read_kind_metrics(
+            kind, total_counts, path=path, where=f"report kinds[{index}]"
+        )
         for index, kind in enumerate(baseline.get("kinds", []))
         if isinstance(kind, Mapping)
     }
