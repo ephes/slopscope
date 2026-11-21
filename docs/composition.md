@@ -103,7 +103,9 @@ plus configured `exclude_dirs` and `include_globs`. Of the discovered files, tho
   `areas` rules as the default report.
 
 Discovery records each selected source's root, parent-directory, and regular-file identities. Reads
-open components relative to checked directory descriptors without following links below the selected
+require one recorded identity for the root and one for each relative path component before opening
+any descriptor. A length mismatch is reported as a source change. Reads then open components
+relative to checked directory descriptors without following links below the selected
 root (the root itself may be a symlink). Files changed since admission, including regular-file
 replacements, are refused. The walk holds at most two directory descriptors at a time, regardless
 of path depth, and releases the last one before reading. A descriptor close failure is reported as

@@ -88,10 +88,13 @@ def open_source(
 ) -> Iterator[BinaryIO]:
     """Validate each opened descriptor before reading; refuse unsupported OS APIs."""
 
-    expected = admission if admission is not None else admit(root, relative_path)
-    parts = Path(relative_path).parts
-    if not parts or Path(relative_path).is_absolute() or ".." in parts:
+    relative = Path(relative_path)
+    parts = relative.parts
+    if not parts or relative.is_absolute() or ".." in parts:
         raise OSError("source path must stay below the selected root")
+    expected = admission if admission is not None else admit(root, relative_path)
+    if len(expected) != len(parts) + 1:
+        raise OSError("source changed since discovery: admission chain length does not match path")
     if not all(hasattr(os, name) for name in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK")):
         raise OSError("safe source opening is unavailable on this platform")
     parent = None

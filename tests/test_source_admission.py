@@ -336,6 +336,28 @@ def test_caller_type_error_is_not_reported_as_platform_failure(tmp_path: Path) -
         raise TypeError("caller bug")
 
 
+@pytest.mark.parametrize(
+    ("source", "recorded_source"), [("pkg/app.py", "app.py"), ("app.py", "pkg/app.py")]
+)
+def test_admission_chain_length_is_checked_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, recorded_source: str
+) -> None:
+    (tmp_path / "pkg").mkdir()
+    for name in (source, recorded_source):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+    admission = _source.admit(tmp_path, recorded_source)
+
+    def unexpected_open(*args: Any, **kwargs: Any) -> int:
+        pytest.fail("mismatched admission must be refused before opening any descriptor")
+
+    monkeypatch.setattr(os, "open", unexpected_open)
+    with (
+        pytest.raises(OSError, match="source changed since discovery"),
+        _source.open_source(tmp_path, source, admission),
+    ):
+        pytest.fail("body must not run")
+
+
 @pytest.mark.parametrize("replace_directory", [False, True])
 def test_deep_source_open_bounds_live_directory_descriptors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_directory: bool

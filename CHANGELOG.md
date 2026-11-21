@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject discovery identity chains of the wrong length before opening sources in composition and
+  size-limits.
+
 - Preserve source admission errors across descriptor cleanup failures in composition and size-limits.
   A standalone close failure is reported as a source I/O error.
 
