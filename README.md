@@ -169,8 +169,9 @@ untested. Output overflow or a timeout is a hard analysis error:
 the CLI returns exit code 2 with a diagnostic, without a report, snapshot, or allowlist write. Partial Git output
 is discarded and no filesystem fallback runs on overflow or timeout. This applies to Python reports, physical-line profiles,
 composition, and size-limits. Git startup failures (including a missing executable) and nonzero exits retain the
-filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
-`subprocess.run`, process creation itself may not be interruptible on every platform.
+filesystem fallback. Successful Git output must be empty or end in a NUL delimiter. A missing final NUL returns
+exit code 2 without a report, snapshot, allowlist write, or filesystem fallback. NUL delimiters preserve unusual
+filenames. As with Python's `subprocess.run`, process creation itself may not be interruptible on every platform.
 
 On POSIX, captured cloc and Git commands retire their owned process group after successful
 and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows

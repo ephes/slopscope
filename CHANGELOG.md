@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject successful nonempty Git file listings that lack the final NUL, without publishing
+  partial results or falling back to filesystem discovery.
+
 - Aggregate churn directly from the bounded Git capture, avoiding a full decoded copy and a list
   of parsed records. Malformed history still skips the entire churn result.
 

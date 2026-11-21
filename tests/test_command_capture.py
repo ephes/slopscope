@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import signal
 import subprocess
 import sys
@@ -73,6 +74,36 @@ def test_exact_combined_budget_preserves_output(
     else:
         monkeypatch.setattr(cloc, "MAX_CLOC_OUTPUT_BYTES", budget, raising=False)
         assert cloc.run_command(["cloc"]) == cloc.ClocResult(0, output.decode(), error.decode())
+
+
+@pytest.mark.parametrize("terminated", [False, True])
+def test_successful_git_capture_requires_nul_termination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, terminated: bool
+) -> None:
+    popen = subprocess.Popen
+    output = b"app.py\0app.py\0" if terminated else b"app.py\0truncated.py"
+    code = f"import sys; sys.stdout.buffer.write({output!r})"
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda args, **kw: popen(
+            args if args[0] == "taskkill" else [sys.executable, "-c", code], **kw
+        ),
+    )
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "truncated.py").write_text("y = 2\n", encoding="utf-8")
+
+    out, err = io.StringIO(), io.StringIO()
+    status = cli.run(
+        [str(tmp_path), "--engine", "python", "--format", "json"], stdout=out, stderr=err
+    )
+    if terminated:
+        assert status == 0
+        assert json.loads(out.getvalue())["language_rows"][0]["files"] == 1
+    else:
+        assert status == 2
+        assert out.getvalue() == ""
+        assert "Git file discovery output is missing its final NUL" in err.getvalue()
 
 
 @pytest.mark.parametrize("mode", ["report", "profile", "composition", "seed", "update"])

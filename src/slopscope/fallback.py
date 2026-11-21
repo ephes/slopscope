@@ -133,6 +133,9 @@ def run_git_ls_files(path: Path | str, executable: str = "git") -> GitLsFilesRes
 def parse_git_ls_files_output(output: bytes) -> list[Path]:
     """Parse NUL-delimited git file output as relative paths."""
 
+    if output and not output.endswith(b"\0"):
+        raise GitDiscoveryError("Git file discovery output is missing its final NUL")
+
     # Deduplicate the exact spelling, without case folding or Unicode normalization.
     return [Path(os.fsdecode(part)) for part in dict.fromkeys(output.split(b"\0")) if part]
 
