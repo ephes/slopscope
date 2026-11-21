@@ -612,6 +612,8 @@ analyzed path.
 - Malformed Git history (invalid month markers or counters, missing NUL boundaries, or incomplete
   rename operands) skips the entire churn result with a bounded category/record diagnostic. No partial
   or fabricated zero history is published. Empty history and binary-file exclusions remain supported.
+  The collector parses the bounded capture one NUL-delimited field at a time and updates monthly
+  totals as records pass the filters. Excluded records are still validated.
 - Churn Git commands run with the hardened Git environment described in the README: no implicit bare
   repositories, no fsmonitor, and no signature verification programs. Other command-running settings in an
   untrusted `.git` directory (for example a promisor remote on Git older than 2.45) are outside this

@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Aggregate churn directly from the bounded Git capture, avoiding a full decoded copy and a list
+  of parsed records. Malformed history still skips the entire churn result.
+
 - Skip optional churn when Git returns a malformed commit ID during ref resolution.
 
 - Apply snapshot count validation to direct composition baseline comparisons. Missing counts keep

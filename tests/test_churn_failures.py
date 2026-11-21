@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tracemalloc
 from datetime import date
 from pathlib import Path
 
@@ -155,10 +156,53 @@ def test_malformed_history_skips_whole_churn(
 
 def test_valid_history_keeps_binary_exclusions_and_newline_rename_paths() -> None:
     assert churn.parse_numstat(
-        b"@2026-03\0\n1\t2\t\0old\nname.py\0new\nname.py\0-\t-\t\0old.png\0new.png\0\0@2026-02\0"
-    ) == [("2026-03", "new\nname.py", 1, 2)]
+        b"@2026-03\0\n1\t2\t\0old\nname.py\0\nnew\t\xffname.py\0-\t-\t\0old.png\0new.png\0\0@2026-02\0"
+    ) == [("2026-03", "\nnew\t\udcffname.py", 1, 2)]
     assert churn.parse_numstat(b"") == []
     assert churn.parse_numstat(b"@2026-03\0") == []
+
+
+@pytest.mark.parametrize("malformed_tail", [False, True])
+def test_churn_aggregates_large_excluded_history_incrementally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed_tail: bool
+) -> None:
+    output = (
+        b"@2026-03\0\n2\t1\t\0excluded/old.py\0src/new.py\0" + b"1\t0\texcluded/a.py\0" * 16_384
+    )
+    if malformed_tail:
+        output += b"bad\t0\texcluded/broken.py\0"
+    replies = iter((b"true\n", b"a" * 40 + b"\n", output))
+
+    def fake_git(
+        executable: str, path: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(arguments, 0, next(replies), b"")
+
+    monkeypatch.setattr(churn, "_git", fake_git)
+    # Isolate parser allocations from pathlib's filename interning in the path filters.
+    monkeypatch.setattr(fallback, "map_language", lambda _: "Python")
+    monkeypatch.setattr(
+        fallback, "is_excluded_path", lambda path, excluded: path.split("/", 1)[0] in excluded
+    )
+    # Trace only the collector, with the bounded subprocess output already in memory.
+    tracemalloc.start()
+    try:
+        result = churn.collect_churn(
+            tmp_path, months=1, excluded_paths=("excluded",), today=date(2026, 3, 20)
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    if malformed_tail:
+        assert result.status == "skipped"
+        assert result.reason == "malformed git history: invalid counters at record 16389"
+        assert result.rows == ()
+    else:
+        assert result.status == "ok"
+        (month,) = result.rows
+        assert (month.month, month.added, month.removed) == ("2026-03", (2, 0, 0), (1, 0, 0))
+    assert peak < 128 * 1024
 
 
 @pytest.mark.parametrize("channel", ["stdout", "stderr"])
