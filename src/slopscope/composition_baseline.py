@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 from collections.abc import Mapping, Sequence
@@ -65,6 +66,17 @@ class BaselineError(Exception):
     """User-facing baseline loading error."""
 
 
+class _NonFiniteNumberError(ValueError):
+    """A JSON number would decode to a nonfinite value."""
+
+
+def _parse_finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise _NonFiniteNumberError("JSON numbers must be finite")
+    return value
+
+
 def load_baseline(
     path: Path,
     *,
@@ -100,12 +112,17 @@ def load_baseline(
                 )
             ):
                 raise BaselineError(f"baseline file {path} changed while reading")
-        data = json.loads(content.decode("utf-8"), object_pairs_hook=unique_object)
+        data = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=_parse_finite_float,
+            parse_float=_parse_finite_float,
+        )
     except FileNotFoundError as exc:
         raise BaselineError(f"baseline file not found: {path}") from exc
     except OSError as exc:
         raise BaselineError(f"could not read baseline file {path}: {exc}") from exc
-    except DuplicateKeyError as exc:
+    except (DuplicateKeyError, _NonFiniteNumberError) as exc:
         raise BaselineError(f"baseline file {path}: {exc}") from exc
     except RecursionError as exc:
         raise BaselineError(f"baseline file {path}: JSON nesting is too deep") from exc

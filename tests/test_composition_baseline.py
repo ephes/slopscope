@@ -570,6 +570,7 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
     data = json.loads(snapshot.read_text())
     del data["total"]["code"]
     del data["total"]["categories"]
+    data["extension"] = {"values": [1.25, -1e308, "NaN"]}
     snapshot.write_text(json.dumps(data))
     code, out, err = run_cli(
         ["--composition", "--format", "json", "--baseline", str(snapshot), str(repository)]
@@ -577,6 +578,28 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
     assert code == 0
     assert err == ""
     assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+
+
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_baseline_rejects_nonfinite_numbers_in_extension_fields(
+    tmp_path: Path, number: str
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    data = json.loads(baseline.read_text(encoding="utf-8"))
+    data["extension"] = {"values": ["extension-number"]}
+    baseline.write_text(json.dumps(data).replace('"extension-number"', number, 1), encoding="utf-8")
+    snapshot.write_bytes(b"previous snapshot")
+
+    code, out, err = run_cli(options + ["--baseline", str(baseline), "--snapshot", str(snapshot)])
+
+    assert code == 2
+    assert out == ""
+    assert err == f"slopscope: baseline file {baseline}: JSON numbers must be finite\n"
+    assert snapshot.read_bytes() == b"previous snapshot"
 
 
 def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:

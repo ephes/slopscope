@@ -540,6 +540,8 @@ Comparison rules:
   snapshot write; existing baseline and snapshot files remain unchanged.
   Integer-decoder resource failures (including huge integers in unused extension fields) are
   normalized to a bounded numeric-decoding diagnostic and exit code 2 without snapshot publication.
+  `NaN`, `Infinity`, `-Infinity`, and floating-point literals that overflow also return exit code 2
+  before comparison, including in unused extension fields. Unknown fields with valid JSON are accepted.
 
 - A different analyzer version, detector inventory or version, or counting setting (every `settings` entry except
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
