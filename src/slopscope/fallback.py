@@ -168,9 +168,13 @@ def discover_files(
     excluded_paths_tuple = tuple(excluded_paths)
     git_result = run_git_ls_files(root)
     if git_result.returncode == 0:
+        try:
+            tracked_paths = parse_git_ls_files_output(git_result.stdout)
+        except GitDiscoveryError as exc:
+            raise GitDiscoveryError(f"{exc}: {root}") from exc
         selected = filter_included_paths(
             filter_excluded_paths(
-                parse_git_ls_files_output(git_result.stdout),
+                tracked_paths,
                 excluded_path_segments=excluded_paths_tuple,
             ),
             include_globs=include_globs,

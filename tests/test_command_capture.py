@@ -103,7 +103,7 @@ def test_successful_git_capture_requires_nul_termination(
     else:
         assert status == 2
         assert out.getvalue() == ""
-        assert "Git file discovery output is missing its final NUL" in err.getvalue()
+        assert f"Git file discovery output is missing its final NUL: {tmp_path}" in err.getvalue()
 
 
 @pytest.mark.parametrize("mode", ["report", "profile", "composition", "seed", "update"])
