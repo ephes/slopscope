@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Require every nested report in a multi-project composition baseline to declare the
+  single-report type and the current integer schema version.
+
 - Parse Git file listings incrementally and refuse more than 100,000 distinct tracked paths
   before filtering. Duplicate index stages still count once toward this limit, which is separate
   from the subprocess output limit.

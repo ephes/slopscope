@@ -133,18 +133,7 @@ def load_baseline(
 
     if not isinstance(data, dict):
         raise BaselineError(f"baseline file {path} is not a composition report")
-    report_type = data.get("report_type")
-    if report_type != expected_report_type:
-        raise BaselineError(
-            f"baseline file {path} has report_type {report_type!r}, "
-            f"expected {expected_report_type!r}"
-        )
-    baseline_schema = data.get("schema_version")
-    if type(baseline_schema) is not int or baseline_schema != schema_version:
-        raise BaselineError(
-            f"baseline file {path} has schema_version {baseline_schema!r}, "
-            f"this version of slopscope writes {schema_version}"
-        )
+    _validate_report_header(data, str(path), expected_report_type, schema_version)
     if expected_report_type == PROJECTS_REPORT_TYPE:
         projects = data.get("projects")
         if not isinstance(projects, list):
@@ -159,20 +148,40 @@ def load_baseline(
                     f"baseline file {path} has a duplicate projects[{index}].name: {name!r}"
                 )
             seen_projects.add(name)
-            _validate_report(project.get("report"), path=path, where=f"projects[{index}].report")
+            where = f"projects[{index}].report"
+            nested = project.get("report")
+            if not isinstance(nested, dict):
+                raise BaselineError(f"baseline file {path} has an invalid {where} object")
+            _validate_report_header(nested, f"{path} {where}", SINGLE_REPORT_TYPE, schema_version)
+            _validate_report(nested, path=path, where=where)
     else:
         _validate_report(data, path=path, where="report")
     return data
 
 
-def _validate_report(data: object, *, path: Path, where: str) -> None:
+def _validate_report_header(
+    data: Mapping[str, Any], location: str, expected_report_type: str, schema_version: int
+) -> None:
+    report_type = data.get("report_type")
+    if report_type != expected_report_type:
+        raise BaselineError(
+            f"baseline file {location} has report_type {report_type!r}, "
+            f"expected {expected_report_type!r}"
+        )
+    baseline_schema = data.get("schema_version")
+    if type(baseline_schema) is not int or baseline_schema != schema_version:
+        raise BaselineError(
+            f"baseline file {location} has schema_version {baseline_schema!r}, "
+            f"this version of slopscope writes {schema_version}"
+        )
+
+
+def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None:
     """Check the parts of a single report object that the comparison reads."""
 
     def fail(field: str) -> BaselineError:
         return BaselineError(f"baseline file {path} has an invalid {where} {field}")
 
-    if not isinstance(data, dict):
-        raise fail("object")
     analyzer = data.get("analyzer")
     if not isinstance(analyzer, dict):
         raise fail("analyzer")

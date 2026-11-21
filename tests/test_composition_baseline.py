@@ -415,6 +415,52 @@ def test_single_report_baseline_is_rejected_for_projects(tmp_path: Path) -> None
     assert "expected 'composition_projects'" in stderr
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", composition.SCHEMA_VERSION + 1),
+        ("schema_version", float(composition.SCHEMA_VERSION)),
+        ("schema_version", None),
+        ("report_type", "composition_projects"),
+        ("report_type", None),
+    ],
+)
+def test_project_baseline_requires_nested_report_header(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    write(tmp_path, "one/src/a.py", "x = 1\n")
+    write(tmp_path, "two/src/b.py", "y = 2\n")
+    write(
+        tmp_path,
+        "pyproject.toml",
+        '[[tool.slopscope.projects]]\nname = "one"\npath = "one"\n'
+        '[[tool.slopscope.projects]]\nname = "two"\npath = "two"\n',
+    )
+    snapshot = tmp_path / "projects.json"
+    options = [str(tmp_path), "--composition", "--project", "all", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
+    compare_options = options + ["--baseline", str(snapshot)]
+    code, out, err = run_cli(compare_options)
+    assert code == 0, err
+    for project in json.loads(out)["projects"]:
+        baseline = project["report"]["baseline"]
+        assert baseline["comparable"] is True
+        assert baseline["deltas"]["total"]["files"]["delta"] == 0
+
+    data = json.loads(snapshot.read_text())
+    nested = data["projects"][1]["report"]
+    if value is None:
+        del nested[field]
+    else:
+        nested[field] = value
+    snapshot.write_text(json.dumps(data))
+
+    code, out, err = run_cli(compare_options)
+    assert code == 2
+    assert out == ""
+    assert f"projects[1].report has {field}" in err
+
+
 @pytest.mark.parametrize("flag", ["--snapshot", "--baseline"])
 def test_snapshot_and_baseline_require_composition(
     flag: str, capsys: pytest.CaptureFixture[str]
@@ -507,7 +553,17 @@ def test_structurally_invalid_project_baseline_exits_2(tmp_path: Path) -> None:
             {
                 "report_type": "composition_projects",
                 "schema_version": composition.SCHEMA_VERSION,
-                "projects": [{"name": "one", "report": {"analyzer": {}, "detectors": None}}],
+                "projects": [
+                    {
+                        "name": "one",
+                        "report": {
+                            "report_type": "composition",
+                            "schema_version": composition.SCHEMA_VERSION,
+                            "analyzer": {},
+                            "detectors": None,
+                        },
+                    },
+                ],
             }
         ),
         encoding="utf-8",
@@ -573,6 +629,8 @@ def test_multi_project_validation_reuses_metric_paths(
         {
             "name": f"project-{index}",
             "report": {
+                "report_type": composition_baseline.SINGLE_REPORT_TYPE,
+                "schema_version": 1,
                 "analyzer": {},
                 "detectors": [],
                 "total": {"categories": {"blank": 0}},

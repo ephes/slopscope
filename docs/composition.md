@@ -539,6 +539,8 @@ The reader closes the descriptor even if buffered stream setup fails.
 Comparison rules:
 
 - A baseline must match the report's `report_type` and provide the current `schema_version` as a JSON integer.
+  In a multi-project baseline, each nested project report must have `report_type: "composition"`
+  and the same integer schema version as the enclosing snapshot.
   Incompatible baselines (for example a multi-project snapshot for a single-path report), non-integer schema
   markers, and missing or invalid files return a `slopscope:` error and exit code 2.
   Duplicate JSON object keys at any nesting level (even with identical values) and excessively nested
