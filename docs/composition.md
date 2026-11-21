@@ -527,7 +527,8 @@ supported. After the read and before decoding, the reader verifies descriptor id
 checks that the number of bytes read matches the descriptor's size. In-place changes and incomplete reads return
 exit code 2 and preserve the prior snapshot. If the pathname is atomically replaced, the reader continues
 using the opened inode and allows unlink-only ctime changes.
-Type or size refusals also return exit code 2 without changing baseline or snapshot bytes.
+Type, size, or read failures also return exit code 2 without changing baseline or snapshot bytes.
+The reader closes the descriptor even if buffered stream setup fails.
 
 Comparison rules:
 
@@ -539,6 +540,8 @@ Comparison rules:
   snapshot write; existing baseline and snapshot files remain unchanged.
   Integer-decoder resource failures (including huge integers in unused extension fields) are
   normalized to a bounded numeric-decoding diagnostic and exit code 2 without snapshot publication.
+  `NaN`, `Infinity`, `-Infinity`, and floating-point literals that overflow also return exit code 2
+  before comparison, including in unused extension fields. Unknown fields with valid JSON are accepted.
 
 - A different analyzer version, detector inventory or version, or counting setting (every `settings` entry except
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and

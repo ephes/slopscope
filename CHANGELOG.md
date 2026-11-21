@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject nonfinite numbers in composition baseline JSON, including in unused extension fields.
+
+- Close the composition baseline file descriptor when buffered stream setup fails.
+
 - Compute source/test, area, and directory totals in one pass without retaining the input file rows.
 
 - Normalize configured paths once per file aggregation call and reuse them across report sections.

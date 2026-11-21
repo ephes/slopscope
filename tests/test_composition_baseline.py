@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -569,6 +570,7 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
     data = json.loads(snapshot.read_text())
     del data["total"]["code"]
     del data["total"]["categories"]
+    data["extension"] = {"values": [1.25, -1e308, "NaN"]}
     snapshot.write_text(json.dumps(data))
     code, out, err = run_cli(
         ["--composition", "--format", "json", "--baseline", str(snapshot), str(repository)]
@@ -576,6 +578,28 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
     assert code == 0
     assert err == ""
     assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+
+
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_baseline_rejects_nonfinite_numbers_in_extension_fields(
+    tmp_path: Path, number: str
+) -> None:
+    repository = make_repository(tmp_path)
+    baseline = tmp_path / "baseline.json"
+    snapshot = tmp_path / "snapshot.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(baseline)])[0] == 0
+    data = json.loads(baseline.read_text(encoding="utf-8"))
+    data["extension"] = {"values": ["extension-number"]}
+    baseline.write_text(json.dumps(data).replace('"extension-number"', number, 1), encoding="utf-8")
+    snapshot.write_bytes(b"previous snapshot")
+
+    code, out, err = run_cli(options + ["--baseline", str(baseline), "--snapshot", str(snapshot)])
+
+    assert code == 2
+    assert out == ""
+    assert err == f"slopscope: baseline file {baseline}: JSON numbers must be finite\n"
+    assert snapshot.read_bytes() == b"previous snapshot"
 
 
 def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:
@@ -991,6 +1015,34 @@ def test_duplicate_budget_preserves_prior_outputs(
     assert allowlist.read_bytes() == b"previous allowlist"
 
 
+def test_baseline_buffer_setup_failure_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text("{}", encoding="utf-8")
+    descriptor = -1
+
+    def fail_fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
+        nonlocal descriptor
+        os.fstat(fd)
+        descriptor = fd
+        raise OSError("buffer setup failed")
+
+    monkeypatch.setattr(os, "fdopen", fail_fdopen)
+    with pytest.raises(composition_baseline.BaselineError, match="could not read.*buffer setup"):
+        composition_baseline.load_baseline(
+            baseline, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    assert descriptor >= 0
+    try:
+        os.fstat(descriptor)
+    except OSError as exc:
+        assert exc.errno == errno.EBADF
+    else:
+        os.close(descriptor)
+        pytest.fail("baseline descriptor leaked")
+
+
 def test_baseline_refuses_short_read_with_stable_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1002,8 +1054,8 @@ def test_baseline_refuses_short_read_with_stable_metadata(
     baseline.write_bytes(complete_report + b"\n  ")
     real_fdopen = os.fdopen
 
-    def fdopen(fd: int, mode: str) -> BinaryIO:
-        handle = cast(BinaryIO, real_fdopen(fd, mode))
+    def fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
+        handle = cast(BinaryIO, real_fdopen(fd, mode, closefd=closefd))
         read = handle.read
 
         def short_read(size: int) -> bytes:
@@ -1039,9 +1091,9 @@ def test_baseline_read_generation(
     real_fdopen = os.fdopen
     injected = False
 
-    def fdopen(fd: int, mode: str) -> BinaryIO:
+    def fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
         nonlocal injected
-        handle = cast(BinaryIO, real_fdopen(fd, mode))
+        handle = cast(BinaryIO, real_fdopen(fd, mode, closefd=closefd))
         if (os.fstat(fd).st_dev, os.fstat(fd).st_ino) != (
             baseline.stat().st_dev,
             baseline.stat().st_ino,

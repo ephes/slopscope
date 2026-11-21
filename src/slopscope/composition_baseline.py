@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +66,17 @@ class BaselineError(Exception):
     """User-facing baseline loading error."""
 
 
+class _NonFiniteNumberError(ValueError):
+    """A JSON number would decode to a nonfinite value."""
+
+
+def _parse_finite_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise _NonFiniteNumberError("JSON numbers must be finite")
+    return value
+
+
 def load_baseline(
     path: Path,
     *,
@@ -74,7 +87,10 @@ def load_baseline(
 
     try:
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(path, flags), "rb") as handle:
+        with ExitStack() as stack:
+            descriptor = os.open(path, flags)
+            stack.callback(os.close, descriptor)
+            handle = stack.enter_context(os.fdopen(descriptor, "rb", closefd=False))
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise BaselineError(f"baseline file {path} must be a regular file")
@@ -96,12 +112,17 @@ def load_baseline(
                 )
             ):
                 raise BaselineError(f"baseline file {path} changed while reading")
-        data = json.loads(content.decode("utf-8"), object_pairs_hook=unique_object)
+        data = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=_parse_finite_float,
+            parse_float=_parse_finite_float,
+        )
     except FileNotFoundError as exc:
         raise BaselineError(f"baseline file not found: {path}") from exc
     except OSError as exc:
         raise BaselineError(f"could not read baseline file {path}: {exc}") from exc
-    except DuplicateKeyError as exc:
+    except (DuplicateKeyError, _NonFiniteNumberError) as exc:
         raise BaselineError(f"baseline file {path}: {exc}") from exc
     except RecursionError as exc:
         raise BaselineError(f"baseline file {path}: JSON nesting is too deep") from exc
