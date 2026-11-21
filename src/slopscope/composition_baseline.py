@@ -45,7 +45,7 @@ METRICS = (
     *(f"constructs.{name}" for name in COMPOSITION_CONSTRUCTS),
     *(f"test_placement.{name}" for name in COMPOSITION_TEST_PLACEMENTS),
 )
-_METRIC_PATHS = tuple(tuple(metric.split(".")) for metric in METRICS)
+_METRIC_PATHS = tuple((metric, tuple(metric.split("."))) for metric in METRICS)
 
 
 # Settings that only change what is listed, not what is counted.
@@ -63,7 +63,7 @@ _PRESENTATION_SETTINGS = frozenset(
 
 
 class BaselineError(Exception):
-    """User-facing baseline loading error."""
+    """User-facing baseline error."""
 
 
 class _NonFiniteNumberError(ValueError):
@@ -173,8 +173,10 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
 
     if not isinstance(data, dict):
         raise fail("object")
-    if not isinstance(data.get("analyzer"), dict):
+    analyzer = data.get("analyzer")
+    if not isinstance(analyzer, dict):
         raise fail("analyzer")
+    _analyzer_versions(analyzer, path=path, where=where)
     detectors = data.get("detectors")
     if not isinstance(detectors, list) or not all(isinstance(item, dict) for item in detectors):
         raise fail("detectors")
@@ -195,7 +197,7 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
-    _validate_metrics(data["total"], path=path, where=f"{where} total")
+    _read_metrics(data["total"], path=path, where=f"{where} total")
     seen_kinds: set[str] = set()
     for index, kind in enumerate(kinds):
         name = kind.get("name")
@@ -204,26 +206,41 @@ def _validate_report(data: object, *, path: Path, where: str) -> None:
         if name in seen_kinds:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
-        _validate_metrics(kind, path=path, where=f"{where} kinds[{index}]")
+        _read_metrics(kind, path=path, where=f"{where} kinds[{index}]")
 
 
-def _validate_metrics(data: dict[str, Any], *, path: Path, where: str) -> None:
-    """Absent metrics remain unknown; present comparison counts must be nonnegative integers."""
+def _analyzer_versions(
+    analyzer: Mapping[str, Any], *, path: Path, where: str
+) -> tuple[int | None, str | None]:
+    version = analyzer.get("version")
+    if "version" in analyzer and type(version) is not int:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.version")
+    python_version = analyzer.get("python_version")
+    if "python_version" in analyzer and type(python_version) is not str:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.python_version")
+    return version, python_version
 
-    for parts in _METRIC_PATHS:
+
+def _read_metrics(data: Mapping[str, Any], *, path: Path, where: str) -> dict[str, int]:
+    """Read present comparison counts, which must be nonnegative integers."""
+
+    counts: dict[str, int] = {}
+    for metric, parts in _METRIC_PATHS:
         value = data
         for index, part in enumerate(parts):
             if part not in value:
                 break
             item = value[part]
             if index < len(parts) - 1:
-                if isinstance(item, dict):
+                if isinstance(item, Mapping):
                     value = item
                     continue
             elif isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+                counts[metric] = item
                 break
             field = f"{where}.{'.'.join(parts[: index + 1])}"
             raise BaselineError(f"baseline file {path} has an invalid {field}")
+    return counts
 
 
 def project_baselines(data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -246,9 +263,9 @@ def compare(
 
     warnings: list[str] = []
     analyzer = baseline.get("analyzer")
-    analyzer = analyzer if isinstance(analyzer, dict) else {}
-    baseline_analyzer_version = analyzer.get("version")
-    baseline_python_version = analyzer.get("python_version")
+    baseline_analyzer_version, baseline_python_version = _analyzer_versions(
+        analyzer if isinstance(analyzer, Mapping) else {}, path=path, where="report"
+    )
     if baseline_analyzer_version != report.analyzer_version:
         warnings.append(
             f"analyzer version differs: baseline {baseline_analyzer_version!r}, "
@@ -286,22 +303,23 @@ def compare(
             f"current {report.python_version!r}"
         )
 
-    baseline_kinds = {
-        str(kind.get("name")): kind for kind in baseline.get("kinds", []) if isinstance(kind, dict)
-    }
     total = baseline.get("total")
+    total_counts = (
+        _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
+    )
+    baseline_kinds = {
+        str(kind.get("name")): _read_metrics(kind, path=path, where=f"report kinds[{index}]")
+        for index, kind in enumerate(baseline.get("kinds", []))
+        if isinstance(kind, Mapping)
+    }
     scopes = [
-        _scope_delta(report.total, total if isinstance(total, dict) else None),
-        *(_scope_delta(kind, baseline_kinds.get(kind.name)) for kind in report.kinds),
+        _scope_delta(report.total, total_counts),
+        *(_scope_delta(kind, baseline_kinds.get(kind.name, {})) for kind in report.kinds),
     ]
     return CompositionComparison(
         path=path,
-        analyzer_version=baseline_analyzer_version
-        if isinstance(baseline_analyzer_version, int)
-        else None,
-        python_version=baseline_python_version
-        if isinstance(baseline_python_version, str)
-        else None,
+        analyzer_version=baseline_analyzer_version,
+        python_version=baseline_python_version,
         comparable=comparable,
         warnings=tuple(warnings),
         scopes=tuple(scopes),
@@ -319,7 +337,7 @@ def missing_baseline(
         python_version=None,
         comparable=False,
         warnings=(reason,),
-        scopes=tuple(_scope_delta(aggregate, None) for aggregate in (report.total, *report.kinds)),
+        scopes=tuple(_scope_delta(aggregate, {}) for aggregate in (report.total, *report.kinds)),
     )
 
 
@@ -344,22 +362,9 @@ def _current_values(aggregate: CompositionAggregate) -> dict[str, int]:
     return values
 
 
-def _baseline_value(data: Mapping[str, Any] | None, metric: str) -> int | None:
-    if data is None:
-        return None
-    value: Any = data
-    for part in metric.split("."):
-        if not isinstance(value, dict):
-            return None
-        value = value.get(part)
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
-
-
 def _scope_delta(
     aggregate: CompositionAggregate,
-    baseline: Mapping[str, Any] | None,
+    baseline: Mapping[str, int],
 ) -> CompositionScopeDelta:
     current = _current_values(aggregate)
     return CompositionScopeDelta(
@@ -367,7 +372,7 @@ def _scope_delta(
         metrics=tuple(
             CompositionMetricDelta(
                 metric=metric,
-                baseline=_baseline_value(baseline, metric),
+                baseline=baseline.get(metric),
                 current=current[metric],
             )
             for metric in METRICS

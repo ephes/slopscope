@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Apply snapshot count validation to direct composition baseline comparisons. Missing counts keep
+  their unknown deltas.
+
+- Require integer analyzer versions and string Python versions when present in composition baselines.
+
 - Reject discovery identity chains of the wrong length before opening sources in composition and
   size-limits.
 

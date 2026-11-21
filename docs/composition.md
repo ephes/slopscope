@@ -547,6 +547,9 @@ Comparison rules:
   `NaN`, `Infinity`, `-Infinity`, and floating-point literals that overflow also return exit code 2
   before comparison, including in unused extension fields. Unknown fields with valid JSON are accepted.
 
+- When present, `analyzer.version` must be an integer and `analyzer.python_version` must be a string.
+  This applies to both snapshot loading and direct comparisons. Older snapshots may omit these fields;
+  missing versions retain the comparison warnings and appear as `null` in the result.
 - A different analyzer version, detector inventory or version, or counting setting (every `settings` entry except
   `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
   `max_total_anchors`, which only control presentation or admission) prints a
@@ -568,6 +571,9 @@ Comparison rules:
   must be objects. Detector entries require string `name` and `kind` fields and a nonnegative integer
   `version`. Kind and project entries require string names. Detector, kind, and project names must be
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
+  Calling `slopscope.composition_baseline.compare()` with a mapping applies the same count and
+  metric-group checks to the total and kind scopes, raising `BaselineError` with the offending
+  field path. Missing counts remain unknown.
 - With `--project`, the baseline must be a multi-project snapshot. Projects are matched by name; a project that the
   baseline lacks gets a warning and a comparison without baseline values.
   Validation reuses the same metric paths for every project's total and kind counts and formats field paths only

@@ -13,7 +13,14 @@ from typing import BinaryIO, SupportsIndex, cast
 
 import pytest
 
-from slopscope import _source, cli, composition, composition_baseline, composition_duplication
+from slopscope import (
+    _source,
+    cli,
+    composition,
+    composition_baseline,
+    composition_duplication,
+    composition_render,
+)
 
 
 def write(root: Path, relative_path: str, text: str) -> None:
@@ -270,6 +277,46 @@ def test_baseline_requires_integer_schema_version(
         )
 
 
+@pytest.mark.parametrize(
+    "field,value", [("version", True), ("version", 1.0), ("python_version", 313)]
+)
+def test_baseline_requires_exact_analyzer_field_types(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    data["analyzer"][field] = value
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(composition_baseline.BaselineError, match=rf"analyzer\.{field}$"):
+        composition_baseline.load_baseline(
+            snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(composition_baseline.BaselineError, match=rf"analyzer\.{field}$"):
+        composition_baseline.compare(report, data, path=snapshot)
+
+
+@pytest.mark.parametrize("omit_versions", [False, True])
+def test_baseline_analyzer_versions_round_trip(tmp_path: Path, omit_versions: bool) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    if omit_versions:
+        del data["analyzer"]["version"]
+        del data["analyzer"]["python_version"]
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    baseline = composition_baseline.load_baseline(
+        snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+    )
+    comparison = composition_baseline.compare(report, baseline, path=snapshot)
+
+    assert comparison.analyzer_version == (None if omit_versions else report.analyzer_version)
+    assert comparison.python_version == (None if omit_versions else report.python_version)
+    assert comparison.comparable is not omit_versions
+
+
 @pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])
 def test_detector_version_mismatch_warns_and_marks_not_comparable(
     tmp_path: Path, detector: str, old_version: int
@@ -377,6 +424,45 @@ def test_snapshot_and_baseline_require_composition(
 
     assert exc_info.value.code == 2
     assert f"{flag} requires --composition" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "baseline,field",
+    [
+        ({"total": {"files": -1}}, "report total.files"),
+        ({"total": {"files": True}}, "report total.files"),
+        ({"total": {"tags": None}}, "report total.tags"),
+        (
+            {"kinds": [{"name": "source", "categories": {"import": -1}}]},
+            "report kinds[0].categories.import",
+        ),
+    ],
+)
+def test_direct_baseline_comparison_refuses_invalid_counts(
+    tmp_path: Path, baseline: dict[str, object], field: str
+) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+
+    with pytest.raises(composition_baseline.BaselineError) as error:
+        composition_baseline.compare(report, baseline, path=snapshot)
+    assert str(error.value) == f"baseline file {snapshot} has an invalid {field}"
+
+
+def test_direct_baseline_comparison_preserves_missing_counts(tmp_path: Path) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    baseline = {"total": {"files": 0}, "kinds": [{"name": "source", "categories": {}}]}
+
+    comparison = composition_baseline.compare(report, baseline, path=tmp_path / "before.json")
+
+    scopes = {
+        scope.name: {metric.metric: metric for metric in scope.metrics}
+        for scope in comparison.scopes
+    }
+    assert scopes["total"]["files"].delta == report.total.files
+    assert scopes["total"]["code"].baseline is None
+    assert scopes["total"]["code"].delta is None
+    assert scopes["source"]["categories.import"].delta is None
 
 
 def test_schema_version_is_current() -> None:
