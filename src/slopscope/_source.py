@@ -5,7 +5,8 @@ from __future__ import annotations
 import os
 import stat
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
+from functools import partial
 from pathlib import Path
 from typing import BinaryIO
 
@@ -70,6 +71,18 @@ def read_bounded(
 
 
 @contextmanager
+def _close_on_exit(close: Callable[[], None]) -> Iterator[None]:
+    try:
+        yield
+    except BaseException:
+        with suppress(OSError):
+            close()
+        raise
+    else:
+        close()
+
+
+@contextmanager
 def open_source(
     root: Path, relative_path: str, admission: Admission | None = None
 ) -> Iterator[BinaryIO]:
@@ -81,9 +94,14 @@ def open_source(
         raise OSError("source path must stay below the selected root")
     if not all(hasattr(os, name) for name in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK")):
         raise OSError("safe source opening is unavailable on this platform")
+    parent = None
+
+    def close_parent() -> None:
+        if parent is not None:
+            os.close(parent)
+
     with ExitStack() as stack:
-        parent = None
-        try:
+        with _close_on_exit(close_parent):
             try:
                 directory_flags = os.O_RDONLY | os.O_DIRECTORY
                 parent = os.open(root, directory_flags)
@@ -91,10 +109,8 @@ def open_source(
                 for index, part in enumerate(parts[:-1], start=1):
                     previous = parent
                     parent = os.open(part, directory_flags | os.O_NOFOLLOW, dir_fd=previous)
-                    try:
+                    with _close_on_exit(partial(os.close, previous)):
                         _check(os.fstat(parent), expected[index], directory=True)
-                    finally:
-                        os.close(previous)
                 descriptor = os.open(
                     parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
                 )
@@ -103,12 +119,10 @@ def open_source(
             try:
                 handle = os.fdopen(descriptor, "rb")
             except BaseException:
-                os.close(descriptor)
+                with suppress(OSError):
+                    os.close(descriptor)
                 raise
-            stack.enter_context(handle)
+            stack.enter_context(_close_on_exit(handle.close))
             _check(os.fstat(handle.fileno()), expected[-1], directory=False)
-        finally:
-            if parent is not None:
-                os.close(parent)
         yield handle
         _check(os.fstat(handle.fileno()), expected[-1], directory=False)

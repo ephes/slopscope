@@ -106,7 +106,9 @@ Discovery records each selected source's root, parent-directory, and regular-fil
 open components relative to checked directory descriptors without following links below the selected
 root (the root itself may be a symlink). Files changed since admission, including regular-file
 replacements, are refused. The walk holds at most two directory descriptors at a time, regardless
-of path depth, and releases the last one before reading. Leaf opens are nonblocking and descriptors
+of path depth, and releases the last one before reading. A descriptor close failure is reported as
+a source I/O error when it is the first failure. If admission already failed, its diagnostic is
+preserved while cleanup attempts to close the remaining descriptors. Leaf opens are nonblocking and descriptors
 must be regular files before any bytes are read, so a substituted FIFO cannot wait for a writer. Platforms without
 descriptor-relative opening, `O_NOFOLLOW`, `O_DIRECTORY`, or `O_NONBLOCK` refuse source analysis; Windows lacks them, so composition
 analysis is unsupported there.

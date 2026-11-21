@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve source admission errors across descriptor cleanup failures in composition and size-limits.
+  A standalone close failure is reported as a source I/O error.
+
 - Reject nonfinite numbers in composition baseline JSON, including in unused extension fields.
 
 - Close the composition baseline file descriptor when buffered stream setup fails.
