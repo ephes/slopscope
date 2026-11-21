@@ -1,4 +1,4 @@
-"""Unique working-tree inputs and finite filesystem discovery."""
+"""Unique working-tree inputs and finite file discovery."""
 
 from __future__ import annotations
 
@@ -20,6 +20,30 @@ def test_git_paths_keep_exact_identity_and_first_order() -> None:
     names = ["b.py", "A.py", "a.py", "é.py", "e\u0301.py", "b.py", "A.py"]
     raw = b"\0".join(os.fsencode(name) for name in names) + b"\0"
     assert fallback.parse_git_ls_files_output(raw) == [Path(name) for name in names[:5]]
+
+
+def test_git_path_limit_stops_before_constructing_excess_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limit = 64
+    output = b"".join(f"{index:x}\0".encode() for index in range(4096))
+    constructed: list[str] = []
+
+    def record_path(name: str) -> Path:
+        constructed.append(name)
+        return Path(name)
+
+    monkeypatch.setattr(fallback, "MAX_GIT_DISCOVERY_PATHS", limit, raising=False)
+    monkeypatch.setattr(fallback, "Path", record_path)
+    with pytest.raises(fallback.GitDiscoveryError, match="Git file discovery.*path limit.*64"):
+        fallback.parse_git_ls_files_output(output)
+    assert constructed == [f"{index:x}" for index in range(limit)]
+
+
+def test_duplicate_git_paths_do_not_consume_path_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fallback, "MAX_GIT_DISCOVERY_PATHS", 3, raising=False)
+    output = b"c.py\0" * 4096 + b"a.py\0c.py\0b.py\0a.py\0" * 4096
+    assert fallback.parse_git_ls_files_output(output) == [Path("c.py"), Path("a.py"), Path("b.py")]
 
 
 def test_real_unmerged_index_counts_working_file_once(

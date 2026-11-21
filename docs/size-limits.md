@@ -12,6 +12,8 @@ seed/update publication; report mode lists failures and exits nonzero.
 Git file discovery has a 30-second execution timeout plus bounded cleanup (up to 6 extra seconds on POSIX,
 11 on Windows). A discovery timeout returns exit code 2 with the root path and no report, snapshot, or allowlist
 write; partial output is discarded without filesystem fallback. Missing/nonzero Git retains filesystem fallback.
+A successful nonempty Git listing without a final NUL also fails with exit code 2 and preserves outputs.
+The separate limit of 100,000 distinct tracked paths applies before filtering and has the same failure behavior.
 Windows process-tree termination is best-effort and untested. Filesystem traversal errors also return exit code 2 with a bounded path diagnostic,
 preserving snapshots and allowlists. Deliberately excluded directories stay pruned.
 See [README](../README.md) for discovery details.

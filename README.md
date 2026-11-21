@@ -169,8 +169,9 @@ untested. Output overflow or a timeout is a hard analysis error:
 the CLI returns exit code 2 with a diagnostic, without a report, snapshot, or allowlist write. Partial Git output
 is discarded and no filesystem fallback runs on overflow or timeout. This applies to Python reports, physical-line profiles,
 composition, and size-limits. Git startup failures (including a missing executable) and nonzero exits retain the
-filesystem fallback. Successful Git output remains NUL-delimited, preserving unusual filenames. As with Python's
-`subprocess.run`, process creation itself may not be interruptible on every platform.
+filesystem fallback. Successful Git output must be empty or end in a NUL delimiter. A missing final NUL returns
+exit code 2 without a report, snapshot, allowlist write, or filesystem fallback. NUL delimiters preserve unusual
+filenames. As with Python's `subprocess.run`, process creation itself may not be interruptible on every platform.
 
 On POSIX, captured cloc and Git commands retire their owned process group after successful
 and nonzero wrapper exits too, including descendants with redirected pipes. Cleanup allows
@@ -243,6 +244,9 @@ application's signal handlers unchanged; Windows retains its existing signal pol
 
 Git-discovered paths are deduplicated by exact spelling in first-seen order: unresolved index
 stages still analyze the working-tree bytes once per path. Case and Unicode spellings stay distinct.
+Git discovery accepts up to 100,000 distinct tracked paths per listing, before excludes, includes, or
+symlink checks. This limit is independent of the 16 MiB subprocess output limit. The first excess
+path returns exit code 2 without a report, snapshot, allowlist write, or filesystem fallback.
 Filesystem fallback visits at most 200,000 entries (including excluded entries in visited directories),
 admits at most 100,000 regular files and 20,000 directories (including the root), and descends at most
 128 directory levels below the root. Excluded directories remain pruned; ordinary sorted depth-first

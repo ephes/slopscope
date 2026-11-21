@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Parse Git file listings incrementally and refuse more than 100,000 distinct tracked paths
+  before filtering. Duplicate index stages still count once toward this limit, which is separate
+  from the subprocess output limit.
+
+- Reject successful nonempty Git file listings that lack the final NUL, without publishing
+  partial results or falling back to filesystem discovery.
+
 - Aggregate churn directly from the bounded Git capture, avoiding a full decoded copy and a list
   of parsed records. Malformed history still skips the entire churn result.
 
