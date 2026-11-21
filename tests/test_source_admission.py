@@ -10,7 +10,7 @@ import tokenize
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 import pytest
 
@@ -124,6 +124,59 @@ def test_nonregular_opened_descriptor_is_refused_before_read(
     assert code == 1
     assert json.loads(out)["failures"]
     assert "source changed" in err
+
+
+@pytest.mark.parametrize("stat_mismatch", [False, True])
+def test_parent_close_failure_reports_primary_source_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stat_mismatch: bool
+) -> None:
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    real_open, real_close, real_fdopen, real_fstat = os.open, os.close, os.fdopen, os.fstat
+    parent_fd = leaf_fd = None
+    parent_closes = 0
+    handles: list[BinaryIO] = []
+
+    def track_open(path: Path | str, flags: int, *, dir_fd: int | None = None) -> int:
+        nonlocal parent_fd, leaf_fd
+        fd = real_open(path, flags, dir_fd=dir_fd)
+        if path == tmp_path:
+            parent_fd = fd
+        elif path == "app.py" and dir_fd == parent_fd:
+            leaf_fd = fd
+        return fd
+
+    def fail_parent_close(fd: int) -> None:
+        nonlocal parent_closes
+        real_close(fd)
+        if fd == parent_fd:
+            parent_closes += 1
+            raise OSError("parent close failed")
+
+    def track_fdopen(fd: int, mode: Literal["rb"]) -> BinaryIO:
+        handle = real_fdopen(fd, mode)
+        if fd == leaf_fd:
+            handles.append(handle)
+        return handle
+
+    def fstat(fd: int) -> os.stat_result:
+        result = real_fstat(fd)
+        if fd == leaf_fd and stat_mismatch:
+            fields = list(result)
+            fields[1] += 1  # Different inode.
+            return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(os, "open", track_open)
+    monkeypatch.setattr(os, "close", fail_parent_close)
+    monkeypatch.setattr(os, "fdopen", track_fdopen)
+    monkeypatch.setattr(os, "fstat", fstat)
+    code, out, err = run([str(tmp_path), "--composition", "--format", "json"])
+
+    assert parent_closes == 1
+    assert len(handles) == 1 and handles[0].closed
+    assert code == 1
+    assert json.loads(out)["failures"]
+    assert ("source changed since discovery" if stat_mismatch else "parent close failed") in err
 
 
 @pytest.mark.parametrize("mode", ["composition", "seed", "update"])
@@ -281,6 +334,28 @@ def test_caller_type_error_is_not_reported_as_platform_failure(tmp_path: Path) -
     (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
     with pytest.raises(TypeError, match="caller bug"), _source.open_source(tmp_path, "app.py"):
         raise TypeError("caller bug")
+
+
+@pytest.mark.parametrize(
+    ("source", "recorded_source"), [("pkg/app.py", "app.py"), ("app.py", "pkg/app.py")]
+)
+def test_admission_chain_length_is_checked_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, recorded_source: str
+) -> None:
+    (tmp_path / "pkg").mkdir()
+    for name in (source, recorded_source):
+        (tmp_path / name).write_text("x = 1\n", encoding="utf-8")
+    admission = _source.admit(tmp_path, recorded_source)
+
+    def unexpected_open(*args: Any, **kwargs: Any) -> int:
+        pytest.fail("mismatched admission must be refused before opening any descriptor")
+
+    monkeypatch.setattr(os, "open", unexpected_open)
+    with (
+        pytest.raises(OSError, match="source changed since discovery"),
+        _source.open_source(tmp_path, source, admission),
+    ):
+        pytest.fail("body must not run")
 
 
 @pytest.mark.parametrize("replace_directory", [False, True])

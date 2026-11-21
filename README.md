@@ -260,7 +260,8 @@ exclude these links. The cloc engine's discovery is unchanged. Python fallback r
 
 Composition and size-limits bind discovered Python files to their root, directory, and regular-file
 identities, then open each component without following links below the selected root. Changed or
-nonregular sources make analysis incomplete; snapshots and allowlists are preserved. Opening is
+nonregular sources make analysis incomplete; snapshots and allowlists are preserved. Descriptor
+close failures also make analysis incomplete and preserve any earlier source error. Opening is
 nonblocking so a substituted FIFO cannot wait for a writer. These modes require descriptor-relative
 opening, `O_NOFOLLOW`, `O_DIRECTORY`, and `O_NONBLOCK`; platforms without these APIs refuse source
 analysis with a diagnostic. Windows lacks them, so `--composition` and `--size-limits` are unsupported
