@@ -263,7 +263,7 @@ def test_cli_churn_timeout_kills_children_without_retry(
         "hang = (stage == 'inside' or (stage == 'verify' and '--verify' in command) "
         "or (stage == 'log' and command[0] == 'log'))\n"
         "if not hang:\n"
-        "    print('true')\n"
+        "    print('a' * 40 if '--verify' in command else 'true')\n"
         "    sys.exit(0)\n"
         f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
         f"with open({str(child_pid)!r}, 'w') as out: out.write(str(child.pid))\n"

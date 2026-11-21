@@ -445,7 +445,7 @@ code 2, including symlink and hardlink aliases. A distinct snapshot inside the r
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
 The branch is resolved once to a commit SHA; every history command uses that SHA, also recorded
 as `churn.commit` in JSON, while `churn.ref` retains the requested display label.
-Malformed history or more than 16 MiB of combined output from any churn Git command skips optional
+Malformed ref output or history, or more than 16 MiB of combined output from any churn Git command, skips optional
 churn with a diagnostic, preserving source analysis and snapshot success policy.
 Git launch failures also skip optional churn. The diagnostic distinguishes a missing executable
 from other launch failures such as permission errors.

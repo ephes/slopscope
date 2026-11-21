@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -28,6 +28,10 @@ GitCaptureError = CaptureError
 # caller's; the Git-side cutoff keeps a margin and months are filtered exactly afterwards.
 _CUTOFF_MARGIN = timedelta(days=2)
 KINDS = ("source", "tests", "other")
+
+
+class _MalformedHistory(ValueError):
+    """The captured Git history could not be parsed."""
 
 
 def collect_churn(
@@ -73,7 +77,10 @@ def collect_churn(
         if verified.returncode != 0:
             return skipped(f"unknown branch or ref {ref!r}")
 
-        commit = verified.stdout.decode("ascii").strip()
+        object_id = re.fullmatch(rb"([0-9a-fA-F]{40}|[0-9a-fA-F]{64})(?:\r?\n)?", verified.stdout)
+        if object_id is None:
+            return skipped("malformed git history: invalid commit ID")
+        commit = object_id[1].decode("ascii")
         log_arguments = [
             "log",
             commit,
@@ -108,24 +115,23 @@ def collect_churn(
         month: ([0, 0, 0], [0, 0, 0]) for month in _months(since, current)
     }
     try:
-        records = parse_numstat(result.stdout)
-    except ValueError as exc:
+        for month, relative_path, added, removed in _iter_numstat(result.stdout):
+            if month not in totals:
+                continue
+            if fallback.map_language(relative_path) != "Python":
+                continue
+            if fallback.is_excluded_path(relative_path, excluded_paths):
+                continue
+            if include_globs and not fallback.matches_include_globs(relative_path, include_globs):
+                continue
+            kind = classify.classify_source_test(
+                relative_path, source_dirs=source_dirs, test_dirs=test_dirs
+            )
+            index = KINDS.index(kind)
+            totals[month][0][index] += added
+            totals[month][1][index] += removed
+    except _MalformedHistory as exc:
         return skipped(f"malformed git history: {exc}")
-    for month, relative_path, added, removed in records:
-        if month < first_month or month not in totals:
-            continue
-        if fallback.map_language(relative_path) != "Python":
-            continue
-        if fallback.is_excluded_path(relative_path, excluded_paths):
-            continue
-        if include_globs and not fallback.matches_include_globs(relative_path, include_globs):
-            continue
-        kind = classify.classify_source_test(
-            relative_path, source_dirs=source_dirs, test_dirs=test_dirs
-        )
-        index = KINDS.index(kind)
-        totals[month][0][index] += added
-        totals[month][1][index] += removed
 
     return CompositionChurn(
         ref=ref,
@@ -147,42 +153,49 @@ def parse_numstat(output: bytes) -> list[tuple[str, str, int, int]]:
     A rename has an empty path field followed by the old and the new path; the new path counts.
     Binary files (``-`` counts) are skipped.
     """
+    return list(_iter_numstat(output))
 
+
+def _nul_fields(output: bytes) -> Iterator[str]:
     if output and not output.endswith(b"\0"):
-        raise ValueError("missing final NUL")
-    items = output.decode("utf-8", errors="surrogateescape").split("\0")[:-1]
-    rows: list[tuple[str, str, int, int]] = []
+        raise _MalformedHistory("missing final NUL")
+    start = 0
+    while start < len(output):
+        end = output.index(b"\0", start)
+        yield output[start:end].decode("utf-8", errors="surrogateescape")
+        start = end + 1
+
+
+def _iter_numstat(output: bytes) -> Iterator[tuple[str, str, int, int]]:
+    items = enumerate(_nul_fields(output), start=1)
     month = ""
-    index = 0
-    while index < len(items):
-        item = items[index].lstrip("\n")
-        index += 1
+    for index, field in items:
+        item = field.lstrip("\n")
         if not item:
             continue
         if "\t" not in item:
             if not re.fullmatch(r"@[0-9]{4}-(?:0[1-9]|1[0-2])", item) or item[1:5] == "0000":
-                raise ValueError(f"invalid month marker at record {index}")
+                raise _MalformedHistory(f"invalid month marker at record {index}")
             month = item[1:]
             continue
         fields = item.split("\t", 2)
         if len(fields) != 3 or not month:
-            raise ValueError(f"invalid numeric record at record {index}")
+            raise _MalformedHistory(f"invalid numeric record at record {index}")
         added, removed, relative_path = fields
         if not relative_path:
-            if index + 1 >= len(items) or not items[index] or not items[index + 1]:
-                raise ValueError(f"incomplete rename at record {index}")
-            relative_path = items[index + 1]
-            index += 2
+            _, old_path = next(items, (0, ""))
+            _, relative_path = next(items, (0, ""))
+            if not old_path or not relative_path:
+                raise _MalformedHistory(f"incomplete rename at record {index}")
         if added == removed == "-":
             continue
         if not all(value.isascii() and value.isdecimal() for value in (added, removed)):
-            raise ValueError(f"invalid counters at record {index}")
+            raise _MalformedHistory(f"invalid counters at record {index}")
         try:
             counts = int(added), int(removed)
         except ValueError as exc:
-            raise ValueError(f"invalid counters at record {index}") from exc
-        rows.append((month, relative_path, *counts))
-    return rows
+            raise _MalformedHistory(f"invalid counters at record {index}") from exc
+        yield month, relative_path, *counts
 
 
 def _git(
