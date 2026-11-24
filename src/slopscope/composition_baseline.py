@@ -186,7 +186,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
     analyzer = data.get("analyzer")
     if not isinstance(analyzer, dict):
         raise fail("analyzer")
-    _analyzer_versions(analyzer, path=path, where=where)
+    _analyzer_metadata(analyzer, path=path, where=where)
     detectors = data.get("detectors")
     if not isinstance(detectors, list) or not all(isinstance(item, dict) for item in detectors):
         raise fail("detectors")
@@ -223,16 +223,19 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
     _validate_kind_subtotals(kind_counts, total_counts, path=path, where=where)
 
 
-def _analyzer_versions(
+def _analyzer_metadata(
     analyzer: Mapping[str, Any], *, path: Path, where: str
-) -> tuple[int | None, str | None]:
+) -> tuple[str | None, int | None, str | None]:
+    name = analyzer.get("name")
+    if "name" in analyzer and type(name) is not str:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.name")
     version = analyzer.get("version")
     if "version" in analyzer and type(version) is not int:
         raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.version")
     python_version = analyzer.get("python_version")
     if "python_version" in analyzer and type(python_version) is not str:
         raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.python_version")
-    return version, python_version
+    return name, version, python_version
 
 
 def _read_metrics(data: Mapping[str, Any], *, path: Path, where: str) -> dict[str, int]:
@@ -307,9 +310,14 @@ def compare(
 
     warnings: list[str] = []
     analyzer = baseline.get("analyzer")
-    baseline_analyzer_version, baseline_python_version = _analyzer_versions(
+    baseline_analyzer_name, baseline_analyzer_version, baseline_python_version = _analyzer_metadata(
         analyzer if isinstance(analyzer, Mapping) else {}, path=path, where="report"
     )
+    if baseline_analyzer_name is not None and baseline_analyzer_name != report.analyzer:
+        warnings.append(
+            f"analyzer name differs: baseline {baseline_analyzer_name!r}, "
+            f"current {report.analyzer!r}"
+        )
     if baseline_analyzer_version != report.analyzer_version:
         warnings.append(
             f"analyzer version differs: baseline {baseline_analyzer_version!r}, "

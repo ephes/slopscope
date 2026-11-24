@@ -440,6 +440,8 @@ file, and `--baseline PATH` compares with an earlier snapshot. The snapshot and 
 must have the expected report type and current integer schema version.
 For files, physical lines, and code lines, the sum of available kind counts cannot exceed the
 corresponding report total when it is present.
+A baseline that names a different analyzer is marked non-comparable, even when the analyzer
+versions match. Older baselines may omit the analyzer name.
 Snapshot publication uses the resolved destination approved during preflight and rechecks its file
 and parent-directory identity before replacement. A changed target is refused, preserving existing
 outputs, including when a snapshot symlink is retargeted during analysis or writing.

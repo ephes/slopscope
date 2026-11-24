@@ -278,7 +278,8 @@ def test_baseline_requires_integer_schema_version(
 
 
 @pytest.mark.parametrize(
-    "field,value", [("version", True), ("version", 1.0), ("python_version", 313)]
+    "field,value",
+    [("version", True), ("version", 1.0), ("python_version", 313), ("name", 7), ("name", None)],
 )
 def test_baseline_requires_exact_analyzer_field_types(
     tmp_path: Path, field: str, value: object
@@ -315,6 +316,36 @@ def test_baseline_analyzer_versions_round_trip(tmp_path: Path, omit_versions: bo
     assert comparison.analyzer_version == (None if omit_versions else report.analyzer_version)
     assert comparison.python_version == (None if omit_versions else report.python_version)
     assert comparison.comparable is not omit_versions
+
+
+@pytest.mark.parametrize("analyzer_name", ["other.composition", "slopscope.composition", None])
+def test_baseline_compares_analyzer_name(tmp_path: Path, analyzer_name: str | None) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "before.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
+    data = json.loads(snapshot.read_text(encoding="utf-8"))
+    if analyzer_name is None:
+        del data["analyzer"]["name"]
+    else:
+        data["analyzer"]["name"] = analyzer_name
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    code, stdout, stderr = run_cli(options + ["--baseline", str(snapshot)])
+
+    assert code == 0
+    baseline = json.loads(stdout)["baseline"]
+    if analyzer_name == "other.composition":
+        warning = (
+            "analyzer name differs: baseline 'other.composition', current 'slopscope.composition'"
+        )
+        assert baseline["comparable"] is False
+        assert baseline["warnings"] == [warning]
+        assert stderr == f"slopscope: warning: {warning}\n"
+    else:
+        assert baseline["comparable"] is True
+        assert baseline["warnings"] == []
+        assert stderr == ""
 
 
 @pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])

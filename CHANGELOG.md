@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Mark composition baselines with a different analyzer name as non-comparable even when versions
+  match. Reject non-string names and continue to accept snapshots that omit the name.
+
 - Block Git transports during reports, including lazy fetches from partial clones on older Git clients.
 
 - Preserve carriage returns in quoted cloc CSV filenames, keeping them distinct from line feeds.
