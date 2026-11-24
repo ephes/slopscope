@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Block Git transports during reports, including lazy fetches from partial clones on older Git clients.
+
+- Preserve carriage returns in quoted cloc CSV filenames, keeping them distinct from line feeds.
+
 - Reject composition baselines with per-kind file, physical-line, or code-line counts above
   the corresponding report totals. Missing counts still produce unknown deltas.
 

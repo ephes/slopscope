@@ -621,9 +621,8 @@ analyzed path.
   The collector parses the bounded capture one NUL-delimited field at a time and updates monthly
   totals as records pass the filters. Excluded records are still validated.
 - Churn Git commands run with the hardened Git environment described in the README: no implicit bare
-  repositories, no fsmonitor, and no signature verification programs. Other command-running settings in an
-  untrusted `.git` directory (for example a promisor remote on Git older than 2.45) are outside this
-  guarantee.
+  repositories, no fsmonitor, no signature verification programs, and no Git transports. Churn reads cached
+  history in partial clones and is skipped with a Git diagnostic if a required object is missing.
 - Outside a Git repository, with an unknown ref, without Git, or when Git fails to start, the report
   records why churn was skipped and stderr gets a `slopscope: skipping churn:` notice. The exit code
   stays the same. A missing executable reports `git was not found`. Other launch failures report

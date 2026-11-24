@@ -94,9 +94,8 @@ Cloc output and filenames must decode strictly using the process locale encoding
 either stdout or stderr return exit code 2 with a bounded diagnostic and no report; filenames are
 never replacement-decoded. Use a matching UTF-8 locale for UTF-8 filenames.
 
-Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
-The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
-are not preserved end to end.
+Cloc CSV parsing preserves embedded LF, CR, and CRLF sequences, commas, tabs, and boundary whitespace
+in quoted filenames. Stderr diagnostics normalize line endings to LF.
 Malformed cloc records, missing or invalid nonnegative counters, and CSV parser failures
 return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
 Required CSV headers must be unique (including case/whitespace variants); the language-summary
@@ -184,12 +183,16 @@ Windows tree termination remains best-effort.
 Git commands that slopscope starts (`git ls-files`, churn's `git rev-parse` and `git log`) and the cloc
 process (whose own Git calls inherit the environment) run with command-line scope Git settings appended
 through `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` (for Git older than 2.31):
-`safe.bareRepository=explicit`, `core.fsmonitor=false`, and `log.showSignature=false`, plus
-`GIT_NO_LAZY_FETCH=1`. A cloned repository can track a directory laid out as a bare repository, for example
+`safe.bareRepository=explicit`, `core.fsmonitor=false`, and `log.showSignature=false`.
+A cloned repository can track a directory laid out as a bare repository, for example
 one named by a configured project, and Git would otherwise read that directory's `config` and run its
 fsmonitor command; a directory without such a repository falls back to filesystem discovery as before.
 Existing `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS` entries are kept and these settings take precedence.
-Git older than 2.38 ignores `safe.bareRepository` and Git older than 2.45 ignores `GIT_NO_LAZY_FETCH`.
+Git older than 2.38 ignores `safe.bareRepository`. Report subprocesses also set `GIT_NO_LAZY_FETCH=1`
+and an empty `GIT_ALLOW_PROTOCOL` allowlist. The allowlist blocks all Git transports, including local file
+transport, even on clients without support for the lazy-fetch flag or with a protocol enabled in repository
+configuration. Complete repositories and cached objects in partial clones can still be read. When churn needs
+a missing object, it is skipped with a Git diagnostic.
 Analyzing a directory whose own `.git` directory came from an untrusted source (an archive rather than a
 clone) is still only as safe as running Git there; other command-running settings in such a `.git/config` are
 outside this guarantee.
