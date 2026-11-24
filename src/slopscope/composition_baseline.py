@@ -6,7 +6,7 @@ import json
 import math
 import os
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -46,6 +46,7 @@ METRICS = (
     *(f"test_placement.{name}" for name in COMPOSITION_TEST_PLACEMENTS),
 )
 _METRIC_PATHS = tuple((metric, tuple(metric.split("."))) for metric in METRICS)
+_KIND_SUBTOTAL_METRICS = ("files", "physical", "code")
 
 
 # Settings that only change what is listed, not what is counted.
@@ -208,6 +209,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
         raise fail("kinds")
     total_counts = _read_metrics(data["total"], path=path, where=f"{where} total")
     seen_kinds: set[str] = set()
+    kind_counts = []
     for index, kind in enumerate(kinds):
         name = kind.get("name")
         if not isinstance(name, str):
@@ -215,7 +217,10 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
         if name in seen_kinds:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
-        _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
+        kind_counts.append(
+            _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
+        )
+    _validate_kind_subtotals(kind_counts, total_counts, path=path, where=where)
 
 
 def _analyzer_versions(
@@ -256,7 +261,7 @@ def _read_kind_metrics(
     kind: Mapping[str, Any], total_counts: Mapping[str, int], *, path: Path, where: str
 ) -> dict[str, int]:
     counts = _read_metrics(kind, path=path, where=where)
-    for metric in ("files", "physical", "code"):
+    for metric in _KIND_SUBTOTAL_METRICS:
         count = counts.get(metric)
         total = total_counts.get(metric)
         if count is not None and total is not None and count > total:
@@ -264,6 +269,22 @@ def _read_kind_metrics(
                 f"baseline file {path} has an invalid {where}.{metric} (exceeds total.{metric})"
             )
     return counts
+
+
+def _validate_kind_subtotals(
+    kind_counts: Collection[dict[str, int]],
+    total_counts: Mapping[str, int],
+    *,
+    path: Path,
+    where: str,
+) -> None:
+    for metric in _KIND_SUBTOTAL_METRICS:
+        total = total_counts.get(metric)
+        if total is not None and sum(counts.get(metric, 0) for counts in kind_counts) > total:
+            raise BaselineError(
+                f"baseline file {path} has an invalid {where} kinds subtotal.{metric} "
+                f"(exceeds total.{metric})"
+            )
 
 
 def project_baselines(data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -337,6 +358,7 @@ def compare(
         for index, kind in enumerate(baseline.get("kinds", []))
         if isinstance(kind, Mapping)
     }
+    _validate_kind_subtotals(baseline_kinds.values(), total_counts, path=path, where="report")
     scopes = [
         _scope_delta(report.total, total_counts),
         *(_scope_delta(kind, baseline_kinds.get(kind.name, {})) for kind in report.kinds),

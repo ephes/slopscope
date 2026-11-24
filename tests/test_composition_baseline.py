@@ -499,6 +499,23 @@ def test_direct_baseline_comparison_refuses_invalid_counts(
     assert str(error.value) == f"baseline file {snapshot} has an invalid {field}"
 
 
+@pytest.mark.parametrize("metric", ["files", "physical", "code"])
+def test_baseline_kind_subtotals_cannot_exceed_total(tmp_path: Path, metric: str) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    data["kinds"][0][metric] = data["total"][metric]
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    message = rf"kinds subtotal\.{metric} \(exceeds total\.{metric}\)"
+    with pytest.raises(composition_baseline.BaselineError, match=message):
+        composition_baseline.load_baseline(
+            snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(composition_baseline.BaselineError, match=message):
+        composition_baseline.compare(report, data, path=snapshot)
+
+
 def test_direct_baseline_comparison_preserves_missing_counts(tmp_path: Path) -> None:
     report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
     baseline = {"total": {"files": 0}, "kinds": [{"name": "source", "categories": {}}]}
@@ -738,6 +755,7 @@ def test_baseline_kind_count_cannot_exceed_total(tmp_path: Path, metric: str) ->
     index, source = next(
         (index, kind) for index, kind in enumerate(data["kinds"]) if kind["name"] == "source"
     )
+    source_count = source[metric]
     source[metric] = data["total"][metric] + 1
     snapshot.write_text(json.dumps(data))
     compare_options = options + ["--baseline", str(snapshot)]
@@ -747,7 +765,7 @@ def test_baseline_kind_count_cannot_exceed_total(tmp_path: Path, metric: str) ->
     assert f"kinds[{index}].{metric} (exceeds total.{metric})" in err
 
     del source[metric]
-    data["kinds"].append({"name": "legacy", metric: data["total"][metric]})
+    data["kinds"].append({"name": "legacy", metric: source_count})
     snapshot.write_text(json.dumps(data))
     code, out, err = run_cli(compare_options)
     assert code == 0

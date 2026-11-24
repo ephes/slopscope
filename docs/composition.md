@@ -575,8 +575,9 @@ Comparison rules:
   must be objects. Detector entries require string `name` and `kind` fields and a nonnegative integer
   `version`. Kind and project entries require string names. Detector, kind, and project names must be
   unique within their lists; malformed identities and metrics fail with exit code 2 and a field path.
-  Each kind's file, physical-line, and code-line counts must be at most the corresponding total
-  when both counts are present. Older kind names remain accepted.
+  For files, physical lines, and code lines, the sum of present kind counts must be at most
+  the corresponding total when it is present. Older kind names remain accepted and contribute
+  to the sum. Missing kind counts leave the subtotal as a lower bound.
   Calling `slopscope.composition_baseline.compare()` with a mapping applies the same count and
   metric-group checks to the total and kind scopes, raising `BaselineError` with the offending
   field path. Missing counts remain unknown.
