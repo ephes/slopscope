@@ -6,7 +6,7 @@ import json
 import math
 import os
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
@@ -46,6 +46,7 @@ METRICS = (
     *(f"test_placement.{name}" for name in COMPOSITION_TEST_PLACEMENTS),
 )
 _METRIC_PATHS = tuple((metric, tuple(metric.split("."))) for metric in METRICS)
+_KIND_SUBTOTAL_METRICS = ("files", "physical", "code")
 
 
 # Settings that only change what is listed, not what is counted.
@@ -185,7 +186,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
     analyzer = data.get("analyzer")
     if not isinstance(analyzer, dict):
         raise fail("analyzer")
-    _analyzer_versions(analyzer, path=path, where=where)
+    _analyzer_metadata(analyzer, path=path, where=where)
     detectors = data.get("detectors")
     if not isinstance(detectors, list) or not all(isinstance(item, dict) for item in detectors):
         raise fail("detectors")
@@ -208,6 +209,7 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
         raise fail("kinds")
     total_counts = _read_metrics(data["total"], path=path, where=f"{where} total")
     seen_kinds: set[str] = set()
+    kind_counts = []
     for index, kind in enumerate(kinds):
         name = kind.get("name")
         if not isinstance(name, str):
@@ -215,19 +217,25 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
         if name in seen_kinds:
             raise fail(f"kinds[{index}].name (duplicate {name!r})")
         seen_kinds.add(name)
-        _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
+        kind_counts.append(
+            _read_kind_metrics(kind, total_counts, path=path, where=f"{where} kinds[{index}]")
+        )
+    _validate_kind_subtotals(kind_counts, total_counts, path=path, where=where)
 
 
-def _analyzer_versions(
+def _analyzer_metadata(
     analyzer: Mapping[str, Any], *, path: Path, where: str
-) -> tuple[int | None, str | None]:
+) -> tuple[str | None, int | None, str | None]:
+    name = analyzer.get("name")
+    if "name" in analyzer and type(name) is not str:
+        raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.name")
     version = analyzer.get("version")
     if "version" in analyzer and type(version) is not int:
         raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.version")
     python_version = analyzer.get("python_version")
     if "python_version" in analyzer and type(python_version) is not str:
         raise BaselineError(f"baseline file {path} has an invalid {where} analyzer.python_version")
-    return version, python_version
+    return name, version, python_version
 
 
 def _read_metrics(data: Mapping[str, Any], *, path: Path, where: str) -> dict[str, int]:
@@ -256,7 +264,7 @@ def _read_kind_metrics(
     kind: Mapping[str, Any], total_counts: Mapping[str, int], *, path: Path, where: str
 ) -> dict[str, int]:
     counts = _read_metrics(kind, path=path, where=where)
-    for metric in ("files", "physical", "code"):
+    for metric in _KIND_SUBTOTAL_METRICS:
         count = counts.get(metric)
         total = total_counts.get(metric)
         if count is not None and total is not None and count > total:
@@ -264,6 +272,22 @@ def _read_kind_metrics(
                 f"baseline file {path} has an invalid {where}.{metric} (exceeds total.{metric})"
             )
     return counts
+
+
+def _validate_kind_subtotals(
+    kind_counts: Collection[dict[str, int]],
+    total_counts: Mapping[str, int],
+    *,
+    path: Path,
+    where: str,
+) -> None:
+    for metric in _KIND_SUBTOTAL_METRICS:
+        total = total_counts.get(metric)
+        if total is not None and sum(counts.get(metric, 0) for counts in kind_counts) > total:
+            raise BaselineError(
+                f"baseline file {path} has an invalid {where} kinds subtotal.{metric} "
+                f"(exceeds total.{metric})"
+            )
 
 
 def project_baselines(data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -286,9 +310,14 @@ def compare(
 
     warnings: list[str] = []
     analyzer = baseline.get("analyzer")
-    baseline_analyzer_version, baseline_python_version = _analyzer_versions(
+    baseline_analyzer_name, baseline_analyzer_version, baseline_python_version = _analyzer_metadata(
         analyzer if isinstance(analyzer, Mapping) else {}, path=path, where="report"
     )
+    if baseline_analyzer_name is not None and baseline_analyzer_name != report.analyzer:
+        warnings.append(
+            f"analyzer name differs: baseline {baseline_analyzer_name!r}, "
+            f"current {report.analyzer!r}"
+        )
     if baseline_analyzer_version != report.analyzer_version:
         warnings.append(
             f"analyzer version differs: baseline {baseline_analyzer_version!r}, "
@@ -337,6 +366,7 @@ def compare(
         for index, kind in enumerate(baseline.get("kinds", []))
         if isinstance(kind, Mapping)
     }
+    _validate_kind_subtotals(baseline_kinds.values(), total_counts, path=path, where="report")
     scopes = [
         _scope_delta(report.total, total_counts),
         *(_scope_delta(kind, baseline_kinds.get(kind.name, {})) for kind in report.kinds),

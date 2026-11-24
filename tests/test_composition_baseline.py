@@ -278,7 +278,8 @@ def test_baseline_requires_integer_schema_version(
 
 
 @pytest.mark.parametrize(
-    "field,value", [("version", True), ("version", 1.0), ("python_version", 313)]
+    "field,value",
+    [("version", True), ("version", 1.0), ("python_version", 313), ("name", 7), ("name", None)],
 )
 def test_baseline_requires_exact_analyzer_field_types(
     tmp_path: Path, field: str, value: object
@@ -315,6 +316,36 @@ def test_baseline_analyzer_versions_round_trip(tmp_path: Path, omit_versions: bo
     assert comparison.analyzer_version == (None if omit_versions else report.analyzer_version)
     assert comparison.python_version == (None if omit_versions else report.python_version)
     assert comparison.comparable is not omit_versions
+
+
+@pytest.mark.parametrize("analyzer_name", ["other.composition", "slopscope.composition", None])
+def test_baseline_compares_analyzer_name(tmp_path: Path, analyzer_name: str | None) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "before.json"
+    options = [str(repository), "--composition", "--format", "json"]
+    assert run_cli(options + ["--snapshot", str(snapshot)])[0] == 0
+    data = json.loads(snapshot.read_text(encoding="utf-8"))
+    if analyzer_name is None:
+        del data["analyzer"]["name"]
+    else:
+        data["analyzer"]["name"] = analyzer_name
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    code, stdout, stderr = run_cli(options + ["--baseline", str(snapshot)])
+
+    assert code == 0
+    baseline = json.loads(stdout)["baseline"]
+    if analyzer_name == "other.composition":
+        warning = (
+            "analyzer name differs: baseline 'other.composition', current 'slopscope.composition'"
+        )
+        assert baseline["comparable"] is False
+        assert baseline["warnings"] == [warning]
+        assert stderr == f"slopscope: warning: {warning}\n"
+    else:
+        assert baseline["comparable"] is True
+        assert baseline["warnings"] == []
+        assert stderr == ""
 
 
 @pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])
@@ -497,6 +528,23 @@ def test_direct_baseline_comparison_refuses_invalid_counts(
     with pytest.raises(composition_baseline.BaselineError) as error:
         composition_baseline.compare(report, baseline, path=snapshot)
     assert str(error.value) == f"baseline file {snapshot} has an invalid {field}"
+
+
+@pytest.mark.parametrize("metric", ["files", "physical", "code"])
+def test_baseline_kind_subtotals_cannot_exceed_total(tmp_path: Path, metric: str) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    data["kinds"][0][metric] = data["total"][metric]
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    message = rf"kinds subtotal\.{metric} \(exceeds total\.{metric}\)"
+    with pytest.raises(composition_baseline.BaselineError, match=message):
+        composition_baseline.load_baseline(
+            snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(composition_baseline.BaselineError, match=message):
+        composition_baseline.compare(report, data, path=snapshot)
 
 
 def test_direct_baseline_comparison_preserves_missing_counts(tmp_path: Path) -> None:
@@ -738,6 +786,7 @@ def test_baseline_kind_count_cannot_exceed_total(tmp_path: Path, metric: str) ->
     index, source = next(
         (index, kind) for index, kind in enumerate(data["kinds"]) if kind["name"] == "source"
     )
+    source_count = source[metric]
     source[metric] = data["total"][metric] + 1
     snapshot.write_text(json.dumps(data))
     compare_options = options + ["--baseline", str(snapshot)]
@@ -747,7 +796,7 @@ def test_baseline_kind_count_cannot_exceed_total(tmp_path: Path, metric: str) ->
     assert f"kinds[{index}].{metric} (exceeds total.{metric})" in err
 
     del source[metric]
-    data["kinds"].append({"name": "legacy", metric: data["total"][metric]})
+    data["kinds"].append({"name": "legacy", metric: source_count})
     snapshot.write_text(json.dumps(data))
     code, out, err = run_cli(compare_options)
     assert code == 0
