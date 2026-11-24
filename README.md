@@ -94,9 +94,8 @@ Cloc output and filenames must decode strictly using the process locale encoding
 either stdout or stderr return exit code 2 with a bounded diagnostic and no report; filenames are
 never replacement-decoded. Use a matching UTF-8 locale for UTF-8 filenames.
 
-Cloc CSV parsing retains embedded newlines, commas, tabs, and boundary whitespace in filenames.
-The subprocess text decoder normalizes carriage returns to newlines, so carriage-return filenames
-are not preserved end to end.
+Cloc CSV parsing preserves embedded LF, CR, and CRLF sequences, commas, tabs, and boundary whitespace
+in quoted filenames. Stderr diagnostics normalize line endings to LF.
 Malformed cloc records, missing or invalid nonnegative counters, and CSV parser failures
 return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
 Required CSV headers must be unique (including case/whitespace variants); the language-summary

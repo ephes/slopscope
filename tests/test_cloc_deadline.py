@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,10 +78,31 @@ def test_cloc_supplies_finite_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(subprocess, "Popen", popen)
     monkeypatch.setattr(cloc, "capture_process", capture)
-    assert cloc.run_command(["cloc"]) == cloc.ClocResult(0, "output\nnext\nlast", "")
+    assert cloc.run_command(["cloc"]) == cloc.ClocResult(0, "output\r\nnext\rlast", "")
     assert popen.call_args.kwargs == {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "start_new_session": os.name == "posix",
         "env": _git_env.hardened_git_env(),
     }
+
+
+def test_cloc_capture_preserves_csv_filename_newlines(tmp_path: Path) -> None:
+    stdout = (
+        b"language,filename,blank,comment,code\r\n"
+        b'Python,"split\rname.py",0,0,1\r'
+        b'Python,"split\nname.py",0,0,2\n'
+        b'Python,"split\r\nname.py",0,0,3\r\n'
+    )
+    stderr = b"first\r\nsecond\rthird\n"
+    script = f"import sys; sys.stdout.buffer.write({stdout!r}); sys.stderr.buffer.write({stderr!r})"
+    result = cloc.run_command([sys.executable, "-c", script])
+
+    assert result.returncode == 0
+    rows = cloc.parse_file_summary_csv(result.stdout, root=tmp_path)
+    assert [(row.path, row.code) for row in rows] == [
+        ("split\rname.py", 1),
+        ("split\nname.py", 2),
+        ("split\r\nname.py", 3),
+    ]
+    assert result.stderr == "first\nsecond\nthird\n"

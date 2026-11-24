@@ -69,10 +69,10 @@ def run_command(command: Sequence[str]) -> ClocResult:
         return ClocResult(2, "", f"slopscope: cloc timed out after {CLOC_TIMEOUT_SECONDS} seconds")
     except CaptureError as exc:
         return ClocResult(2, "", f"slopscope: {exc}")
-    # Match Popen(text=True): use the locale encoding and normalize universal newlines.
+    # Use the locale encoding for both streams. Only diagnostics normalize newlines.
     encoding = io.text_encoding(None)
     try:
-        stdout = io.TextIOWrapper(io.BytesIO(result.stdout), encoding=encoding).read()
+        stdout = io.TextIOWrapper(io.BytesIO(result.stdout), encoding=encoding, newline="").read()
         stderr = io.TextIOWrapper(io.BytesIO(result.stderr), encoding=encoding).read()
     except UnicodeDecodeError:
         return ClocResult(2, "", "slopscope: could not decode cloc output with the locale encoding")
