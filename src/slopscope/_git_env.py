@@ -42,6 +42,8 @@ def hardened_git_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
     parameters = " ".join(f"'{key}={value}'" for key, value in HARDENED_GIT_CONFIG)
     existing = env.get("GIT_CONFIG_PARAMETERS", "").strip()
     env["GIT_CONFIG_PARAMETERS"] = f"{existing} {parameters}" if existing else parameters
-    # Git 2.45+: never fetch missing objects from a promisor remote the repository names.
+    # Deny every transport, including on Git that still attempts a lazy fetch. The environment
+    # allowlist takes precedence over repository protocol settings and is inherited by child Git.
+    env["GIT_ALLOW_PROTOCOL"] = ""
     env["GIT_NO_LAZY_FETCH"] = "1"
     return env

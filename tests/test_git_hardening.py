@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from slopscope import _git_env, cli, cloc, composition_churn, fallback
+from slopscope.report import CompositionChurn
 
 posix_git = pytest.mark.skipif(
     os.name != "posix" or shutil.which("git") is None, reason="needs git on a POSIX shell"
@@ -82,6 +83,7 @@ def embedded_bare_repository_clone(tmp_path: Path, marker: Path) -> Path:
 def test_hardened_env_appends_after_existing_command_line_config() -> None:
     base = {
         "PATH": "/bin",
+        "GIT_ALLOW_PROTOCOL": "file:ssh",
         "GIT_CONFIG_COUNT": "1",
         "GIT_CONFIG_KEY_0": "user.name",
         "GIT_CONFIG_VALUE_0": "Someone",
@@ -103,6 +105,8 @@ def test_hardened_env_appends_after_existing_command_line_config() -> None:
         "log.showSignature": "false",
     }
     assert env["GIT_NO_LAZY_FETCH"] == "1"
+    assert env["GIT_ALLOW_PROTOCOL"] == ""
+    assert base["GIT_ALLOW_PROTOCOL"] == "file:ssh"
     assert env["PATH"] == "/bin"
     assert env["GIT_CONFIG_PARAMETERS"] == (
         "'safe.bareRepository=explicit' 'core.fsmonitor=false' 'log.showSignature=false'"
@@ -220,6 +224,65 @@ def test_churn_does_not_run_repository_signature_program(tmp_path: Path) -> None
     assert churn.status == "ok"
 
 
+@posix_git
+def test_churn_keeps_partial_clone_transport_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Only use a local transport for fixture setup. The report must override even that allowance.
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+    monkeypatch.setenv("GIT_NO_LAZY_FETCH", "0")
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "2026-01-15T12:00:00+00:00")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-01-15T12:00:00+00:00")
+    source = tmp_path / "source"
+    source.mkdir()
+    git(source, "init", "-q")
+    (source / "module.py").write_text("x = 1\n", encoding="utf-8")
+    git(source, "add", "module.py")
+    git(source, "commit", "-qm", "one")
+    git(source, "config", "uploadpack.allowFilter", "true")
+    blob = git(source, "rev-parse", "HEAD:module.py").strip()
+
+    partial = tmp_path / "partial"
+    git(
+        tmp_path,
+        "clone",
+        "-q",
+        "--no-checkout",
+        "--filter=blob:none",
+        source.as_uri(),
+        str(partial),
+    )
+    assert (
+        f"?{blob}" in git(partial, "rev-list", "--objects", "--missing=print", "HEAD").splitlines()
+    )
+
+    marker = tmp_path / "transport-started"
+    upload_pack = tmp_path / "upload-pack"
+    upload_pack.write_text(f"#!/bin/sh\n{marker_command(marker)}\n", encoding="utf-8")
+    upload_pack.chmod(0o755)
+    git(partial, "config", "remote.origin.uploadpack", shlex.quote(str(upload_pack)))
+    git(partial, "config", "protocol.file.allow", "always")
+
+    def churn(root: Path) -> CompositionChurn:
+        return composition_churn.collect_churn(
+            root, months=1, excluded_paths=EXCLUDES, today=date(2026, 1, 20)
+        )
+
+    complete = churn(source)
+    assert complete.status == "ok"
+    assert sum(complete.rows[0].added) == 1
+
+    offline = churn(partial)
+    assert not marker.exists()
+    assert offline.status == "skipped"
+    assert offline.reason is not None and offline.reason.startswith("git log failed:")
+
+    # Populate the local object store with the missing blob, keeping the sentinel configured.
+    assert git(partial, "hash-object", "-w", str(source / "module.py")).strip() == blob
+    assert churn(partial) == complete
+    assert not marker.exists()
+
+
 def test_cloc_runs_with_hardened_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
@@ -234,6 +297,7 @@ def test_cloc_runs_with_hardened_git_environment(monkeypatch: pytest.MonkeyPatch
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["GIT_CONFIG_KEY_0"] == "safe.bareRepository"
+    assert env["GIT_ALLOW_PROTOCOL"] == ""
 
 
 @posix_git
