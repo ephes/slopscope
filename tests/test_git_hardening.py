@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import subprocess
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
@@ -276,6 +277,21 @@ def test_churn_keeps_partial_clone_transport_offline(
     assert not marker.exists()
     assert offline.status == "skipped"
     assert offline.reason is not None and offline.reason.startswith("git log failed:")
+
+    # Simulate a client that ignores GIT_NO_LAZY_FETCH: only the empty protocol allowlist remains.
+    hardened = _git_env.hardened_git_env
+
+    def without_lazy_fetch_flag(base: Mapping[str, str] | None = None) -> dict[str, str]:
+        env = hardened(base)
+        del env["GIT_NO_LAZY_FETCH"]
+        return env
+
+    with monkeypatch.context() as patch:
+        patch.setattr(composition_churn, "hardened_git_env", without_lazy_fetch_flag)
+        older_client = churn(partial)
+    assert not marker.exists()
+    assert older_client.status == "skipped"
+    assert older_client.reason is not None and older_client.reason.startswith("git log failed:")
 
     # Populate the local object store with the missing blob, keeping the sentinel configured.
     assert git(partial, "hash-object", "-w", str(source / "module.py")).strip() == blob
