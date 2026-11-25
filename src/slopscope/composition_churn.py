@@ -13,6 +13,7 @@ from pathlib import Path
 
 from slopscope import classify, fallback
 from slopscope._capture import CaptureError, capture_process
+from slopscope._display import display_text
 from slopscope._git_env import hardened_git_env
 from slopscope.report import CompositionChurn, CompositionChurnMonth
 
@@ -27,6 +28,7 @@ GitCaptureError = CaptureError
 # Commits are bucketed by their own time zone, which can be up to about a day away from the
 # caller's; the Git-side cutoff keeps a margin and months are filtered exactly afterwards.
 _CUTOFF_MARGIN = timedelta(days=2)
+_GIT_LOG_STDERR_PREVIEW_BYTES = 64
 KINDS = ("source", "tests", "other")
 
 
@@ -102,7 +104,10 @@ def collect_churn(
         if result.returncode != 0:
             result = _git(executable, path, [*log_arguments, "--"])
         if result.returncode != 0:
-            message = result.stderr.decode(errors="replace").strip()
+            preview = result.stderr[:_GIT_LOG_STDERR_PREVIEW_BYTES].decode(errors="replace")
+            message = display_text(preview.strip())
+            if len(result.stderr) > _GIT_LOG_STDERR_PREVIEW_BYTES:
+                message += "..."
             return skipped(f"git log failed: {message or 'no error output'}")
 
     except subprocess.TimeoutExpired:
@@ -114,13 +119,14 @@ def collect_churn(
     totals: dict[str, tuple[list[int], list[int]]] = {
         month: ([0, 0, 0], [0, 0, 0]) for month in _months(since, current)
     }
+    excluded_path_parts = fallback.compile_excluded_paths(excluded_paths)
     try:
         for month, relative_path, added, removed in _iter_numstat(result.stdout):
             if month not in totals:
                 continue
             if fallback.map_language(relative_path) != "Python":
                 continue
-            if fallback.is_excluded_path(relative_path, excluded_paths):
+            if fallback.matches_excluded_path(relative_path, excluded_path_parts):
                 continue
             if include_globs and not fallback.matches_include_globs(relative_path, include_globs):
                 continue
