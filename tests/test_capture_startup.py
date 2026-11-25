@@ -61,6 +61,8 @@ def fail_start(
     return process, pipes, started
 
 
+# Patching threading.Thread globally would also break taskkill capture on Windows.
+@pytest.mark.skipif(os.name != "posix", reason="POSIX group rollback")
 @pytest.mark.parametrize("fail_at", [1, 2])
 def test_reader_construction_failure_closes_pipes_and_reaps_child(
     monkeypatch: pytest.MonkeyPatch, fail_at: int
