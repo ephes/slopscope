@@ -121,9 +121,10 @@ and backup creation before any destination is replaced.
 Seed/update output uses the same 16 MiB ceiling, measured on the complete serialized UTF-8
 bytes including formatting and the final newline. Publication also has one 128 MiB
 (134,217,728 bytes) staging budget across the mutation, counting both serialized outputs
-and the exact previous bytes needed for recovery. Exact-limit payloads and batches are
-accepted. Both ceilings are checked before staging any output or recovery backup. Exceeding
-either ceiling returns exit code 2 and preserves all prior allowlists (or their absence).
+and the exact previous bytes needed for recovery. Serialization checks both budgets before
+appending each JSON fragment. Admission also checks the previous bytes needed for recovery
+before staging. Exact-limit payloads and batches are accepted. Exceeding either ceiling
+returns exit code 2 and preserves all prior allowlists (or their absence).
 Stable lock files may remain as usual.
 
 ## Report

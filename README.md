@@ -496,7 +496,8 @@ including JSON formatting and the final newline. Exact-limit outputs are accepte
 returns exit code 2 before staging; any oversized allowlist in a multi-project batch preserves
 all previous allowlists. Allowlist mutations also share a 128 MiB staging budget for all
 serialized outputs and their previous recovery bytes. Exceeding it returns exit code 2
-before any staging. Multi-project snapshots share one ceiling for the complete envelope.
+before any staging. Allowlist serialization stops as soon as the next JSON fragment exceeds
+the file or remaining staging budget. Multi-project snapshots share one ceiling for the complete envelope.
 Seed/update binds reads and writes to the locked allowlist target and refuses target or parent
 changes. Lock entries are opened without following symlinks and must be single-link regular files;
 identity is rechecked after acquiring the lock. Each mutation has one 10-second deadline to

@@ -15,6 +15,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
+from itertools import chain
 from pathlib import Path
 
 from slopscope import _source, classify, composition, composition_duplication, fallback
@@ -327,12 +328,27 @@ def _retain_backup(item: _PreparedAllowlist) -> None:
         _sync_directory(item.destination.target.parent)
 
 
-def _serialize_allowlist(path: Path, allowlist: Mapping[str, Mapping[str, int]]) -> bytes:
-    data = {kind: dict(sorted(allowlist.get(kind, {}).items())) for kind in SIZE_LIMIT_KINDS}
-    content = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    if len(content) > MAX_ALLOWLIST_BYTES:
-        raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
-    return content
+def _staging_overflow(path: Path) -> SizeLimitsError:
+    return SizeLimitsError(
+        f"allowlist publication staging exceeds {MAX_ALLOWLIST_STAGING_BYTES} bytes at {path}"
+    )
+
+
+def _serialize_allowlist(
+    path: Path, allowlist: Mapping[str, Mapping[str, int]], *, staging_bytes: int = 0
+) -> bytes:
+    data = {kind: dict(allowlist.get(kind, {})) for kind in SIZE_LIMIT_KINDS}
+    encoder = json.JSONEncoder(indent=2, sort_keys=True, ensure_ascii=True)
+    content = bytearray()
+    for fragment in chain(encoder.iterencode(data), ("\n",)):
+        # The ASCII-only JSON representation uses one UTF-8 byte per character.
+        size = len(content) + len(fragment)
+        if size > MAX_ALLOWLIST_BYTES:
+            raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+        if staging_bytes + size > MAX_ALLOWLIST_STAGING_BYTES:
+            raise _staging_overflow(path)
+        content.extend(fragment.encode("utf-8"))
+    return bytes(content)
 
 
 def publish_allowlists(
@@ -355,14 +371,11 @@ def publish_allowlists(
         contents = []
         staging_bytes = 0
         for path, data in updates:
-            content = _serialize_allowlist(path, data)
+            content = _serialize_allowlist(path, data, staging_bytes=staging_bytes)
             prior = _read_allowlist_bytes(path, destinations[path])
             staging_bytes += len(content) + len(prior or b"")
             if staging_bytes > MAX_ALLOWLIST_STAGING_BYTES:
-                raise SizeLimitsError(
-                    f"allowlist publication staging exceeds {MAX_ALLOWLIST_STAGING_BYTES} bytes"
-                    f" at {path}"
-                )
+                raise _staging_overflow(path)
             contents.append((path, content, prior))
         for path, content, prior in contents:
             destination = destinations[path]
