@@ -602,6 +602,11 @@ def test_sigterm_restore_failure_preserves_capture_outcome(
         process.wait.assert_called_once_with(timeout=5)
     install.assert_called_with(signal.SIGTERM, signal.SIG_DFL)
     assert process.stdout.closed and process.stderr.closed
+    # The handler left installed by the failed restore must still exit on a later TERM.
+    leftover = install.call_args_list[0].args[1]
+    with pytest.raises(SystemExit) as raised_later:
+        leftover(signal.SIGTERM, None)
+    assert raised_later.value.code == 128 + signal.SIGTERM
 
 
 @pytest.mark.parametrize("interruption", ["term", "error"])

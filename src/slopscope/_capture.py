@@ -207,6 +207,10 @@ def capture_process(
                 signal.signal(signal.SIGTERM, previous_handler)
             except Exception as exc:
                 restore_failure = exc
+        if restore_failure is not None:
+            # The scoped handler stays installed. Re-arm it before the check below so a
+            # later TERM still exits instead of recording intent nobody reads.
+            cleaning = False
         if termination_requested is not None:
             # A repeated TERM during cleanup records intent without interrupting
             # escalation, draining, or reap, including cleanup of another failure.

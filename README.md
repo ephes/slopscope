@@ -251,7 +251,8 @@ Repeated TERM during cleanup does not interrupt draining or reaping. Capture att
 restore the previous SIGTERM handler on every outcome. A recorded TERM takes precedence
 over restoration failure, and an existing capture error or timeout retains its diagnostic.
 If restoration is the only failure, capture discards the result with `could not restore
-SIGTERM handler after <command> capture`. An ignored SIGTERM (`SIG_IGN`) or a handler not
+SIGTERM handler after <command> capture`. After a failed restoration, the capture handler
+stays installed and any later SIGTERM exits with status 143. An ignored SIGTERM (`SIG_IGN`) or a handler not
 installed from Python is left unchanged. Library captures in worker threads leave the
 application's signal handlers unchanged; Windows retains its existing signal policy.
 
