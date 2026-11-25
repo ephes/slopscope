@@ -45,7 +45,7 @@ def test_churn_admits_only_full_git_object_ids(
         "elif '--verify' in sys.argv:\n"
         f"    sys.stdout.buffer.write({evidence!r})\n"
         "else:\n"
-        "    print('true')\n",
+        "    print('true\\n')\n",
         encoding="utf-8",
     )
     wrapper.chmod(0o700)
@@ -90,7 +90,7 @@ def test_git_launch_error_skips_churn_with_distinct_reason(
     filename = str(tmp_path / "missing-cwd") if error_source == "working directory" else executable
     failure = OSError(error_code, "unbounded startup details\n" * 100, filename)
     commit = "a" * 40
-    outputs = [b"true\n", commit.encode("ascii") + b"\n"]
+    outputs = [b"true\n\n", commit.encode("ascii") + b"\n"]
     popen = Mock(side_effect=[Mock() for _ in range(launch_index)] + [failure])
     monkeypatch.setattr(subprocess, "Popen", popen)
     monkeypatch.setattr(
@@ -142,7 +142,11 @@ def test_malformed_history_skips_whole_churn(
     def fake_git(
         executable: str, path: Path, arguments: list[str]
     ) -> subprocess.CompletedProcess[bytes]:
-        outputs = {"log": output, "--verify": b"a" * 40 + b"\n", "--is-inside-work-tree": b"true\n"}
+        outputs = {
+            "log": output,
+            "--verify": b"a" * 40 + b"\n",
+            "--is-inside-work-tree": b"true\n\n",
+        }
         command = arguments[0] if arguments[0] == "log" else arguments[1]
         return subprocess.CompletedProcess(arguments, 0, outputs[command], b"")
 
@@ -173,7 +177,7 @@ def test_churn_parses_each_exclusion_once_and_matches_path_segments(
         b"3\t4\tsrc/vendor/nested/generated/keep.py\0"
         b"5\t6\ttests/test_keep.py\0"
     )
-    replies = iter((b"true\n", b"a" * 40 + b"\n", output))
+    replies = iter((b"true\n\n", b"a" * 40 + b"\n", output))
 
     def fake_git(
         executable: str, path: Path, arguments: list[str]
@@ -211,7 +215,7 @@ def test_churn_aggregates_large_excluded_history_incrementally(
     )
     if malformed_tail:
         output += b"bad\t0\texcluded/broken.py\0"
-    replies = iter((b"true\n", b"a" * 40 + b"\n", output))
+    replies = iter((b"true\n\n", b"a" * 40 + b"\n", output))
 
     def fake_git(
         executable: str, path: Path, arguments: list[str]
@@ -257,7 +261,8 @@ def test_fast_git_output_overflow_skips_churn_in_report(
         "if command[0] == 'log':\n"
         "    stream.write(b'x' * 262144)\n"
         "else:\n"
-        "    print('a' * 40 if '--verify' in command else 'true')\n"
+        "    result = b'a' * 40 + b'\\n' if '--verify' in command else b'true\\n\\n'\n"
+        "    sys.stdout.buffer.write(result)\n"
     )
 
     def fake_popen(command: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
@@ -334,7 +339,7 @@ def test_failed_git_log_has_same_bounded_reason_in_text_and_json(
     ) -> subprocess.CompletedProcess[bytes]:
         if arguments[0] == "log":
             return subprocess.CompletedProcess(arguments, 1, b"", git_stderr)
-        output = b"a" * 40 + b"\n" if "--verify" in arguments else b"true\n"
+        output = b"a" * 40 + b"\n" if "--verify" in arguments else b"true\n\n"
         return subprocess.CompletedProcess(arguments, 0, output, b"")
 
     monkeypatch.setattr(churn, "_git", fake_git)
@@ -447,7 +452,7 @@ def test_reader_exception_never_publishes_partial_output(
     def fake_popen(command: list[str], **kwargs: object) -> object:
         if command[3] == "log":
             return process
-        output = b"a" * 40 + b"\n" if "--verify" in command else b"true\n"
+        output = b"a" * 40 + b"\n" if "--verify" in command else b"true\n\n"
         return Mock(args=command, returncode=0, stdout=io.BytesIO(output), stderr=io.BytesIO())
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)

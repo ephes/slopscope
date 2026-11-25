@@ -72,9 +72,13 @@ def collect_churn(
         )
 
     try:
-        inside = _git(executable, path, ["rev-parse", "--is-inside-work-tree"])
-        if inside.returncode != 0 or inside.stdout.strip() != b"true":
+        inside = _git(executable, path, ["rev-parse", "--is-inside-work-tree", "--show-prefix"])
+        work_tree, _, raw_prefix = inside.stdout.partition(b"\n")
+        if inside.returncode != 0 or work_tree != b"true":
             return skipped("not a Git repository")
+        if raw_prefix != b"\n" and not raw_prefix.endswith(b"/\n"):
+            return skipped("malformed git history: invalid worktree prefix")
+        prefix = raw_prefix[:-1].decode("utf-8", errors="surrogateescape")
         verified = _git(executable, path, ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"])
         if verified.returncode != 0:
             return skipped(f"unknown branch or ref {ref!r}")
@@ -90,7 +94,7 @@ def collect_churn(
             "--diff-merges=first-parent",
             "--numstat",
             "-M",
-            "--relative",
+            "--no-relative",
             "-z",
             "--date=format:%Y-%m",
             "--format=@%cd",
@@ -121,9 +125,10 @@ def collect_churn(
     }
     excluded_path_parts = fallback.compile_excluded_paths(excluded_paths)
     try:
-        for month, relative_path, added, removed in _iter_numstat(result.stdout):
-            if month not in totals:
+        for month, destination, added, removed in _iter_numstat(result.stdout):
+            if month not in totals or not destination.startswith(prefix):
                 continue
+            relative_path = destination[len(prefix) :]
             if fallback.map_language(relative_path) != "Python":
                 continue
             if fallback.matches_excluded_path(relative_path, excluded_path_parts):
