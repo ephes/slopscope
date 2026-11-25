@@ -25,7 +25,11 @@ _MAX_PROC_STAT_BYTES = 4096
 
 
 class CaptureError(RuntimeError):
-    """A command could not be captured completely within its byte budget."""
+    """A command's capture could not be accepted."""
+
+
+class SignalRestoreError(CaptureError):
+    """Capture finished but restoring the previous SIGTERM handler failed."""
 
 
 def capture_process(
@@ -40,6 +44,7 @@ def capture_process(
     started: list[threading.Thread] = []
     readers_may_run = False
     retired = False
+    capture_failed = False
     cleaning = False
     termination_requested: int | None = None
     previous_handler = None
@@ -154,6 +159,7 @@ def capture_process(
         # First statement of the handler block: CPython runs Python signal handlers only at
         # eval-breaker checks, so a repeated TERM after this point is recorded, not raised.
         cleaning = True
+        capture_failed = True
         if readers_may_run:
             stopped.set()
         if not retired and os.name == "posix":
@@ -195,12 +201,20 @@ def capture_process(
     finally:
         # A TERM arriving while the handler is restored is recorded and re-raised below.
         cleaning = True
+        restore_failure = None
         if previous_handler is not None:
-            signal.signal(signal.SIGTERM, previous_handler)
+            try:
+                signal.signal(signal.SIGTERM, previous_handler)
+            except Exception as exc:
+                restore_failure = exc
         if termination_requested is not None:
             # A repeated TERM during cleanup records intent without interrupting
             # escalation, draining, or reap, including cleanup of another failure.
             raise SystemExit(128 + termination_requested)
+        if restore_failure is not None and not capture_failed:
+            raise SignalRestoreError(
+                f"could not restore SIGTERM handler after {label} capture"
+            ) from restore_failure
     return subprocess.CompletedProcess(
         process.args, process.returncode, bytes(buffers[0]), bytes(buffers[1])
     )

@@ -247,8 +247,11 @@ Interruptions retain their original exit behavior.
 
 During POSIX main-thread capture, supervisor SIGTERM runs the same bounded owned-tree
 cleanup and exits with status 143 (`128 + SIGTERM`), without accepting partial output.
-Repeated TERM during cleanup does not interrupt draining or reaping. The previous SIGTERM
-handler is restored on every outcome. An ignored SIGTERM (`SIG_IGN`) or a handler not
+Repeated TERM during cleanup does not interrupt draining or reaping. Capture attempts to
+restore the previous SIGTERM handler on every outcome. A recorded TERM takes precedence
+over restoration failure, and an existing capture error or timeout retains its diagnostic.
+If restoration is the only failure, capture discards the result with `could not restore
+SIGTERM handler after <command> capture`. An ignored SIGTERM (`SIG_IGN`) or a handler not
 installed from Python is left unchanged. Library captures in worker threads leave the
 application's signal handlers unchanged; Windows retains its existing signal policy.
 
