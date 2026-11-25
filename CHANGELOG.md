@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Encode allowlist JSON incrementally and stop when the output would exceed the file or
+  remaining batch staging budget, before writing any output or recovery copy.
+
+- Reduce terminal rendering allocations for long diagnostics by copying printable spans together
+  and passing fully printable text through directly.
+
 - Reuse parent directory resolution across siblings in each rooted cloc file report and
   recheck reused paths before returning the report.
 

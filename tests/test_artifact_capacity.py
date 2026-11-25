@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,11 @@ def test_allowlist_capacity_exact_boundary(
     if not new:
         target.parent.mkdir()
         target.write_bytes(b"{}\n")
-    data = {"functions": {"src/café.py::f": 200}, "classes": {}, "test_files": {}}
+    data = {
+        "functions": {"src/🧪.py::f": 200, "src/café\n.py::f": 190},
+        "classes": {},
+        "test_files": {},
+    }
     encoded = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
     monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_BYTES", len(encoded) - int(overflow))
     if overflow:
@@ -64,6 +69,48 @@ def test_all_allowlist_payloads_are_admitted_before_any_staging(
     for target in (a, b):
         assert target.read_bytes() == b"{}\n"
         assert list(tmp_path.glob(f".{target.name}.*")) == [tmp_path / f".{target.name}.lock"]
+
+
+@pytest.mark.parametrize("staging_limit", [False, True])
+def test_wide_allowlist_stops_encoding_at_the_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staging_limit: bool
+) -> None:
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    prior = b"{}\n"
+    for target in (a, b):
+        target.write_bytes(prior)
+    small: size_limits.Units = {"classes": {}, "functions": {}, "test_files": {}}
+    wide = {"functions": {f"src/{'x' * 100}.py::f{i}": 200 for i in range(4000)}}
+    if staging_limit:
+        first_size = len(json.dumps(small, indent=2, sort_keys=True)) + 1 + len(prior)
+        monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_STAGING_BYTES", first_size + 128)
+    else:
+        monkeypatch.setattr(size_limits, "MAX_ALLOWLIST_BYTES", 128)
+
+    encoded_chars = 0
+    iterencode = json.JSONEncoder.iterencode
+
+    def count_fragments(
+        encoder: json.JSONEncoder, obj: object, _one_shot: bool = False
+    ) -> Iterator[str]:
+        nonlocal encoded_chars
+        for fragment in iterencode(encoder, obj, _one_shot):
+            encoded_chars += len(fragment)
+            yield fragment
+
+    def unexpected_stage(*args: object, **kwargs: object) -> Path:
+        pytest.fail("oversized batch reached disk staging")
+
+    match = "publication staging exceeds" if staging_limit else "allowlist .* exceeds 128 bytes"
+    with size_limits.allowlist_locks([a, b], action=size_limits.UPDATE) as destinations:
+        monkeypatch.setattr(json.JSONEncoder, "iterencode", count_fragments)
+        monkeypatch.setattr(size_limits, "_stage_bytes", unexpected_stage)
+        with pytest.raises(size_limits.SizeLimitsError, match=match):
+            size_limits.publish_allowlists([(a, small), (b, wide)], destinations=destinations)
+
+    assert encoded_chars < 256
+    assert a.read_bytes() == b.read_bytes() == prior
+    assert set(tmp_path.iterdir()) == {a, b, tmp_path / ".a.json.lock", tmp_path / ".b.json.lock"}
 
 
 @pytest.mark.parametrize("overflow", [False, True])
