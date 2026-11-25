@@ -83,10 +83,27 @@ def _close_on_exit(close: Callable[[], None]) -> Iterator[None]:
 
 
 @contextmanager
+def _open_parent(root: Path, parts: tuple[str, ...], expected: Admission) -> Iterator[int]:
+    parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+
+    def close_parent() -> None:
+        os.close(parent)
+
+    with _close_on_exit(close_parent):
+        _check(os.fstat(parent), expected[0], directory=True)
+        for index, part in enumerate(parts[:-1], start=1):
+            previous = parent
+            parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=previous)
+            with _close_on_exit(partial(os.close, previous)):
+                _check(os.fstat(parent), expected[index], directory=True)
+        yield parent
+
+
+@contextmanager
 def open_source(
     root: Path, relative_path: str, admission: Admission | None = None
 ) -> Iterator[BinaryIO]:
-    """Validate each opened descriptor before reading; refuse unsupported OS APIs."""
+    """Validate the source before reading and recheck its name before accepting bytes."""
 
     relative = Path(relative_path)
     parts = relative.parts
@@ -97,35 +114,29 @@ def open_source(
         raise OSError("source changed since discovery: admission chain length does not match path")
     if not all(hasattr(os, name) for name in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK")):
         raise OSError("safe source opening is unavailable on this platform")
-    parent = None
-
-    def close_parent() -> None:
-        if parent is not None:
-            os.close(parent)
-
     with ExitStack() as stack:
-        with _close_on_exit(close_parent):
-            try:
-                directory_flags = os.O_RDONLY | os.O_DIRECTORY
-                parent = os.open(root, directory_flags)
-                _check(os.fstat(parent), expected[0], directory=True)
-                for index, part in enumerate(parts[:-1], start=1):
-                    previous = parent
-                    parent = os.open(part, directory_flags | os.O_NOFOLLOW, dir_fd=previous)
-                    with _close_on_exit(partial(os.close, previous)):
-                        _check(os.fstat(parent), expected[index], directory=True)
+        try:
+            with _open_parent(root, parts, expected) as parent:
                 descriptor = os.open(
                     parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
                 )
-            except (NotImplementedError, TypeError) as exc:
-                raise OSError("safe source opening is unavailable on this platform") from exc
-            try:
-                handle = os.fdopen(descriptor, "rb")
-            except BaseException:
-                with suppress(OSError):
-                    os.close(descriptor)
-                raise
-            stack.enter_context(_close_on_exit(handle.close))
-            _check(os.fstat(handle.fileno()), expected[-1], directory=False)
+                try:
+                    handle = os.fdopen(descriptor, "rb")
+                except BaseException:
+                    with suppress(OSError):
+                        os.close(descriptor)
+                    raise
+                stack.enter_context(_close_on_exit(handle.close))
+                _check(os.fstat(handle.fileno()), expected[-1], directory=False)
+        except (NotImplementedError, TypeError) as exc:
+            raise OSError("safe source opening is unavailable on this platform") from exc
         yield handle
         _check(os.fstat(handle.fileno()), expected[-1], directory=False)
+
+    # Release the file before walking again so a deep path still needs only two descriptors.
+    try:
+        with _open_parent(root, parts, expected) as parent:
+            named = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+            _check(named, expected[-1], directory=False)
+    except (NotImplementedError, TypeError) as exc:
+        raise OSError("safe source rechecking is unavailable on this platform") from exc

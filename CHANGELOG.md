@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject composition and size-limits reads when the source was detached from its selected path
+  during the read.
+
 - Count Git churn for renames across a selected directory boundary using the destination.
   Moves into the directory contribute only their edits, and moves out contribute nothing.
 
