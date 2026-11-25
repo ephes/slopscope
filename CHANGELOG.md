@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound and escape Git churn failure diagnostics in text and JSON reports.
+
 - Close size-limit allowlist descriptors when rejecting directories and other nonregular files.
 
 - Reject size-limit allowlist reads whose byte count differs from the opened file size, even when

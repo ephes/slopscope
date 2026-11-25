@@ -270,6 +270,59 @@ def test_fast_git_output_overflow_skips_churn_in_report(
     assert all(process.stderr is not None and process.stderr.closed for process in children)
 
 
+@pytest.mark.parametrize(
+    "git_stderr,preview_start,truncated",
+    [
+        (
+            b"fatal: missing object\r\n\t\x1b[31m\xff" + b"details\n" * 1024,
+            r"fatal: missing object\r\n\t\x1b",
+            True,
+        ),
+        (b"\x1b" * 1024, r"\x1b", True),
+        (b"fatal: missing object\n", "fatal: missing object", False),
+        (b"\n\t", "no error output", False),
+    ],
+    ids=["multiline", "escape-expansion", "short", "blank"],
+)
+def test_failed_git_log_has_same_bounded_reason_in_text_and_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    git_stderr: bytes,
+    preview_start: str,
+    truncated: bool,
+) -> None:
+    def fake_git(
+        executable: str, path: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[bytes]:
+        if arguments[0] == "log":
+            return subprocess.CompletedProcess(arguments, 1, b"", git_stderr)
+        output = b"a" * 40 + b"\n" if "--verify" in arguments else b"true\n"
+        return subprocess.CompletedProcess(arguments, 0, output, b"")
+
+    monkeypatch.setattr(churn, "_git", fake_git)
+    monkeypatch.setattr(
+        fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(0, b"app.py\0")
+    )
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    args = [str(tmp_path), "--composition", "--churn", "--format"]
+    json_out, plain_out, notice = io.StringIO(), io.StringIO(), io.StringIO()
+
+    assert cli.run([*args, "json"], stdout=json_out, stderr=notice) == 0
+    report = json.loads(json_out.getvalue())
+    assert report["total"]["files"] == 1
+    assert report["churn"]["status"] == "skipped"
+    assert report["churn"]["rows"] == []
+    reason = report["churn"]["reason"]
+    assert len(reason) <= 275
+    assert reason.isprintable()
+    assert reason.startswith(f"git log failed: {preview_start}")
+    assert reason.endswith("...") == truncated
+    assert notice.getvalue().splitlines() == [f"slopscope: skipping churn: {reason}"]
+
+    assert cli.run([*args, "plain"], stdout=plain_out, stderr=io.StringIO()) == 0
+    assert f"(skipped: {reason})" in plain_out.getvalue().splitlines()
+
+
 @pytest.mark.parametrize("platform", ["posix", "nt"])
 @pytest.mark.parametrize("wrapper_exited", [False, True])
 def test_capture_budget_is_combined_and_cleanup_reaps_owned_processes(

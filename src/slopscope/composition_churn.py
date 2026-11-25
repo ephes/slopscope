@@ -13,6 +13,7 @@ from pathlib import Path
 
 from slopscope import classify, fallback
 from slopscope._capture import CaptureError, capture_process
+from slopscope._display import display_text
 from slopscope._git_env import hardened_git_env
 from slopscope.report import CompositionChurn, CompositionChurnMonth
 
@@ -27,6 +28,7 @@ GitCaptureError = CaptureError
 # Commits are bucketed by their own time zone, which can be up to about a day away from the
 # caller's; the Git-side cutoff keeps a margin and months are filtered exactly afterwards.
 _CUTOFF_MARGIN = timedelta(days=2)
+_GIT_LOG_STDERR_PREVIEW_BYTES = 64
 KINDS = ("source", "tests", "other")
 
 
@@ -102,7 +104,10 @@ def collect_churn(
         if result.returncode != 0:
             result = _git(executable, path, [*log_arguments, "--"])
         if result.returncode != 0:
-            message = result.stderr.decode(errors="replace").strip()
+            preview = result.stderr[:_GIT_LOG_STDERR_PREVIEW_BYTES].decode(errors="replace")
+            message = display_text(preview.strip())
+            if len(result.stderr) > _GIT_LOG_STDERR_PREVIEW_BYTES:
+                message += "..."
             return skipped(f"git log failed: {message or 'no error output'}")
 
     except subprocess.TimeoutExpired:

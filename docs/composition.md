@@ -617,6 +617,8 @@ analyzed path.
   read in 64 KiB chunks. Exceeding the budget terminates the owned process group/tree and skips churn
   without a retry, through the same bounded cleanup as a timeout. Source analysis, snapshot success
   policy, and the report exit code are unchanged.
+- If `git log` fails after retrying, text and JSON report `git log failed` with the same escaped preview
+  of up to 64 bytes of Git stderr. An ellipsis marks truncation.
 - Malformed Git history (invalid month markers or counters, missing NUL boundaries, or incomplete
   rename operands) skips the entire churn result with a bounded category/record diagnostic. No partial
   or fabricated zero history is published. Empty history and binary-file exclusions remain supported.
