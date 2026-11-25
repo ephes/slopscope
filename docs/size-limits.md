@@ -182,7 +182,8 @@ Existing symlinks are supported and remain symlinks.
 
 Multi-project seed/update prepares and fsyncs every output and recovery backup before replacing
 any allowlist, then syncs each parent directory so recovery names are durable. New parent
-directory names are synced too. Every replacement and restoration is directory-synced before
+directory names are synced too. A short write aborts staging before the affected file is synced
+and preserves all existing allowlists. Every replacement and restoration is directory-synced before
 retiring recovery evidence; backup retirement is also synced before success. Directory-sync
 support is required for successful mutation. A handled staging or replacement error returns exit code 2 with no report and
 restores earlier replacements to their exact prior bytes and permissions (or removes newly

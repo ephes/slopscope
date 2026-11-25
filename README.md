@@ -514,6 +514,7 @@ fails instead of waiting when another seed/update holds a lock for longer; rerun
 Multi-project publication
 stages all outputs first and restores earlier writes on catchable replacement failures, including
 `KeyboardInterrupt` and `SystemExit`.
+A short write of an output or its recovery backup aborts staging before any target is replaced.
 The original interruption propagates after recovery; failed restoration retains a named recovery
 backup reported in exception notes. Recovery names are directory-synced before replacement; each
 replacement and restoration is directory-synced before recovery evidence is retired, and backup

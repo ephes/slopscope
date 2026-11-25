@@ -399,7 +399,7 @@ def test_missing_sections_default_to_empty(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.parametrize("operation", ["write", "fsync", "replace"])
+@pytest.mark.parametrize("operation", ["write", ".pending", ".backup", "fsync", "replace"])
 def test_allowlist_failed_write_preserves_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
@@ -417,21 +417,33 @@ def test_allowlist_failed_write_preserves_baseline(
         called = True
         raise OSError("injected failure")
 
-    if operation == "write":
+    if operation in {"write", ".pending", ".backup"}:
         from unittest.mock import MagicMock
 
         real_temporary = tempfile.NamedTemporaryFile
 
         def broken_temporary(*args: object, **kwargs: object) -> object:
             handle = real_temporary(*args, **kwargs)  # type: ignore[call-overload]
+            if operation != "write" and kwargs["suffix"] != operation:
+                return handle
             wrapped = MagicMock(wraps=handle)
             wrapped.name = handle.name
-            wrapped.__enter__.return_value = wrapped
-            wrapped.__exit__.side_effect = handle.__exit__
+            if operation != "write":
+                wrapped.flush.side_effect = AssertionError("short write reached flush")
 
-            def partial_write(text: str) -> None:
-                handle.write(text[:10])
-                fail()
+                def close_with_fault() -> None:
+                    handle.close()
+                    raise OSError("injected close failure")
+
+                wrapped.close.side_effect = close_with_fault
+
+            def partial_write(content: bytes) -> int:
+                nonlocal called
+                called = True
+                written: int = handle.write(content[:10])
+                if operation == "write":
+                    fail()
+                return written
 
             wrapped.write.side_effect = partial_write
             return wrapped
@@ -439,8 +451,12 @@ def test_allowlist_failed_write_preserves_baseline(
         monkeypatch.setattr(tempfile, "NamedTemporaryFile", broken_temporary)
     else:
         monkeypatch.setattr(os, operation, fail)
-    with pytest.raises(size_limits.SizeLimitsError, match="injected failure"):
-        size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    message = "short write" if operation.startswith(".") else "injected failure"
+    with patch.object(os, "replace", wraps=os.replace) as replace:
+        with pytest.raises(size_limits.SizeLimitsError, match=message):
+            size_limits.write_allowlist(path, {"functions": {"new": 180}})
+        if operation != "replace":
+            replace.assert_not_called()
     assert called
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]

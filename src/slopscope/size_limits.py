@@ -301,15 +301,28 @@ class _PreparedAllowlist:
 def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str) -> Path:
     temporary: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
+        # Close explicitly so a close error cannot hide the staging failure.
+        handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="wb", dir=target.parent, prefix=f".{target.name}.", suffix=suffix, delete=False
-        ) as handle:
-            temporary = Path(handle.name)
+        )
+        temporary = Path(handle.name)
+        try:
             if mode is not None:
                 os.chmod(temporary, mode)
-            handle.write(content)
+            written = handle.write(content)
+            if written != len(content):
+                raise SizeLimitsError(
+                    f"short write staging allowlist {temporary}: "
+                    f"wrote {written} of {len(content)} bytes"
+                )
             handle.flush()
             os.fsync(handle.fileno())
+        except BaseException:
+            with contextlib.suppress(OSError):
+                handle.close()
+            raise
+        else:
+            handle.close()
         return temporary
     except BaseException:
         if temporary is not None:

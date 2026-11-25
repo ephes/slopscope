@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Refuse short writes of staged allowlist outputs and recovery backups before syncing the
+  incomplete file or replacing any allowlist.
+
 - Honor an unambiguous class-body `__test__ = False` in pytest test placement while preserving fixture
   placement. Placement detector version 4 marks older placement baselines as non-comparable.
 
