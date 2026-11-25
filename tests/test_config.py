@@ -74,8 +74,8 @@ top = 20
     assert loaded.areas == ("docs", "infra")
     assert loaded.nested_bucket_dirs == ("packages",)
     assert loaded.projects == (
-        config.ProjectConfig(name="app", path=(tmp_path / "packages/app").resolve()),
-        config.ProjectConfig(name="docs", path=(tmp_path / "../docs").resolve(), optional=True),
+        config.ProjectConfig(name="app", path=tmp_path / "packages/app"),
+        config.ProjectConfig(name="docs", path=tmp_path / "../docs", optional=True),
     )
     assert loaded.profiles == (
         config.ProfileConfig(

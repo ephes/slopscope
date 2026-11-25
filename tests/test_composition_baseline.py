@@ -1017,7 +1017,7 @@ def test_incomplete_analysis_preserves_snapshot(
             '[[tool.slopscope.projects]]\nname = "good"\npath = "."\n'
             '[[tool.slopscope.projects]]\nname = "bad"\npath = "../other"\n',
         )
-        bad_file = tmp_path / "other/src/bad.py"
+        bad_file = repository / "../other/src/bad.py"
         options += ["--project", "all"]
     snapshot = tmp_path / "report.json"
     previous = None

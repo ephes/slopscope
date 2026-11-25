@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve configured project aliases in reports and diagnostics. A dangling project symlink
+  fails analysis even when the project is optional.
+
 - Reuse source discovery and identity checks from snapshot preflight during composition analysis,
   and avoid checking the destination inode again for each source.
 

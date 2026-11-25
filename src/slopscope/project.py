@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 from collections.abc import Sequence
+from pathlib import Path
 
 from slopscope import config as config_module
 from slopscope.report import (
@@ -67,6 +68,7 @@ def partition_existing_projects(
         try:
             metadata = path.stat()
         except (FileNotFoundError, NotADirectoryError) as exc:
+            _verify_missing_project_path(path, label)
             if isinstance(exc, NotADirectoryError):
                 raise ProjectError(f"{label} path has a non-directory component: {path}") from exc
             if not configured_project.optional:
@@ -88,6 +90,22 @@ def partition_existing_projects(
             raise ProjectError(f"{label} path is not a directory: {path}")
         existing.append(configured_project)
     return tuple(existing), tuple(skipped)
+
+
+def _verify_missing_project_path(path: Path, label: str) -> None:
+    """Check for a directory entry that the followed stat could not reach."""
+    try:
+        entry = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except OSError as exc:
+        raise ProjectError(
+            f"incomplete analysis: could not inspect {label} path {path}: {exc}"
+        ) from exc
+
+    if stat.S_ISLNK(entry.st_mode):
+        raise ProjectError(f"incomplete analysis: {label} path is a dangling symlink: {path}")
+    raise ProjectError(f"incomplete analysis: {label} path changed during admission: {path}")
 
 
 def build_multi_project_report(

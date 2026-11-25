@@ -549,3 +549,49 @@ def test_lexical_placement_report(tmp_path: Path, format_name: str) -> None:
         assert "fixture" in out
         assert "helper_or_unknown" in out
         assert "2 tests" in out
+
+
+def test_composition_keeps_configured_project_aliases_in_path_receipts(tmp_path: Path) -> None:
+    write(tmp_path, "checkout/app.py", "value = 1\n")
+    (tmp_path / "linked").symlink_to("checkout", target_is_directory=True)
+    (tmp_path / "dangling").symlink_to("gone-target", target_is_directory=True)
+    config_path = tmp_path / "workspace.toml"
+    for name in ("linked", "missing", "dangling"):
+        with config_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f'[[tool.slopscope.projects]]\nname = "{name}"\npath = "{name}"\noptional = true\n'
+            )
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_bytes(b"previous snapshot")
+    args = [
+        str(tmp_path),
+        "--composition",
+        "--config",
+        str(config_path),
+        "--format",
+        "json",
+        "--snapshot",
+        str(snapshot),
+    ]
+
+    code, out, err = run_cli([*args, "--project", "all"])
+    assert code == 2
+    assert out == ""
+    assert "incomplete analysis" in err
+    assert "dangling symlink" in err
+    assert str(tmp_path / "dangling") in err
+    assert snapshot.read_bytes() == b"previous snapshot"
+
+    code, out, err = run_cli([*args, "--project", "linked", "--project", "missing"])
+    assert code == 0, err
+    data = json.loads(out)
+    (linked,) = data["projects"]
+    assert linked["report"]["path"] == str(tmp_path / "linked")
+    assert linked["report"]["total"]["files"] == 1
+    assert data["skipped_projects"] == [
+        {
+            "name": "missing",
+            "path": str(tmp_path / "missing"),
+            "reason": "missing optional project path",
+        }
+    ]
