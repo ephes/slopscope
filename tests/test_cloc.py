@@ -94,6 +94,17 @@ SUM,3,13,4,110
     ]
 
 
+def test_parse_language_summary_csv_rejects_repeated_sum_rows() -> None:
+    output = """language,filename,blank,comment,code
+Python,2,10,4,90
+SUM,2,10,4,90
+" SUM ",99,0,0,999
+"""
+
+    with pytest.raises(cloc.ClocParseError, match="row 4: repeated SUM row"):
+        cloc.parse_language_summary_csv(output)
+
+
 def test_parse_language_summary_csv_accepts_files_column() -> None:
     output = (
         'files,language,blank,comment,code,"github.com/AlDanial/cloc v 2.08"\n'

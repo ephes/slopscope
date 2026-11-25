@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reuse parent directory resolution across siblings in each rooted cloc file report and
+  recheck reused paths before returning the report.
+
+- Reject repeated `SUM` rows when parsing cloc language summaries.
+
 - Parse configured exclusion paths once per Git churn report.
 
 - Bound and escape Git churn failure diagnostics in text and JSON reports.

@@ -121,11 +121,17 @@ def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     """Parse a complete cloc language report, refusing invalid records."""
 
     rows: list[LanguageRow] = []
+    seen_total = False
     for index, row in enumerate(_csv_rows(output), start=2):
         try:
-            rows.append(_parse_language_row(row))
+            parsed = _parse_language_row(row)
         except ValueError as exc:
             raise ClocParseError(f"invalid cloc CSV row {index}: language or counters") from exc
+        if parsed.language == "SUM":
+            if seen_total:
+                raise ClocParseError(f"invalid cloc CSV row {index}: repeated SUM row")
+            seen_total = True
+        rows.append(parsed)
     return rows
 
 
@@ -134,6 +140,8 @@ def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[Fil
 
     rows: list[FileRow] = []
     seen: set[str] = set()
+    resolved_parents: dict[str, Path] = {}
+    reused_parents: set[str] = set()
     resolved_root = root.resolve() if root is not None else None
     for index, row in enumerate(_csv_rows(output), start=2):
         try:
@@ -147,9 +155,16 @@ def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[Fil
                     if ".." in identity.parts or not identity.name:
                         raise ValueError("file outside root")
                     candidate = resolved_root / identity
-                    identity = (candidate.parent.resolve() / candidate.name).relative_to(
-                        resolved_root
-                    )
+                    parent = candidate.parent
+                    # Keep the exact spelling, even where Path equality folds case.
+                    parent_key = str(parent)
+                    resolved_parent = resolved_parents.get(parent_key)
+                    if resolved_parent is None:
+                        resolved_parent = parent.resolve()
+                        resolved_parents[parent_key] = resolved_parent
+                    else:
+                        reused_parents.add(parent_key)
+                    identity = (resolved_parent / candidate.name).relative_to(resolved_root)
                 else:
                     identity = Path(os.path.normpath(parsed.path))
                     if not identity.is_absolute() and ".." in identity.parts:
@@ -167,6 +182,15 @@ def parse_file_summary_csv(output: str, *, root: Path | None = None) -> list[Fil
             ) from exc
         if parsed is not None:
             rows.append(parsed)
+
+    # Detect changed symlink destinations before publishing cached identities.
+    for parent_key in reused_parents:
+        try:
+            current_parent = Path(parent_key).resolve()
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise ClocParseError("invalid cloc CSV: could not recheck file parent") from exc
+        if str(current_parent) != str(resolved_parents[parent_key]):
+            raise ClocParseError("invalid cloc CSV: file parent changed during parsing")
     return rows
 
 

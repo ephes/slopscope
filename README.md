@@ -100,10 +100,15 @@ Malformed cloc records, missing or invalid nonnegative counters, and CSV parser 
 return exit code 2 with a bounded row/category diagnostic, without publishing partial totals.
 Required CSV headers must be unique (including case/whitespace variants); the language-summary
 `files` and `filename` aliases are accepted individually, never together. Extra metadata columns remain supported.
+The language-summary parser accepts at most one `SUM` row. Multi-project snapshot rows
+sum the individual language counts when the supplied language rows omit `SUM`.
 File rows are normalized and admitted before filtering: repeated identities, absolute/relative aliases,
 and paths outside the selected root (including `..` components and linked parent directories that
 leave it) refuse the whole report, including profiles. Only parent directories are resolved: a file
 symlink is counted under its own path, as cloc counts it, even when its target lies outside the root. No conflicting counters are merged or silently omitted.
+Within one rooted file report, rows with the same parent path spelling share its resolution.
+Before returning rows, the parser resolves each reused parent again and rejects the report if
+the destination has changed or the recheck fails.
 CSV parsing streams records under a fixed 100,000-data-record ceiling (including `SUM`, excluding
 the header), independently of the capture-byte ceiling. The first excess record refuses the whole
 report before domain conversion; exact-limit input remains supported. This applies to both parser

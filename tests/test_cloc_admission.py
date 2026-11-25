@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -180,3 +182,71 @@ def test_all_counts_project_one_file_capture(
         "test_code": 4,
     }
     assert captures == ["file"]
+
+
+def test_rooted_file_csv_resolves_distinct_parents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve() / "project"
+    parent = root / "src" / "pkg"
+    parent.mkdir(parents=True)
+    link = root / "linked"
+    link.symlink_to(parent, target_is_directory=True)
+
+    resolve = Path.resolve
+    resolutions: Counter[Path] = Counter()
+
+    def count_resolve(path: Path, *, strict: bool = False) -> Path:
+        resolutions[path] += 1
+        return resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", count_resolve)
+    siblings = [f"src/pkg/{index}.py" for index in range(1000)]
+    report = csv_files([*siblings, str(link / "first.py"), "linked/second.py"])
+    rows = cloc.parse_file_summary_csv(report, root=root)
+
+    assert [row.path for row in rows] == [*siblings, "src/pkg/first.py", "src/pkg/second.py"]
+    assert resolutions == {root: 1, parent: 2, link: 2}
+
+
+def test_rooted_file_csv_preserves_link_admission_across_parses(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    parent = root / "src"
+    parent.mkdir(parents=True)
+    link = root / "linked"
+    link.symlink_to(parent, target_is_directory=True)
+
+    report = csv_files(["linked/first.py", "linked/second.py"])
+    with pytest.raises(cloc.ClocParseError, match="file identity"):
+        cloc.parse_file_summary_csv(csv_files(["linked/first.py", "src/first.py"]), root=root)
+    assert [row.path for row in cloc.parse_file_summary_csv(report, root=root)] == [
+        "src/first.py",
+        "src/second.py",
+    ]
+
+    link.unlink()
+    link.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(cloc.ClocParseError, match="file identity"):
+        cloc.parse_file_summary_csv(report, root=root)
+
+
+def test_rooted_file_csv_refuses_retargeted_cached_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "project"
+    parent = root / "src"
+    parent.mkdir(parents=True)
+    link = root / "linked"
+    link.symlink_to(parent, target_is_directory=True)
+    csv_rows = cloc._csv_rows
+
+    def retarget_between_rows(output: str) -> Iterator[dict[str, str | None]]:
+        rows = csv_rows(output)
+        yield next(rows)
+        link.unlink()
+        link.symlink_to(tmp_path, target_is_directory=True)
+        yield from rows
+
+    monkeypatch.setattr(cloc, "_csv_rows", retarget_between_rows)
+    with pytest.raises(cloc.ClocParseError, match="invalid cloc CSV"):
+        cloc.parse_file_summary_csv(csv_files(["linked/first.py", "linked/second.py"]), root=root)
