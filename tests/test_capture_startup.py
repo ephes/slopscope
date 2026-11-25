@@ -6,6 +6,7 @@ import io
 import os
 import signal
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import Mock
@@ -58,6 +59,35 @@ def fail_start(
 
     monkeypatch.setattr(threading.Thread, "start", start)
     return process, pipes, started
+
+
+@pytest.mark.parametrize("fail_at", [1, 2])
+def test_reader_construction_failure_closes_pipes_and_reaps_child(
+    monkeypatch: pytest.MonkeyPatch, fail_at: int
+) -> None:
+    reader = Mock()
+    failure = RuntimeError("synthetic private construction detail")
+    construct = Mock(side_effect=[reader] * (fail_at - 1) + [failure])
+    monkeypatch.setattr(threading, "Thread", construct)
+    with subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name == "posix",
+    ) as process:
+        try:
+            with pytest.raises(
+                _capture.CaptureError, match="^could not start synthetic output readers$"
+            ) as raised:
+                _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+            assert raised.value.__cause__ is failure
+            assert process.returncode is not None and process.returncode != 0
+            assert process.stdout is not None and process.stdout.closed
+            assert process.stderr is not None and process.stderr.closed
+            reader.start.assert_not_called()
+        finally:
+            if process.returncode is None:
+                process.kill()
 
 
 @pytest.mark.parametrize("fail_at", [1, 2])

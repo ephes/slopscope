@@ -36,14 +36,13 @@ def capture_process(
     Callers must start a new session on POSIX. Descendants that leave that session/group
     are outside this ownership boundary; Windows tree termination remains best-effort.
     """
-    # Each reader retains only its share of one combined byte budget. Separate readers
-    # prevent a full stderr pipe from blocking stdout (and work on Windows too).
-    buffers = (bytearray(), bytearray())
-    failures: list[CaptureError] = []
-    lock = threading.Lock()
-    changed = threading.Event()
-    stopped = threading.Event()
     owned_pipes: list[BinaryIO] = []
+    started: list[threading.Thread] = []
+    readers_may_run = False
+    retired = False
+    cleaning = False
+    termination_requested: int | None = None
+    previous_handler = None
 
     def read_pipe(pipe: BinaryIO, target: bytearray) -> None:
         with lock:
@@ -79,17 +78,6 @@ def capture_process(
                 pipe.close()
             changed.set()
 
-    assert process.stdout is not None and process.stderr is not None
-    threads = [
-        threading.Thread(target=read_pipe, args=(pipe, buffer), daemon=True)
-        for pipe, buffer in zip((process.stdout, process.stderr), buffers, strict=True)
-    ]
-    started: list[threading.Thread] = []
-    deadline = time.monotonic() + timeout
-    retired = False
-    cleaning = False
-    termination_requested: int | None = None
-
     def terminate(signum: int, frame: FrameType | None) -> None:
         nonlocal cleaning, termination_requested
         termination_requested = signum
@@ -97,18 +85,32 @@ def capture_process(
             cleaning = True
             raise SystemExit(128 + signum)
 
-    # Python permits handler installation only in the main thread. CLI captures
-    # own this scoped handler; library calls in other threads leave it untouched.
-    handle_sigterm = os.name == "posix" and threading.current_thread() is threading.main_thread()
-    # Read the prior handler first and install inside ``try``: a TERM arriving right after
-    # installation then still reaches owned-tree cleanup and the handler restore below.
-    # A deliberately ignored SIGTERM (or a non-Python handler) stays as it is.
-    previous_handler = signal.getsignal(signal.SIGTERM) if handle_sigterm else None
-    if previous_handler is signal.SIG_IGN:
-        previous_handler = None
     try:
+        try:
+            # Separate readers prevent a full stderr pipe from blocking stdout.
+            # Both readers share the same byte budget.
+            buffers = (bytearray(), bytearray())
+            failures: list[CaptureError] = []
+            lock = threading.Lock()
+            changed = threading.Event()
+            stopped = threading.Event()
+            assert process.stdout is not None and process.stderr is not None
+            threads = [
+                threading.Thread(target=read_pipe, args=(pipe, buffer), daemon=True)
+                for pipe, buffer in zip((process.stdout, process.stderr), buffers, strict=True)
+            ]
+        except Exception as exc:
+            raise CaptureError(f"could not start {label} output readers") from exc
+        deadline = time.monotonic() + timeout
+        # Python permits handler installation only in the main thread. A deliberately
+        # ignored SIGTERM (or a non-Python handler) stays as it is.
+        if os.name == "posix" and threading.current_thread() is threading.main_thread():
+            previous = signal.getsignal(signal.SIGTERM)
+            if previous is not signal.SIG_IGN:
+                previous_handler = previous
         if previous_handler is not None:
             signal.signal(signal.SIGTERM, terminate)
+        readers_may_run = True
         for thread in threads:
             try:
                 thread.start()
@@ -152,7 +154,8 @@ def capture_process(
         # First statement of the handler block: CPython runs Python signal handlers only at
         # eval-breaker checks, so a repeated TERM after this point is recorded, not raised.
         cleaning = True
-        stopped.set()
+        if readers_may_run:
+            stopped.set()
         if not retired and os.name == "posix":
             # Kill the group even if the wrapper has exited but a child still owns its pipes.
             with contextlib.suppress(OSError):
@@ -168,9 +171,11 @@ def capture_process(
         if not retired:
             with contextlib.suppress(OSError):
                 process.kill()
-        with lock:
+        with lock if readers_may_run else contextlib.nullcontext():
             unowned_pipes = [
-                pipe for pipe in (process.stdout, process.stderr) if pipe not in owned_pipes
+                pipe
+                for pipe in (process.stdout, process.stderr)
+                if pipe is not None and pipe not in owned_pipes
             ]
         for pipe in unowned_pipes:
             # No reader claimed this pipe before rollback. A late reader checks

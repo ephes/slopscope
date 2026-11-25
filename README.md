@@ -235,12 +235,14 @@ terminating signal to a potentially reused identity. macOS may refuse signals to
 zombie-only group: this is accepted only when the subsequent absence check succeeds.
 An extant or uninspectable group still refuses the result within the cleanup deadline.
 
-If either output-reader thread fails to start, capture discards partial output and runs
-bounded child termination, reader draining, and reaping. Rollback closes pipes not yet
-claimed by a reader; readers close their own pipes. A late-starting reader cannot reuse a
-pipe reclaimed during rollback. The fixed diagnostic is `could not start <command> output readers`:
-cloc and Git discovery return exit code 2 without a report, snapshot, or allowlist
-write, and Git discovery does not use the filesystem fallback for this incomplete capture.
+Capture owns the child and its pipes during setup, including output-reader construction
+and signal-handler setup. If setup fails or either reader thread fails to start, capture
+discards partial output and runs bounded child termination, reader draining, and reaping.
+Rollback closes unclaimed pipes. Readers close their own pipes, and a late-starting
+reader cannot reuse a reclaimed pipe. The fixed diagnostic for reader construction or
+startup failure is `could not start <command> output readers`. Cloc and Git discovery
+return exit code 2 without a report, snapshot, or allowlist write. Git discovery stops
+before the filesystem fallback.
 Interruptions retain their original exit behavior.
 
 During POSIX main-thread capture, supervisor SIGTERM runs the same bounded owned-tree

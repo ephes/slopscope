@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Terminate and reap the capture child and close its pipes if reader construction or
+  signal-handler setup fails. Reader construction failures use the bounded startup diagnostic.
+
 - Encode allowlist JSON incrementally and stop when the output would exceed the file or
   remaining batch staging budget, before writing any output or recovery copy.
 
