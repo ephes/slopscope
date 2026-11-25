@@ -348,7 +348,7 @@ def test_baseline_compares_analyzer_name(tmp_path: Path, analyzer_name: str | No
         assert stderr == ""
 
 
-@pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 1)])
+@pytest.mark.parametrize("detector,old_version", [("qt", 0), ("logging", 3), ("test_placement", 3)])
 def test_detector_version_mismatch_warns_and_marks_not_comparable(
     tmp_path: Path, detector: str, old_version: int
 ) -> None:

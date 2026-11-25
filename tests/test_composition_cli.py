@@ -97,7 +97,7 @@ def test_composition_json_has_distinct_stable_shape(tmp_path: Path) -> None:
         {"name": "logging", "kind": "tag", "version": 4},
         {"name": "data_shape", "kind": "tag", "version": 3},
         {"name": "compat", "kind": "marker", "version": 1},
-        {"name": "test_placement", "kind": "placement", "version": 3},
+        {"name": "test_placement", "kind": "placement", "version": 4},
         {"name": "duplication", "kind": "duplication", "version": 1},
     ]
     assert data["settings"]["min_duplicate_tokens"] == 50
@@ -543,7 +543,7 @@ def test_lexical_placement_report(tmp_path: Path, format_name: str) -> None:
             "helper_or_unknown": 7,
         }
         assert report["total"]["constructs"]["tests"] == 2
-        assert {"name": "test_placement", "kind": "placement", "version": 3} in report["detectors"]
+        assert {"name": "test_placement", "kind": "placement", "version": 4} in report["detectors"]
     else:
         assert "Test Placement" in out
         assert "fixture" in out

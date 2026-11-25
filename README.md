@@ -431,8 +431,10 @@ logger field's receiver or any ancestor attribute invalidates that nested logger
 including shared evidence from another direct method. Rebinding the receiver name by import,
 definition, `except`/`match` capture, or `global`/`nonlocal` declaration does too. Unchanged sibling fields remain eligible.
 These accuracy changes can increase or reduce counts;
-baseline comparison warns about older detector versions. Test-placement detector version 3 applies the same lexical rules to fixture decorators and test bases; local unittest
-inheritance also requires an unambiguous, unmodified class name.
+baseline comparison warns about older detector versions. Test-placement detector version 4 applies the same
+lexical rules to fixture decorators and test bases. Local unittest inheritance requires an unambiguous,
+unmodified class name. A direct, unambiguous class-level `__test__ = False` opts a pytest class out of
+test counting while preserving fixture placement.
 
 Semantic resolution inventories lexical bindings separately from visiting expressions. Definition
 headers and nested lambda defaults are resolved once in their owning environment, so doubling
