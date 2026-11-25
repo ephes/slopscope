@@ -226,7 +226,7 @@ def test_cli_multi_project_update_budgets_outputs_and_recovery_together(
     staged: list[Path] = []
     stage_bytes = size_limits._stage_bytes
 
-    def record_stage(target: Path, *args: Any, **kwargs: Any) -> Path:
+    def record_stage(target: Path, *args: Any, **kwargs: Any) -> size_limits._StagedAllowlist:
         staged.append(target)
         return stage_bytes(target, *args, **kwargs)
 
