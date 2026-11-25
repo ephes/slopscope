@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject repeated `SUM` rows when parsing cloc language summaries.
+
 - Parse configured exclusion paths once per Git churn report.
 
 - Bound and escape Git churn failure diagnostics in text and JSON reports.

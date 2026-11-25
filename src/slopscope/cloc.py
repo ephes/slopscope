@@ -121,11 +121,17 @@ def parse_language_summary_csv(output: str) -> list[LanguageRow]:
     """Parse a complete cloc language report, refusing invalid records."""
 
     rows: list[LanguageRow] = []
+    seen_total = False
     for index, row in enumerate(_csv_rows(output), start=2):
         try:
-            rows.append(_parse_language_row(row))
+            parsed = _parse_language_row(row)
         except ValueError as exc:
             raise ClocParseError(f"invalid cloc CSV row {index}: language or counters") from exc
+        if parsed.language == "SUM":
+            if seen_total:
+                raise ClocParseError(f"invalid cloc CSV row {index}: repeated SUM row")
+            seen_total = True
+        rows.append(parsed)
     return rows
 
 

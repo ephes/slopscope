@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import config, project
+from slopscope import cloc, config, project
 from slopscope.report import (
     AreaRow,
     DirectoryRow,
@@ -127,13 +127,13 @@ def test_build_multi_project_report_builds_snapshot_rows(tmp_path: Path) -> None
 
 
 def test_build_multi_project_report_sums_languages_when_sum_row_is_missing(tmp_path: Path) -> None:
+    language_rows = cloc.parse_language_summary_csv(
+        "language,files,blank,comment,code\nPython,1,0,0,20\nMarkdown,2,0,0,5\n"
+    )
     report = RepositoryReport(
-        engine="python",
+        engine="cloc",
         path=tmp_path / "frontend",
-        language_rows=(
-            LanguageRow(language="Python", files=1, blank=0, comment=0, code=20),
-            LanguageRow(language="Markdown", files=2, blank=0, comment=0, code=5),
-        ),
+        language_rows=tuple(language_rows),
         source_test_summary=SourceTestSummary(
             source_files=1,
             source_code=20,
