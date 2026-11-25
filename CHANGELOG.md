@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Close size-limit allowlist descriptors when rejecting directories and other nonregular files.
+
+- Reject size-limit allowlist reads whose byte count differs from the opened file size, even when
+  the bytes form valid JSON and the file metadata stays unchanged.
+
 - Mark composition baselines with a different analyzer name as non-comparable even when versions
   match. Reject non-string names and continue to accept snapshots that omit the name.
 
