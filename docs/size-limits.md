@@ -113,9 +113,10 @@ positive integers, duplicate object keys at any nesting level, decoder recursion
 error and exit code 2 before any allowlist write. Duplicate keys are refused even when their values
 agree, with a bounded key diagnostic and object member index. Existing allowlist bytes are preserved.
 Allowlist inputs must be regular files (symlinks to regular files are supported), at most 16 MiB
-(16,777,216 bytes). The opened descriptor is checked before a bounded read; special files such as
-named pipes are refused without waiting for a writer. The opened size, mtime, and ctime must
-remain unchanged across the read; concurrent in-place edits refuse loading, update planning,
+(16,777,216 bytes). The reader checks the descriptor's type before creating a stream and closes
+it on every exit. Special files such as named pipes are refused without waiting for a writer.
+The read must return exactly the opened size, and the size, mtime, and ctime must remain unchanged
+across the read. A length mismatch or a concurrent in-place edit stops loading, update planning,
 and backup creation before any destination is replaced.
 Seed/update output uses the same 16 MiB ceiling, measured on the complete serialized UTF-8
 bytes including formatting and the final newline. Publication also has one 128 MiB

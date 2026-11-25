@@ -170,23 +170,26 @@ def _read_allowlist_bytes(
         if destination is not None:
             _verify_destination(destination)
         flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(destination.target if destination else path, flags), "rb") as handle:
-            info = os.fstat(handle.fileno())
+        with contextlib.ExitStack() as stack:
+            descriptor = os.open(destination.target if destination else path, flags)
+            stack.callback(os.close, descriptor)
+            info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode):
                 raise SizeLimitsError(f"allowlist {path} must be a regular file")
             if destination is not None and (info.st_dev, info.st_ino) != destination.identity:
                 raise SizeLimitsError(f"allowlist target changed after locking: {path}")
             if info.st_size > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
+            handle = stack.enter_context(os.fdopen(descriptor, "rb", closefd=False))
             content = handle.read(MAX_ALLOWLIST_BYTES + 1)
             if len(content) > MAX_ALLOWLIST_BYTES:
                 raise SizeLimitsError(f"allowlist {path} exceeds {MAX_ALLOWLIST_BYTES} bytes")
-            after = os.fstat(handle.fileno())
-            if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-            ):
+            after = os.fstat(descriptor)
+            if len(content) != info.st_size or (
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+            ) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                 raise SizeLimitsError(f"allowlist {path} changed during read")
         if destination is not None:
             _verify_destination(destination)

@@ -2,15 +2,50 @@
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import os
 import threading
 from pathlib import Path
+from typing import BinaryIO, cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from slopscope import size_limits
 from slopscope.report import SizeLimitSettings
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires opening a directory descriptor")
+def test_allowlist_directory_rejection_closes_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_open = os.open
+    descriptors: list[int] = []
+
+    def track_open(path: Path, flags: int) -> int:
+        descriptor = real_open(path, flags)
+        descriptors.append(descriptor)
+        return descriptor
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", track_open)
+        try:
+            errors = []
+            for _ in range(3):
+                with pytest.raises(size_limits.SizeLimitsError) as error:
+                    size_limits.load_allowlist(tmp_path)
+                errors.append(str(error.value))
+            assert len(descriptors) == 3
+            for descriptor in descriptors:
+                with pytest.raises(OSError) as closed:
+                    os.fstat(descriptor)
+                assert closed.value.errno == errno.EBADF
+            assert errors == [f"allowlist {tmp_path} must be a regular file"] * 3
+        finally:
+            for descriptor in descriptors:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
 
 
 @pytest.mark.parametrize("operation", ["load", "update", "backup"])
@@ -73,6 +108,45 @@ def test_inplace_change_during_read_refuses_evidence(
     assert not worker.is_alive()
     assert path.stat().st_ino == initial.st_ino
     assert path.read_bytes() == after
+    assert not list(tmp_path.glob("*.backup"))
+    assert not list(tmp_path.glob("*.pending"))
+
+
+@pytest.mark.parametrize("operation", ["load", "update", "backup"])
+def test_allowlist_refuses_short_read_with_stable_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    path = tmp_path / "allowlist.json"
+    content = b"{}\n  "
+    path.write_bytes(content)
+    real_fdopen = os.fdopen
+
+    def fdopen(fd: int, mode: str, *, closefd: bool = True) -> BinaryIO:
+        handle = cast(BinaryIO, real_fdopen(fd, mode, closefd=closefd))
+        read = handle.read
+
+        def short_read(limit: int) -> bytes:
+            assert limit == size_limits.MAX_ALLOWLIST_BYTES + 1
+            return read(2)
+
+        monkeypatch.setattr(handle, "read", short_read)
+        return handle
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    with pytest.raises(size_limits.SizeLimitsError, match="changed during read"):
+        if operation == "load":
+            size_limits.load_allowlist(path)
+        elif operation == "update":
+            size_limits.check(
+                tmp_path,
+                allowlist_path=path,
+                settings=SizeLimitSettings(),
+                action=size_limits.UPDATE,
+                excluded_paths=(),
+            )
+        else:
+            size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    assert path.read_bytes() == content
     assert not list(tmp_path.glob("*.backup"))
     assert not list(tmp_path.glob("*.pending"))
 
