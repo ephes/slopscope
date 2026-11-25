@@ -10,11 +10,12 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Never, TextIO
 
 from slopscope import (
+    _source,
     classify,
     cloc,
     composition,
@@ -565,6 +566,7 @@ def _run_composition(
         roots = [project.path for project in existing_projects]
 
     snapshot_destination: _SnapshotDestination | None = None
+    source_admissions: dict[Path, dict[str, _source.Admission]] = {}
     if args.snapshot is not None:
         snapshot_path = Path(args.snapshot)
         config_path = (
@@ -574,7 +576,12 @@ def _run_composition(
         )
         try:
             snapshot_destination = _validate_snapshot_inputs(
-                snapshot_path, roots, slopscope_config, config_path, baseline_path
+                snapshot_path,
+                roots,
+                slopscope_config,
+                config_path,
+                baseline_path,
+                source_admissions=source_admissions,
             )
         except OSError as exc:
             print(
@@ -585,7 +592,9 @@ def _run_composition(
 
     rendered_report: CompositionReport | MultiProjectCompositionReport
     if args.project is None:
-        report = _build_composition_report(path, slopscope_config, limit)
+        report = _build_composition_report(
+            path, slopscope_config, limit, admissions=source_admissions.get(path)
+        )
         if args.churn:
             report = _with_churn(report, path, slopscope_config, err, label=None)
         if baseline is not None and baseline_path is not None:
@@ -615,7 +624,12 @@ def _run_composition(
             {} if baseline is None else composition_baseline.project_baselines(baseline)
         )
         for configured_project in existing_projects:
-            report = _build_composition_report(configured_project.path, slopscope_config, limit)
+            report = _build_composition_report(
+                configured_project.path,
+                slopscope_config,
+                limit,
+                admissions=source_admissions.get(configured_project.path),
+            )
             if args.churn:
                 report = _with_churn(
                     report,
@@ -721,30 +735,41 @@ def _validate_snapshot_inputs(
     slopscope_config: config_module.SlopscopeConfig,
     config_path: Path | None,
     baseline_path: Path | None,
+    *,
+    source_admissions: dict[Path, dict[str, _source.Admission]] | None = None,
 ) -> _SnapshotDestination:
-    """Refuse snapshot destinations that resolve to or share an inode with an input."""
+    """Refuse input aliases and optionally retain the admissions checked by preflight."""
     target = _resolved_snapshot(snapshot)
-    inputs = [path for path in (config_path, baseline_path) if path is not None]
-    for root in roots:
-        inputs.extend(
-            root / relative_path
-            for relative_path in composition.discover_python_files(
-                root,
-                excluded_paths=_effective_fallback_excludes(slopscope_config),
-                include_globs=slopscope_config.include_globs,
-            )
-        )
-    for input_path in inputs:
-        shared = target == input_path.resolve()
-        if not shared:
-            with contextlib.suppress(FileNotFoundError):
-                shared = target.samefile(input_path)
-        if shared:
+    identity = _snapshot_identity(target)
+    destination = _SnapshotDestination(target, identity, _snapshot_identity(target.parent))
+
+    for input_path in (config_path, baseline_path):
+        if input_path is None:
+            continue
+        if target == _resolved_snapshot(input_path) or (
+            identity is not None and identity == _snapshot_identity(input_path)
+        ):
             raise OSError(f"snapshot {snapshot} aliases input {input_path}")
 
-    return _SnapshotDestination(
-        target, _snapshot_identity(target), _snapshot_identity(target.parent)
-    )
+    for root in dict.fromkeys(roots):
+        resolved_root = _resolved_snapshot(root)
+        admissions: dict[str, _source.Admission] = {}
+        composition.discover_python_files(
+            root,
+            excluded_paths=_effective_fallback_excludes(slopscope_config),
+            include_globs=slopscope_config.include_globs,
+            admissions=admissions,
+        )
+        for relative_path, admission in admissions.items():
+            source = admission[-1]
+            if target == resolved_root / relative_path or identity == (
+                source.st_dev,
+                source.st_ino,
+            ):
+                raise OSError(f"snapshot {snapshot} aliases input {root / relative_path}")
+        if source_admissions is not None:
+            source_admissions[root] = admissions
+    return destination
 
 
 def _verify_snapshot_destination(path: Path, destination: _SnapshotDestination) -> None:
@@ -882,6 +907,8 @@ def _build_composition_report(
     path: Path,
     slopscope_config: config_module.SlopscopeConfig,
     limit: int,
+    *,
+    admissions: Mapping[str, _source.Admission] | None = None,
 ) -> CompositionReport:
     composition_config = slopscope_config.composition
     return composition.build_composition_report(
@@ -899,6 +926,7 @@ def _build_composition_report(
         max_total_source_bytes=composition_config.max_total_source_bytes,
         max_total_tokens=composition_config.max_total_tokens,
         max_total_anchors=composition_config.max_total_anchors,
+        admissions=admissions,
         semantic_settings=composition_semantics.SemanticSettings.configured(
             qt_modules=composition_config.qt_modules,
             logging_patterns=composition_config.logging_patterns,

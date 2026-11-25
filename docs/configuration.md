@@ -91,9 +91,11 @@ slopscope --project backend
 slopscope --project frontend --project backend
 ```
 
-Project paths are resolved relative to the configuration file. `--project all` runs configured projects in config
+Relative project paths are interpreted from the configuration file’s directory. Reports and diagnostics
+retain the configured path, including symlink aliases. `--project all` runs configured projects in config
 order. Repeated `--project NAME` selections also render in config order, and duplicate explicit selections are a
-usage error. `--project all` cannot be mixed with named project selections.
+usage error. `--project all` cannot be mixed with named project selections. The name `all` is reserved.
+Rename any project called `all` and update commands that select it.
 
 Top-level filters and classification fields apply to every selected project. Project-specific overrides are not
 implemented yet.
@@ -102,6 +104,8 @@ Required project paths must exist. Missing required projects fail with a `slopsc
 Missing optional projects are skipped with a concise stderr notice and appear in JSON output under
 `skipped_projects`. If all selected projects are optional and missing, `slopscope` still renders a successful
 multi-project report with no project rows and the skipped project list.
+Permission and I/O failures, non-directory components, and dangling project symlinks exit with code 2,
+including for optional projects. A symlink to an existing directory is accepted.
 
 `--project` cannot be combined with `--profile` in the current implementation.
 
@@ -256,7 +260,8 @@ use `0.3.0a1` or later.
 
 ## Notes
 
-- Project paths are resolved relative to the configuration file.
+- Relative project paths are interpreted from the configuration file’s directory. Reports and diagnostics
+retain the configured path, including symlink aliases.
 - The positional path remains the repository inspected by the default single-repository report and the location used
   for default config discovery when `--config` is not supplied. Configured projects are selected only when
   `--project` is supplied.

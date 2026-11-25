@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -87,7 +89,7 @@ def test_select_projects_rejects_duplicate_names(tmp_path: Path) -> None:
 def test_partition_existing_projects_skips_optional_missing_paths(tmp_path: Path) -> None:
     existing_path = tmp_path / "frontend"
     existing_path.mkdir()
-    frontend = config.ProjectConfig(name="frontend", path=existing_path)
+    frontend = config.ProjectConfig(name="frontend", path=existing_path, optional=True)
     docs = config.ProjectConfig(name="docs", path=tmp_path / "docs", optional=True)
 
     existing, skipped = project.partition_existing_projects((frontend, docs))
@@ -152,3 +154,31 @@ def test_build_multi_project_report_sums_languages_when_sum_row_is_missing(tmp_p
 
     assert multi_report.snapshot_rows[0].files == 3
     assert multi_report.snapshot_rows[0].code == 25
+
+
+@pytest.mark.parametrize("error_number", [errno.EACCES, errno.EIO])
+def test_partition_existing_projects_reports_optional_stat_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_number: int
+) -> None:
+    path = tmp_path / "frontend"
+    frontend = config.ProjectConfig(name="frontend", path=path, optional=True)
+    original_stat = Path.stat
+
+    def failing_stat(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        if self == path:
+            raise OSError(error_number, "injected stat failure", str(path))
+        return original_stat(self, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", failing_stat)
+
+    with pytest.raises(project.ProjectError, match="project frontend.*injected stat failure"):
+        project.partition_existing_projects((frontend,))
+
+
+def test_partition_existing_projects_reports_non_directory_component(tmp_path: Path) -> None:
+    parent = tmp_path / "file"
+    parent.touch()
+    docs = config.ProjectConfig(name="docs", path=parent / "docs", optional=True)
+
+    with pytest.raises(project.ProjectError, match="project docs.*non-directory component"):
+        project.partition_existing_projects((docs,))

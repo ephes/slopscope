@@ -9,6 +9,8 @@ from pathlib import Path
 
 from slopscope import classify
 
+ALL_PROJECTS = "all"
+
 
 class ConfigError(Exception):
     """User-facing configuration error."""
@@ -322,11 +324,16 @@ def _parse_project(
         raise ConfigError(f"unknown projects[{index}] field: {unknown[0]}")
 
     name = _required_string(data, "name", context=f"projects[{index}]")
+    if name == ALL_PROJECTS:
+        raise ConfigError(
+            f"projects[{index}]: project name {name!r} is reserved for --project all; "
+            "rename this project and update any commands that select it"
+        )
     path_value = _required_string(data, "path", context=f"projects[{index}]")
     optional = _bool_value(data, "optional", default=False, context=f"projects[{index}]")
     return ProjectConfig(
         name=name,
-        path=_resolve_config_path(path_value, config_path=config_path),
+        path=_configured_project_path(path_value, config_path=config_path),
         optional=optional,
     )
 
@@ -424,8 +431,8 @@ def _validate_language_filters(
         raise ConfigError(f"{context} cannot include and exclude the same language: {conflicts[0]}")
 
 
-def _resolve_config_path(value: str, *, config_path: Path | None) -> Path:
+def _configured_project_path(value: str, *, config_path: Path | None) -> Path:
     path = Path(value)
     if path.is_absolute() or config_path is None:
         return path
-    return (config_path.parent / path).resolve()
+    return config_path.parent.absolute() / path

@@ -74,8 +74,8 @@ top = 20
     assert loaded.areas == ("docs", "infra")
     assert loaded.nested_bucket_dirs == ("packages",)
     assert loaded.projects == (
-        config.ProjectConfig(name="app", path=(tmp_path / "packages/app").resolve()),
-        config.ProjectConfig(name="docs", path=(tmp_path / "../docs").resolve(), optional=True),
+        config.ProjectConfig(name="app", path=tmp_path / "packages/app"),
+        config.ProjectConfig(name="docs", path=tmp_path / "../docs", optional=True),
     )
     assert loaded.profiles == (
         config.ProfileConfig(
@@ -163,3 +163,14 @@ def test_profiles_reject_unknown_fields() -> None:
 def test_profiles_reject_duplicate_names() -> None:
     with pytest.raises(config.ConfigError, match="duplicate profile name"):
         config.parse_config_mapping({"profiles": [{"name": "yaml"}, {"name": "yaml"}]})
+
+
+def test_load_config_rejects_reserved_project_name(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        '[[tool.slopscope.projects]]\nname = "all"\npath = "."\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(config.ConfigError, match=r"project name 'all'.*--project all.*rename"):
+        config.load_config_from_pyproject(pyproject)

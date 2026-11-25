@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import stat
 from collections.abc import Sequence
+from pathlib import Path
 
 from slopscope import config as config_module
 from slopscope.report import (
@@ -61,27 +63,49 @@ def partition_existing_projects(
     existing: list[config_module.ProjectConfig] = []
     skipped: list[SkippedProject] = []
     for configured_project in projects:
-        if configured_project.path.is_dir():
-            existing.append(configured_project)
-            continue
-        if configured_project.path.exists():
-            raise ProjectError(
-                f"project {configured_project.name} path is not a directory: "
-                f"{configured_project.path}"
-            )
-        if configured_project.optional:
+        path = configured_project.path
+        label = f"project {configured_project.name}"
+        try:
+            metadata = path.stat()
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            _verify_missing_project_path(path, label)
+            if isinstance(exc, NotADirectoryError):
+                raise ProjectError(f"{label} path has a non-directory component: {path}") from exc
+            if not configured_project.optional:
+                raise ProjectError(f"{label} path not found: {path}") from exc
             skipped.append(
                 SkippedProject(
                     name=configured_project.name,
-                    path=configured_project.path,
+                    path=path,
                     reason="missing optional project path",
                 )
             )
             continue
-        raise ProjectError(
-            f"project {configured_project.name} path not found: {configured_project.path}"
-        )
+        except OSError as exc:
+            raise ProjectError(
+                f"incomplete analysis: could not stat {label} path {path}: {exc}"
+            ) from exc
+
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ProjectError(f"{label} path is not a directory: {path}")
+        existing.append(configured_project)
     return tuple(existing), tuple(skipped)
+
+
+def _verify_missing_project_path(path: Path, label: str) -> None:
+    """Check for a directory entry that the followed stat could not reach."""
+    try:
+        entry = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except OSError as exc:
+        raise ProjectError(
+            f"incomplete analysis: could not inspect {label} path {path}: {exc}"
+        ) from exc
+
+    if stat.S_ISLNK(entry.st_mode):
+        raise ProjectError(f"incomplete analysis: {label} path is a dangling symlink: {path}")
+    raise ProjectError(f"incomplete analysis: {label} path changed during admission: {path}")
 
 
 def build_multi_project_report(
@@ -105,7 +129,7 @@ def build_multi_project_report(
 
 
 def _validate_requested_names(requested_names: Sequence[str]) -> None:
-    if "all" in requested_names and len(requested_names) > 1:
+    if config_module.ALL_PROJECTS in requested_names and len(requested_names) > 1:
         raise ProjectError("--project all cannot be combined with named projects")
 
     seen: set[str] = set()
@@ -116,7 +140,7 @@ def _validate_requested_names(requested_names: Sequence[str]) -> None:
 
 
 def _requests_all(requested_names: Sequence[str]) -> bool:
-    return len(requested_names) == 1 and requested_names[0] == "all"
+    return len(requested_names) == 1 and requested_names[0] == config_module.ALL_PROJECTS
 
 
 def _build_snapshot_row(name: str, report: RepositoryReport) -> ProjectSnapshotRow:
