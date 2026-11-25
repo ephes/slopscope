@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Honor an unambiguous class-body `__test__ = False` in pytest test placement while preserving fixture
+  placement. Placement detector version 4 marks older placement baselines as non-comparable.
+
 - Preserve capture failures and supervisor SIGTERM exits when restoring the previous
   handler fails. Report restoration-only failures with a dedicated capture diagnostic, and
   keep exiting with status 143 on any later SIGTERM through the handler left installed.

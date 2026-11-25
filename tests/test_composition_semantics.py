@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -324,6 +327,68 @@ def test_pytest_placement_rules() -> None:
         "helper_or_unknown": 2 + 2 + 2 + 2 + 5,
     }
     assert sum(placement.values()) == result.code
+
+
+@pytest.mark.parametrize(
+    "assignment", ["__test__ = False", "__test__: bool = False", "__test__ = enabled = False"]
+)
+def test_pytest_class_literal_opt_out_matches_collection(tmp_path: Path, assignment: str) -> None:
+    class_body = textwrap.dedent("""
+        @pytest.fixture
+        def resource(self):
+            return 1
+
+        def setup_method(self):
+            pass
+
+        def test_member(self, resource):
+            assert resource
+
+        def helper(self):
+            pass
+    """)
+    source = "import pytest\n"
+    source += "class TestEnabled:\n" + textwrap.indent(class_body, "    ")
+    source += f"class TestDisabled:\n    {assignment}\n"
+    source += textwrap.indent(class_body, "    ")
+    sample = tmp_path / "test_sample.py"
+    sample.write_text(source, encoding="utf-8")
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", sample.name],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    node_ids = [line for line in collected.stdout.splitlines() if line.startswith(sample.name)]
+    assert node_ids == ["test_sample.py::TestEnabled::test_member"]
+
+    result = counts(source, test_file=True)
+    assert result.construct("tests") == len(node_ids)
+    assert result.placement("test") == 2
+    assert result.placement("fixture") == 6
+    assert result.placement("setup") == 2
+    assert result.placement("helper_or_unknown") == 11
+    assert sum(result.placements) == result.code
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "__test__ = True",
+        "__test__ = 0",
+        "__test__ = disabled",
+        "if condition:\n    __test__ = False",
+        "__test__ = False\n__test__ = True",
+        "__test__ = False\nif condition:\n    del __test__",
+        "__test__ = False\nfrom markers import enabled as __test__",
+    ],
+)
+def test_pytest_class_requires_unambiguous_literal_opt_out(body: str) -> None:
+    source = "class TestCandidate:\n" + textwrap.indent(body, "    ")
+    source += "\n    def test_member(self): pass\n"
+    assert counts(source, test_file=True).construct("tests") == 1
 
 
 def test_unittest_placement_rules_resolve_testcase_bases() -> None:

@@ -37,7 +37,7 @@ DETECTORS = (
     CompositionDetector(name=LOGGING, kind="tag", version=4),
     CompositionDetector(name=DATA_SHAPE, kind="tag", version=3),
     CompositionDetector(name=COMPAT, kind="marker", version=1),
-    CompositionDetector(name="test_placement", kind="placement", version=3),
+    CompositionDetector(name="test_placement", kind="placement", version=4),
 )
 
 QT_MODULES = frozenset({"PySide2", "PySide6", "PyQt5", "PyQt6", "qtpy"})
@@ -916,6 +916,21 @@ def _is_fixture(node: ast.FunctionDef | ast.AsyncFunctionDef, imports: ImportMap
     )
 
 
+def _has_pytest_class_opt_out(node: ast.ClassDef) -> bool:
+    """Recognize a direct literal False assignment with no competing class binding."""
+    for stmt in node.body:
+        if not isinstance(stmt, ast.Assign | ast.AnnAssign):
+            continue
+        if not isinstance(stmt.value, ast.Constant) or stmt.value.value is not False:
+            continue
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id == "__test__":
+                other_nodes = [child for child in _scope_nodes(node.body) if child is not target]
+                return "__test__" not in _rebound_names(other_nodes)
+    return False
+
+
 def _test_placements(
     tree: ast.Module,
     imports: ImportMap,
@@ -980,8 +995,10 @@ def _test_placements(
             if is_unittest:
                 unittest_classes.add(stmt.name)
             methods = [child for child in stmt.body if isinstance(child, _FUNCTION_TYPES)]
-            is_pytest_class = stmt.name.startswith("Test") and not any(
-                method.name == "__init__" for method in methods
+            is_pytest_class = (
+                stmt.name.startswith("Test")
+                and not any(method.name == "__init__" for method in methods)
+                and not _has_pytest_class_opt_out(stmt)
             )
             for method in methods:
                 if _is_fixture(method, imports):

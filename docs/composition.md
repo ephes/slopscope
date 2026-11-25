@@ -286,13 +286,13 @@ Per file and aggregated:
 For files classified as tests, every code line is placed in exactly one bucket, so the buckets add up to the test
 files' code lines. Other files are not placed and report zero for every bucket.
 
-Test-placement detector version 3 resolves fixture decorators and imported test bases in their
+Test-placement detector version 4 resolves fixture decorators and imported test bases in their
 lexical scope, using the same conservative rebinding rules as semantic tags. Child imports do
 not leak, and class-local imports can supply method decorators. Rebinding, deletion, conflicting
 imports, and star imports invalidate fixture/base names throughout their scope. Local unittest
 inheritance requires a unique class name with no other binding or mutation in module scope;
 assignment aliases and decorated local base classes are not inferred. Older placement detector
-versions are marked non-comparable when loading a baseline. Pytest naming rules are unchanged.
+versions are marked non-comparable when loading a baseline.
 
 | Placement | Code lines |
 |---|---|
@@ -306,7 +306,11 @@ Test functions and methods are recognized conservatively:
 
 - A top-level function is a test when its name is `test` or starts with `test_`. pytest itself also collects names such
   as `testing_helper`; they are placed in `helper_or_unknown` instead.
-- A class is a pytest test class when its name starts with `Test` and it defines no `__init__` method. Its methods named
+- A class is a pytest test class when its name starts with `Test`, it defines no `__init__` method, and it has no
+  explicit opt-out. The detector recognizes a direct class-body assignment of the literal `False` to `__test__`
+  (including an annotated assignment) when there is no other class-scope binding or deletion of that name.
+  Conditional assignments, computed values, and inherited opt-outs are outside this static rule. A disabled class's
+  fixture methods retain fixture placement, and its other lines are helpers. In an eligible class, methods named
   `test` or `test_*` are tests.
 - A class is a unittest test class when a direct base resolves to `unittest.TestCase`,
   `unittest.IsolatedAsyncioTestCase`, or one of Django's test case classes, or is a unittest test class defined earlier
@@ -408,7 +412,7 @@ file to keep a snapshot.
     {"name": "logging", "kind": "tag", "version": 4},
     {"name": "data_shape", "kind": "tag", "version": 3},
     {"name": "compat", "kind": "marker", "version": 1},
-    {"name": "test_placement", "kind": "placement", "version": 3},
+    {"name": "test_placement", "kind": "placement", "version": 4},
     {"name": "duplication", "kind": "duplication", "version": 1}
   ],
   "path": ".",
@@ -478,7 +482,8 @@ file to keep a snapshot.
 - `schema_version` changes when the JSON shape changes. `analyzer.version` changes when the counting rules change, so
   numbers from different analyzer versions should not be compared directly.
   Analyzer version 4 corrects signature/header, generic-parameter, and annotation-only binding
-  boundaries for overloads. Semantic/placement detector version 3 uses the corrected lexical rules.
+  boundaries for overloads. Semantic/placement detector version 3 introduced the corrected lexical rules.
+  Test-placement detector version 4 recognizes explicit pytest class opt-outs.
   Version 3 keeps comprehension iteration targets out of surrounding overload bindings.
   Version 2 resolves size-limit overload exemptions through scoped typing imports (including aliases)
   instead of decorator spelling. Composition line counts and JSON schema version 4 are unchanged; size-limit
