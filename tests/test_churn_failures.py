@@ -162,6 +162,46 @@ def test_valid_history_keeps_binary_exclusions_and_newline_rename_paths() -> Non
     assert churn.parse_numstat(b"@2026-03\0") == []
 
 
+def test_churn_parses_each_exclusion_once_and_matches_path_segments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = (
+        b"@2026-03\0"
+        b"10\t9\tsrc/cache/hidden.py\0"
+        b"20\t19\tsrc/vendor/generated/hidden.py\0"
+        b"1\t2\tsrc/cacheable/keep.py\0"
+        b"3\t4\tsrc/vendor/nested/generated/keep.py\0"
+        b"5\t6\ttests/test_keep.py\0"
+    )
+    replies = iter((b"true\n", b"a" * 40 + b"\n", output))
+
+    def fake_git(
+        executable: str, path: Path, arguments: list[str]
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(arguments, 0, next(replies), b"")
+
+    monkeypatch.setattr(churn, "_git", fake_git)
+    patterns = ("cache", "./vendor//generated/", "")
+    parsed_patterns: list[str] = []
+    path_parts = fallback._path_parts
+
+    def track_path_parts(path: Path | str) -> tuple[str, ...]:
+        if isinstance(path, str) and path in patterns:
+            parsed_patterns.append(path)
+        return path_parts(path)
+
+    monkeypatch.setattr(fallback, "_path_parts", track_path_parts)
+
+    result = churn.collect_churn(
+        tmp_path, months=1, excluded_paths=patterns, today=date(2026, 3, 20)
+    )
+
+    assert result.status == "ok"
+    (month,) = result.rows
+    assert (month.added, month.removed) == ((4, 5, 0), (6, 6, 0))
+    assert parsed_patterns == list(patterns)
+
+
 @pytest.mark.parametrize("malformed_tail", [False, True])
 def test_churn_aggregates_large_excluded_history_incrementally(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed_tail: bool
@@ -181,9 +221,7 @@ def test_churn_aggregates_large_excluded_history_incrementally(
     monkeypatch.setattr(churn, "_git", fake_git)
     # Isolate parser allocations from pathlib's filename interning in the path filters.
     monkeypatch.setattr(fallback, "map_language", lambda _: "Python")
-    monkeypatch.setattr(
-        fallback, "is_excluded_path", lambda path, excluded: path.split("/", 1)[0] in excluded
-    )
+    monkeypatch.setattr(fallback, "_path_parts", lambda path: tuple(str(path).split("/")))
     # Trace only the collector, with the bounded subprocess output already in memory.
     tracemalloc.start()
     try:

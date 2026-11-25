@@ -119,13 +119,14 @@ def collect_churn(
     totals: dict[str, tuple[list[int], list[int]]] = {
         month: ([0, 0, 0], [0, 0, 0]) for month in _months(since, current)
     }
+    excluded_path_parts = fallback.compile_excluded_paths(excluded_paths)
     try:
         for month, relative_path, added, removed in _iter_numstat(result.stdout):
             if month not in totals:
                 continue
             if fallback.map_language(relative_path) != "Python":
                 continue
-            if fallback.is_excluded_path(relative_path, excluded_paths):
+            if fallback.matches_excluded_path(relative_path, excluded_path_parts):
                 continue
             if include_globs and not fallback.matches_include_globs(relative_path, include_globs):
                 continue

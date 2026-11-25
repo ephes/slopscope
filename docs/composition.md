@@ -604,6 +604,8 @@ analyzed path.
 - Renames are detected and count toward the new path, so moving a file adds only its changed lines.
 - The same rules as the report apply: only Python files, the same excludes and include globs, and the same source,
   tests, and other split. Binary changes are ignored.
+  Churn splits each exclusion into path segments once per invocation and reuses those segments for all records.
+  Single-segment exclusions can match any component, and nested exclusions match contiguous components.
 - Months use the committer date in the commit's own time zone. The window covers `churn_months` months including the
   current one, and months without commits are listed with zeros.
 - Each churn Git command has a 30-second timeout. On expiry its process group (Windows: process tree) is

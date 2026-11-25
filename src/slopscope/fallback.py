@@ -203,9 +203,20 @@ def filter_excluded_paths(
 def is_excluded_path(path: Path | str, excluded_path_segments: Iterable[str]) -> bool:
     """Return whether a relative path contains an excluded path."""
 
+    return matches_excluded_path(path, map(_path_parts, excluded_path_segments))
+
+
+def compile_excluded_paths(excluded_paths: Iterable[str]) -> tuple[tuple[str, ...], ...]:
+    """Split exclusion patterns into reusable path segments."""
+
+    return tuple(map(_path_parts, excluded_paths))
+
+
+def matches_excluded_path(path: Path | str, excluded_paths: Iterable[tuple[str, ...]]) -> bool:
+    """Return whether a relative path contains any of the parsed patterns."""
+
     parts = _path_parts(path)
-    for excluded in excluded_path_segments:
-        excluded_parts = _path_parts(excluded)
+    for excluded_parts in excluded_paths:
         if not excluded_parts:
             continue
         if len(excluded_parts) == 1:
