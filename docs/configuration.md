@@ -93,7 +93,8 @@ slopscope --project frontend --project backend
 
 Project paths are resolved relative to the configuration file. `--project all` runs configured projects in config
 order. Repeated `--project NAME` selections also render in config order, and duplicate explicit selections are a
-usage error. `--project all` cannot be mixed with named project selections.
+usage error. `--project all` cannot be mixed with named project selections. The name `all` is reserved.
+Rename any project called `all` and update commands that select it.
 
 Top-level filters and classification fields apply to every selected project. Project-specific overrides are not
 implemented yet.

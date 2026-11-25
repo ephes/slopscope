@@ -9,6 +9,8 @@ from pathlib import Path
 
 from slopscope import classify
 
+ALL_PROJECTS = "all"
+
 
 class ConfigError(Exception):
     """User-facing configuration error."""
@@ -322,6 +324,11 @@ def _parse_project(
         raise ConfigError(f"unknown projects[{index}] field: {unknown[0]}")
 
     name = _required_string(data, "name", context=f"projects[{index}]")
+    if name == ALL_PROJECTS:
+        raise ConfigError(
+            f"projects[{index}]: project name {name!r} is reserved for --project all; "
+            "rename this project and update any commands that select it"
+        )
     path_value = _required_string(data, "path", context=f"projects[{index}]")
     optional = _bool_value(data, "optional", default=False, context=f"projects[{index}]")
     return ProjectConfig(

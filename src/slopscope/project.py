@@ -105,7 +105,7 @@ def build_multi_project_report(
 
 
 def _validate_requested_names(requested_names: Sequence[str]) -> None:
-    if "all" in requested_names and len(requested_names) > 1:
+    if config_module.ALL_PROJECTS in requested_names and len(requested_names) > 1:
         raise ProjectError("--project all cannot be combined with named projects")
 
     seen: set[str] = set()
@@ -116,7 +116,7 @@ def _validate_requested_names(requested_names: Sequence[str]) -> None:
 
 
 def _requests_all(requested_names: Sequence[str]) -> bool:
-    return len(requested_names) == 1 and requested_names[0] == "all"
+    return len(requested_names) == 1 and requested_names[0] == config_module.ALL_PROJECTS
 
 
 def _build_snapshot_row(name: str, report: RepositoryReport) -> ProjectSnapshotRow:

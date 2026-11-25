@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reserve the project name `all` for wildcard selection. Rename any project using that name.
+
 - Check staged allowlist and backup identities before installation, restoration, and cleanup.
   Preserve substituted entries and recreate missing recovery evidence under a fresh name.
 
