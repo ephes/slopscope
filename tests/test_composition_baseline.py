@@ -6,7 +6,7 @@ import json
 import os
 import stat
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, SupportsIndex, cast
@@ -1382,3 +1382,48 @@ def test_anchor_hash_work_overflow_preserves_snapshot(
     assert out == ""
     assert "duplicate work limit" in err
     assert snapshot.read_bytes() == b"last good snapshot"
+
+
+def test_snapshot_reuses_discovery_without_restatting_destination_per_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    for index in range(100):
+        write(repository, f"src/sample_{index}.py", f"value = {index}\n")
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text("old snapshot", encoding="utf-8")
+
+    destination_stats = 0
+    discovery_calls = 0
+    original_stat = Path.stat
+    original_discover = composition.discover_python_files
+
+    def count_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        nonlocal destination_stats
+        if path == snapshot:
+            destination_stats += 1
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    def count_discover(
+        path: Path | str,
+        *,
+        excluded_paths: Iterable[str],
+        include_globs: Iterable[str] = (),
+        admissions: dict[str, _source.Admission] | None = None,
+    ) -> list[str]:
+        nonlocal discovery_calls
+        discovery_calls += 1
+        return original_discover(
+            path, excluded_paths=excluded_paths, include_globs=include_globs, admissions=admissions
+        )
+
+    monkeypatch.setattr(Path, "stat", count_stat)
+    monkeypatch.setattr(composition, "discover_python_files", count_discover)
+    code, out, err = run_cli(
+        [str(repository), "--composition", "--format", "json", "--snapshot", str(snapshot)]
+    )
+
+    assert code == 0, err
+    assert json.loads(out)["total"]["files"] == 100
+    assert destination_stats <= 10
+    assert discovery_calls == 1

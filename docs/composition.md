@@ -506,7 +506,9 @@ skippable. The partial report and diagnostics still appear through the selected 
 exit code 1. A subsequent complete run can replace the snapshot normally.
 Before analysis, snapshot destinations that alias selected Python files, the loaded configuration, or the baseline
 are rejected with exit code 2 and no report or writes. Resolved symlink paths and hardlinks are checked too, across
-all selected projects. A distinct snapshot inside the repository is allowed.
+all selected projects. Preflight captures the destination identity once and compares it with the same
+source admissions used by the analysis. A source changed between discovery and opening fails analysis.
+A distinct snapshot inside the repository is allowed.
 The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
 Precommit write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
 The snapshot file is fsynced before replacement, and its parent directory is fsynced afterward.

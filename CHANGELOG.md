@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reuse source discovery and identity checks from snapshot preflight during composition analysis,
+  and avoid checking the destination inode again for each source.
+
 - Report permission and I/O failures and non-directory components in configured project paths, including
   for optional projects.
 

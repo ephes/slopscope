@@ -17,7 +17,7 @@ import re
 import stat
 import tokenize
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -314,8 +314,9 @@ def build_composition_report(
     semantic_settings: composition_semantics.SemanticSettings = (
         composition_semantics.DEFAULT_SETTINGS
     ),
+    admissions: Mapping[str, _source.Admission] | None = None,
 ) -> CompositionReport:
-    """Discover, analyze, classify, and aggregate Python files below a path."""
+    """Analyze admitted Python files, discovering sources when no admissions are supplied."""
 
     root = Path(path)
     max_total_source_bytes = (
@@ -335,14 +336,19 @@ def build_composition_report(
     classes: list[CompositionClassRow] = []
     functions: list[CompositionFunctionRow] = []
     failures: list[CompositionFailure] = []
-    admissions: dict[str, _source.Admission] = {}
+    if admissions is None:
+        discovered: dict[str, _source.Admission] = {}
+        paths = discover_python_files(
+            root,
+            excluded_paths=excluded_paths,
+            include_globs=include_globs,
+            admissions=discovered,
+        )
+        admissions = discovered
+    else:
+        paths = sorted(admissions)
 
-    for relative_path in discover_python_files(
-        root,
-        excluded_paths=excluded_paths,
-        include_globs=include_globs,
-        admissions=admissions,
-    ):
+    for relative_path in paths:
         kind = classify.classify_source_test(
             relative_path, source_dirs=source_dirs, test_dirs=test_dirs
         )
