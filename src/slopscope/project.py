@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 from collections.abc import Sequence
 
 from slopscope import config as config_module
@@ -61,26 +62,31 @@ def partition_existing_projects(
     existing: list[config_module.ProjectConfig] = []
     skipped: list[SkippedProject] = []
     for configured_project in projects:
-        if configured_project.path.is_dir():
-            existing.append(configured_project)
-            continue
-        if configured_project.path.exists():
-            raise ProjectError(
-                f"project {configured_project.name} path is not a directory: "
-                f"{configured_project.path}"
-            )
-        if configured_project.optional:
+        path = configured_project.path
+        label = f"project {configured_project.name}"
+        try:
+            metadata = path.stat()
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            if isinstance(exc, NotADirectoryError):
+                raise ProjectError(f"{label} path has a non-directory component: {path}") from exc
+            if not configured_project.optional:
+                raise ProjectError(f"{label} path not found: {path}") from exc
             skipped.append(
                 SkippedProject(
                     name=configured_project.name,
-                    path=configured_project.path,
+                    path=path,
                     reason="missing optional project path",
                 )
             )
             continue
-        raise ProjectError(
-            f"project {configured_project.name} path not found: {configured_project.path}"
-        )
+        except OSError as exc:
+            raise ProjectError(
+                f"incomplete analysis: could not stat {label} path {path}: {exc}"
+            ) from exc
+
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ProjectError(f"{label} path is not a directory: {path}")
+        existing.append(configured_project)
     return tuple(existing), tuple(skipped)
 
 

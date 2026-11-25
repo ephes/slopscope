@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Report permission and I/O failures and non-directory components in configured project paths, including
+  for optional projects.
+
 - Reserve the project name `all` for wildcard selection. Rename any project using that name.
 
 - Check staged allowlist and backup identities before installation, restoration, and cleanup.

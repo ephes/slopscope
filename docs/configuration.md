@@ -103,6 +103,8 @@ Required project paths must exist. Missing required projects fail with a `slopsc
 Missing optional projects are skipped with a concise stderr notice and appear in JSON output under
 `skipped_projects`. If all selected projects are optional and missing, `slopscope` still renders a successful
 multi-project report with no project rows and the skipped project list.
+Permission and I/O failures and non-directory path components exit with code 2, including for optional
+projects. An existing project path must be a directory.
 
 `--project` cannot be combined with `--profile` in the current implementation.
 
