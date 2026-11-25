@@ -108,6 +108,38 @@ def test_months_limit_the_window(tmp_path: Path) -> None:
     assert [row.month for row in churn.rows] == ["2026-03"]
 
 
+def test_churn_attributes_cross_boundary_renames_to_the_destination(tmp_path: Path) -> None:
+    git(tmp_path, "init", "-q", "-b", "trunk")
+    git(tmp_path, "config", "diff.relative", "true")
+    original = "".join(f"value_{index} = {index}\n" for index in range(10))
+    write(tmp_path, "app-extra/src/pure.py", original)
+    write(tmp_path, "app/tests/test_move.py", original.replace("value_", "test_"))
+    write(tmp_path, "app-extra/src/edited.py", original.replace("value_", "edited_"))
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "initial files")
+
+    (tmp_path / "app/src").mkdir()
+    git(tmp_path, "mv", "app-extra/src/pure.py", "app/src/pure.py")
+    git(tmp_path, "mv", "app/tests/test_move.py", "app-extra/src/test_move.py")
+    git(tmp_path, "commit", "-qm", "move files", when="2026-02-10T12:00:00+00:00")
+
+    git(tmp_path, "mv", "app-extra/src/edited.py", "app/src/edited.py")
+    write(
+        tmp_path, "app/src/edited.py", original.replace("value_", "edited_").replace("= 9", "= 99")
+    )
+    git(tmp_path, "commit", "-qam", "move and edit", when="2026-03-10T12:00:00+00:00")
+
+    churn = composition_churn.collect_churn(
+        tmp_path / "app", months=2, excluded_paths=EXCLUDES, today=TODAY
+    )
+
+    assert churn.status == "ok"
+    assert [(row.month, row.added, row.removed) for row in churn.rows] == [
+        ("2026-02", (0, 0, 0), (0, 0, 0)),
+        ("2026-03", (1, 0, 0), (1, 0, 0)),
+    ]
+
+
 def test_configured_branch_is_used(tmp_path: Path) -> None:
     app = make_history(tmp_path)
     git(tmp_path, "checkout", "-q", "-b", "other", "trunk~1")
@@ -263,7 +295,7 @@ def test_cli_churn_timeout_kills_children_without_retry(
         "hang = (stage == 'inside' or (stage == 'verify' and '--verify' in command) "
         "or (stage == 'log' and command[0] == 'log'))\n"
         "if not hang:\n"
-        "    print('a' * 40 if '--verify' in command else 'true')\n"
+        "    print('a' * 40 if '--verify' in command else 'true\\n')\n"
         "    sys.exit(0)\n"
         f"child = subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
         f"with open({str(child_pid)!r}, 'w') as out: out.write(str(child.pid))\n"

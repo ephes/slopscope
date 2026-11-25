@@ -186,6 +186,42 @@ def test_discover_filesystem_files_returns_sorted_relative_files_and_prunes_excl
     ]
 
 
+def test_filesystem_walk_compiles_prune_rules_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    patterns = ("cache", "/vendor/generated", "skip.py")
+    parsed_patterns: list[str] = []
+    path_parts = fallback._path_parts
+
+    def track_path_parts(path: Path | str) -> tuple[str, ...]:
+        if isinstance(path, str) and path in patterns:
+            parsed_patterns.append(path)
+        return path_parts(path)
+
+    monkeypatch.setattr(fallback, "_path_parts", track_path_parts)
+    branches = [Path(f"branch-{index}") for index in range(8)]
+    for branch in reversed(branches):
+        for filename in (
+            "cache/hidden.py",
+            "vendor/generated/hidden.py",
+            "vendor/nested/generated/keep.py",
+            "skip.py",
+            "keep.py",
+        ):
+            path = tmp_path / branch / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+
+    discovered = fallback.discover_filesystem_files(tmp_path, pruned_dir_names=iter(patterns))
+
+    assert discovered == [
+        branch / filename
+        for branch in branches
+        for filename in ("keep.py", "vendor/nested/generated/keep.py")
+    ]
+    assert sorted(parsed_patterns) == sorted(patterns)
+
+
 def test_map_language_by_suffix_and_filename() -> None:
     assert fallback.map_language(Path("src/app.py")) == "Python"
     assert fallback.map_language(Path("types/package.pyi")) == "Python"

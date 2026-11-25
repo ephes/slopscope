@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Count Git churn for renames across a selected directory boundary using the destination.
+  Moves into the directory contribute only their edits, and moves out contribute nothing.
+
+- Compile directory exclusion patterns once per filesystem fallback walk.
+
 - Preserve configured project aliases in reports and diagnostics. A dangling project symlink
   fails analysis even when the project is optional.
 

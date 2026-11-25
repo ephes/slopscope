@@ -271,6 +271,8 @@ retain the configured path, including symlink aliases.
 - `exclude_dirs` augments fallback default excludes. For `cloc`, configured `exclude_dirs` are applied to parsed
   file rows and language totals are recomputed from the filtered file rows. Top-level `exclude_dirs` always apply to
   profiles.
+  The filesystem fallback prepares the exclusion patterns once per walk. It prunes directories by matching
+  contiguous relative path components and skips files whose names exactly match an exclusion entry.
 - For the default report, `include_globs` selects relative paths in both engines. Cloc paths are normalized
   relative to the repository root before matching; language totals are rebuilt from selected file rows.
   Cloc keeps code-line counts while Python keeps physical-line counts. For profiles, non-empty profile

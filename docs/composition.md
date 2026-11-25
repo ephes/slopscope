@@ -608,7 +608,9 @@ analyzed path.
   diff against the branch it was merged into, in the month of the merge. No branch name such as `main` is assumed.
 - Only paths below the analyzed path count, with paths relative to it, so a subdirectory of a repository or a
   configured project reports its own churn.
-- Renames are detected and count toward the new path, so moving a file adds only its changed lines.
+- Git detects renames across the whole worktree. For a selected subdirectory, a rename into it
+  contributes only the changed lines, and a rename out contributes nothing. Churn applies the report's
+  filters and classification to the destination path relative to the selected directory.
 - The same rules as the report apply: only Python files, the same excludes and include globs, and the same source,
   tests, and other split. Binary changes are ignored.
   Churn splits each exclusion into path segments once per invocation and reuses those segments for all records.
@@ -626,6 +628,7 @@ analyzed path.
   read in 64 KiB chunks. Exceeding the budget terminates the owned process group/tree and skips churn
   without a retry, through the same bounded cleanup as a timeout. Source analysis, snapshot success
   policy, and the report exit code are unchanged.
+  The Git log budget covers the whole worktree's diff output, including paths outside a selected subdirectory.
 - If `git log` fails after retrying, text and JSON report `git log failed` with the same escaped preview
   of up to 64 bytes of Git stderr. An ellipsis marks truncation.
 - Malformed Git history (invalid month markers or counters, missing NUL boundaries, or incomplete

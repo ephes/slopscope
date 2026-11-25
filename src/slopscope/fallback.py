@@ -273,6 +273,7 @@ def discover_filesystem_files(
 
     root = Path(path)
     pruned_names = set(pruned_dir_names)
+    pruned_paths = compile_excluded_paths(pruned_names)
     files: list[Path] = []
 
     pending = [root]
@@ -294,7 +295,7 @@ def discover_filesystem_files(
                     if entry.is_symlink():
                         continue
                     if entry.is_dir(follow_symlinks=False):
-                        if is_excluded_path(relative, pruned_names):
+                        if matches_excluded_path(relative, pruned_paths):
                             continue
                         directories += 1
                         if directories > MAX_DISCOVERY_DIRECTORIES:
