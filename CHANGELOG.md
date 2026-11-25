@@ -8,6 +8,13 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve capture failures and supervisor SIGTERM exits when restoring the previous
+  handler fails. Report restoration-only failures with a dedicated capture diagnostic, and
+  keep exiting with status 143 on any later SIGTERM through the handler left installed.
+
+- Terminate and reap the capture child and close its pipes if reader construction or
+  signal-handler setup fails. Reader construction failures use the bounded startup diagnostic.
+
 - Encode allowlist JSON incrementally and stop when the output would exceed the file or
   remaining batch staging budget, before writing any output or recovery copy.
 

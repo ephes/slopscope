@@ -553,6 +553,62 @@ def test_term_during_handler_restore_still_restores_and_exits(
         real_signal(signal.SIGTERM, original_handler)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX scoped SIGTERM handling")
+@pytest.mark.parametrize("outcome", ["timeout", "term", "restore-only"])
+def test_sigterm_restore_failure_preserves_capture_outcome(
+    monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from unittest.mock import Mock
+
+    process = Mock(
+        pid=12345, args=["synthetic"], returncode=0, stdout=io.BytesIO(), stderr=io.BytesIO()
+    )
+    timeout = subprocess.TimeoutExpired(process.args, 1)
+    restore_failure = OSError("synthetic private restore detail")
+    monkeypatch.setattr(
+        _capture,
+        "_wait_for_exit",
+        Mock(return_value=True, side_effect=None if outcome == "restore-only" else timeout),
+    )
+    monkeypatch.setattr(_capture, "_retire_group", Mock(return_value=None))
+    monkeypatch.setattr(os, "killpg", Mock())
+    monkeypatch.setattr(signal, "getsignal", Mock(return_value=signal.SIG_DFL))
+
+    def set_handler(signum: int, handler: object) -> None:
+        if handler is signal.SIG_DFL:
+            if outcome == "term":
+                installed = install.call_args_list[0].args[1]
+                installed(signal.SIGTERM, None)
+            raise restore_failure
+
+    install = Mock(side_effect=set_handler)
+    monkeypatch.setattr(signal, "signal", install)
+    if outcome == "restore-only":
+        with pytest.raises(
+            _capture.SignalRestoreError,
+            match="^could not restore SIGTERM handler after synthetic capture$",
+        ) as raised_restore:
+            _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+        assert raised_restore.value.__cause__ is restore_failure
+    elif outcome == "term":
+        with pytest.raises(SystemExit) as raised_term:
+            _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+        assert raised_term.value.code == 128 + signal.SIGTERM
+        process.wait.assert_called_once_with(timeout=5)
+    else:
+        with pytest.raises(subprocess.TimeoutExpired) as raised_timeout:
+            _capture.capture_process(process, timeout=1, max_bytes=100, label="synthetic")
+        assert raised_timeout.value is timeout
+        process.wait.assert_called_once_with(timeout=5)
+    install.assert_called_with(signal.SIGTERM, signal.SIG_DFL)
+    assert process.stdout.closed and process.stderr.closed
+    # The handler left installed by the failed restore must still exit on a later TERM.
+    leftover = install.call_args_list[0].args[1]
+    with pytest.raises(SystemExit) as raised_later:
+        leftover(signal.SIGTERM, None)
+    assert raised_later.value.code == 128 + signal.SIGTERM
+
+
 @pytest.mark.parametrize("interruption", ["term", "error"])
 def test_released_identity_is_not_killed_by_failure_cleanup(
     monkeypatch: pytest.MonkeyPatch, interruption: str
