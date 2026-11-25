@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Check staged allowlist and backup identities before installation, restoration, and cleanup.
+  Preserve substituted entries and recreate missing recovery evidence under a fresh name.
+
 - Refuse short writes of staged allowlist outputs and recovery backups before syncing the
   incomplete file or replacing any allowlist.
 

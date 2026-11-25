@@ -192,6 +192,14 @@ failed restoration and its retained sibling `.<allowlist-name>.*.backup` file, o
 seeded file to remove. Preserve that backup and restore it manually after resolving the error
 and coordinating with other writers. This is a handled-error guarantee, not a transaction
 across process death or power loss; an uncatchable interruption may leave a partially published set.
+
+Staged outputs and backups are tracked by the device and inode of their open file descriptors.
+Publication, restoration, and cleanup compare the current staging entry directly, without following
+symlinks. A missing or substituted stage refuses installation or restoration. Cleanup leaves
+substituted names in place. If a substituted backup is needed for recovery, the command writes
+the original bytes to a fresh sibling backup for manual restoration. These path-based checks are
+best effort and leave a race window between verification and the filesystem operation.
+
 If directory synchronization fails after replacement, the command reports "durability unconfirmed"
 (exit code 2), leaves visible publication in place, and retains named old-byte backups (or identifies
 new seeds to remove). A failed restoration sync retains a backup even if old bytes are visible again.

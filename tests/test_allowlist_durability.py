@@ -266,6 +266,119 @@ def test_compensation_directory_sync_failure_retains_old_bytes(
     assert str(backups[0]) in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    ("suffix", "symlink"), [("pending", False), ("pending", True), ("backup", False)]
+)
+def test_publication_refuses_substituted_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, symlink: bool
+) -> None:
+    path = tmp_path / "allowlist.json"
+    original = b'{"functions": {"old": 200}}'
+    path.write_bytes(original)
+    displaced = tmp_path / "displaced"
+    replacement: Path | None = None
+    real_sync = size_limits._sync_directory
+
+    def sync(parent: Path) -> None:
+        nonlocal replacement
+        real_sync(parent)
+        if replacement is None:
+            (replacement,) = parent.glob(f".allowlist.json.*.{suffix}")
+            replacement.rename(displaced)
+            if symlink:
+                replacement.symlink_to(displaced)
+            else:
+                replacement.write_bytes(b"foreign")
+
+    monkeypatch.setattr(size_limits, "_sync_directory", sync)
+    with pytest.raises(size_limits.SizeLimitsError, match="staging entry changed"):
+        size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    assert path.read_bytes() == original
+    assert replacement is not None
+    if symlink:
+        assert replacement.readlink() == displaced
+    else:
+        assert replacement.read_bytes() == b"foreign"
+    assert list(tmp_path.glob(".allowlist.json.*")) == [replacement]
+
+
+def test_failed_staging_preserves_substituted_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "allowlist.json"
+    path.write_bytes(b"{}")
+    replacement: Path | None = None
+
+    def fail_sync(fd: int) -> None:
+        nonlocal replacement
+        (replacement,) = tmp_path.glob(".allowlist.json.*.pending")
+        replacement.rename(tmp_path / "displaced")
+        replacement.write_bytes(b"foreign")
+        raise OSError("injected staging sync failure")
+
+    monkeypatch.setattr(os, "fsync", fail_sync)
+    with pytest.raises(size_limits.SizeLimitsError, match="injected staging sync failure"):
+        size_limits.write_allowlist(path, {"functions": {"new": 180}})
+    assert path.read_bytes() == b"{}"
+    assert replacement is not None
+    assert replacement.read_bytes() == b"foreign"
+
+
+@pytest.mark.parametrize("phase", ["restore", "retire"])
+def test_publication_preserves_substituted_backup_and_recovers_prior_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    paths = [tmp_path / name for name in ("a.json", "b.json")]
+    original = b'{"functions": {"old": 200}}'
+    for path in paths:
+        path.write_bytes(original)
+    replacement: Path | None = None
+    real_replace, real_sync = os.replace, size_limits._sync_directory
+
+    def substitute_backup() -> None:
+        nonlocal replacement
+        (replacement,) = tmp_path.glob(".a.json.*.backup")
+        replacement.rename(tmp_path / "displaced")
+        replacement.write_bytes(b"foreign")
+
+    def replace(src: Path, dst: Path) -> None:
+        if phase == "restore" and dst == paths[1]:
+            substitute_backup()
+            raise OSError("injected second replace failure")
+        real_replace(src, dst)
+
+    def sync(parent: Path) -> None:
+        real_sync(parent)
+        if (
+            phase == "retire"
+            and replacement is None
+            and all(b'"new"' in path.read_bytes() for path in paths)
+        ):
+            substitute_backup()
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(size_limits, "_sync_directory", sync)
+    with (
+        size_limits.allowlist_locks(paths, action=size_limits.UPDATE) as destinations,
+        pytest.raises(size_limits.SizeLimitsError, match="staging entry changed") as raised,
+    ):
+        size_limits.publish_allowlists(
+            [(path, {"functions": {"new": 180}}) for path in paths], destinations=destinations
+        )
+    if phase == "restore":
+        assert "injected second replace failure" in str(raised.value)
+        assert paths[1].read_bytes() == original
+    else:
+        assert b'"new"' in paths[1].read_bytes()
+    assert b'"new"' in paths[0].read_bytes()
+    assert replacement is not None
+    assert replacement.read_bytes() == b"foreign"
+    (recovery,) = set(tmp_path.glob(".a.json.*.backup")) - {replacement}
+    assert recovery.read_bytes() == original
+    assert f"restore from {recovery}" in str(raised.value)
+    assert f"restore from {replacement}" not in str(raised.value)
+
+
 def test_seed_durably_creates_parent_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import stat
 

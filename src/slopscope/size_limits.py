@@ -123,9 +123,9 @@ class AllowlistDestination:
     mode: int | None
 
 
-def _identity(path: Path) -> tuple[int, int] | None:
+def _identity(path: Path, *, follow_symlinks: bool = True) -> tuple[int, int] | None:
     try:
-        info = path.stat()
+        info = path.stat(follow_symlinks=follow_symlinks)
     except FileNotFoundError:
         return None
     return info.st_dev, info.st_ino
@@ -288,35 +288,63 @@ def write_allowlist(
         raise SizeLimitsError(f"could not write allowlist {path}: {exc}") from exc
 
 
+@dataclasses.dataclass(frozen=True)
+class _StagedAllowlist:
+    path: Path
+    identity: tuple[int, int]
+
+    def matches(self) -> bool:
+        return _identity(self.path, follow_symlinks=False) == self.identity
+
+    def verify(self) -> None:
+        if not self.matches():
+            raise SizeLimitsError(f"allowlist staging entry changed: {self.path}")
+
+    def unlink(self) -> None:
+        self.verify()
+        self.path.unlink()
+
+    def discard(self) -> None:
+        with contextlib.suppress(OSError, SizeLimitsError):
+            self.unlink()
+
+
 @dataclasses.dataclass
 class _PreparedAllowlist:
     destination: AllowlistDestination
-    temporary: Path
-    backup: Path | None
-    installed_identity: tuple[int, int] | None = None
+    temporary: _StagedAllowlist
+    backup: _StagedAllowlist | None
     keep_backup: bool = False
     prior: bytes | None = None
 
 
-def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str) -> Path:
-    temporary: Path | None = None
+def _stage_bytes(
+    target: Path, content: bytes, mode: int | None, *, suffix: str
+) -> _StagedAllowlist:
+    temporary: _StagedAllowlist | None = None
     try:
         # Close explicitly so a close error cannot hide the staging failure.
         handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="wb", dir=target.parent, prefix=f".{target.name}.", suffix=suffix, delete=False
         )
-        temporary = Path(handle.name)
         try:
+            descriptor = handle.fileno()
+            info = os.fstat(descriptor)
+            temporary = _StagedAllowlist(Path(handle.name), (info.st_dev, info.st_ino))
             if mode is not None:
-                os.chmod(temporary, mode)
+                if os.chmod in os.supports_fd:
+                    os.chmod(descriptor, mode)
+                else:
+                    temporary.verify()
+                    os.chmod(temporary.path, mode)
             written = handle.write(content)
             if written != len(content):
                 raise SizeLimitsError(
-                    f"short write staging allowlist {temporary}: "
+                    f"short write staging allowlist {temporary.path}: "
                     f"wrote {written} of {len(content)} bytes"
                 )
             handle.flush()
-            os.fsync(handle.fileno())
+            os.fsync(descriptor)
         except BaseException:
             with contextlib.suppress(OSError):
                 handle.close()
@@ -326,19 +354,25 @@ def _stage_bytes(target: Path, content: bytes, mode: int | None, *, suffix: str)
         return temporary
     except BaseException:
         if temporary is not None:
-            with contextlib.suppress(OSError):
-                temporary.unlink(missing_ok=True)
+            temporary.discard()
         raise
 
 
 def _retain_backup(item: _PreparedAllowlist) -> None:
-    """Recreate evidence if an uncertain restore/retirement already consumed its name."""
+    """Keep owned recovery evidence or recreate it under a fresh name."""
 
-    if item.prior is not None and (item.backup is None or not item.backup.exists()):
-        item.backup = _stage_bytes(
-            item.destination.target, item.prior, item.destination.mode, suffix=".backup"
-        )
-        _sync_directory(item.destination.target.parent)
+    if item.prior is None:
+        return
+    backup, item.backup = item.backup, None
+    if backup is not None and backup.matches():
+        item.backup = backup
+        return
+    backup = _stage_bytes(
+        item.destination.target, item.prior, item.destination.mode, suffix=".backup"
+    )
+    backup.verify()
+    item.backup = backup
+    _sync_directory(item.destination.target.parent)
 
 
 def _staging_overflow(path: Path) -> SizeLimitsError:
@@ -408,12 +442,14 @@ def publish_allowlists(
             _sync_directory(item.destination.target.parent)
         for item in prepared:
             _verify_destination(item.destination)
-            item.installed_identity = _identity(item.temporary)
+            if item.backup is not None:
+                item.backup.verify()
+            item.temporary.verify()
             # Keep the prior bytes until the outcome is settled, so an interruption at any
             # point after this replacement (including during compensation) retains them.
             item.keep_backup = True
             replaced.append(item)  # Include an interrupted rename whose outcome is uncertain.
-            os.replace(item.temporary, item.destination.target)
+            os.replace(item.temporary.path, item.destination.target)
             durability_uncertain = True
             _sync_directory(item.destination.target.parent)
             durability_uncertain = False
@@ -444,12 +480,13 @@ def publish_allowlists(
                     continue
                 # Do not restore through a changed ancestor or clobber an external writer.
                 _verify_destination(
-                    dataclasses.replace(destination, identity=item.installed_identity)
+                    dataclasses.replace(destination, identity=item.temporary.identity)
                 )
                 if item.backup is None:
                     destination.target.unlink()
                 else:
-                    os.replace(item.backup, destination.target)
+                    item.backup.verify()
+                    os.replace(item.backup.path, destination.target)
                 _sync_directory(destination.target.parent)
                 item.keep_backup = False
             except BaseException as recovery:
@@ -457,11 +494,12 @@ def publish_allowlists(
                     _retain_backup(item)
                 except BaseException as retention:
                     recovery_errors.append(f"could not settle recovery evidence: {retention}")
-                evidence = (
-                    f"restore from {item.backup}"
-                    if item.backup is not None
-                    else f"remove newly seeded {destination.target}"
-                )
+                if item.backup is not None:
+                    evidence = f"restore from {item.backup.path}"
+                elif item.prior is None:
+                    evidence = f"remove newly seeded {destination.target}"
+                else:
+                    evidence = "no recovery backup available"
                 recovery_errors.append(
                     f"{destination.path}: {type(recovery).__name__}: {recovery}; {evidence}"
                 )
@@ -480,8 +518,7 @@ def publish_allowlists(
         for item in prepared:
             for leftover in (item.temporary, None if item.keep_backup else item.backup):
                 if leftover is not None:
-                    with contextlib.suppress(OSError):
-                        leftover.unlink(missing_ok=True)
+                    leftover.discard()
 
 
 @contextlib.contextmanager
