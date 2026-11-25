@@ -337,7 +337,9 @@ Human reports and diagnostics display nonprinting characters in repository paths
 labels, unit names, and errors as visible escapes: `\n`, `\r`, `\t`, `\xHH`, `\uHHHH`, or
 `\UHHHHHHHH`. This includes ESC/OSC/CSI controls, C1 controls, Unicode directional controls and
 line separators. Printable Unicode and literal brackets remain readable; Rich applies only its
-own table styling. Data cannot insert terminal commands or new report rows. JSON values, allowlist
+own table styling. The renderer passes through fully printable text and copies printable spans as
+a unit around escapes, keeping allocation low for long diagnostics with few controls.
+Data cannot insert terminal commands or new report rows. JSON values, allowlist
 keys, snapshot identities, and filesystem paths retain their original characters. Use JSON for
 exact identities; a human display escape can also occur literally in a filename.
 

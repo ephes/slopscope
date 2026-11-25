@@ -5,12 +5,14 @@ from __future__ import annotations
 import io
 import json
 import re
+import tracemalloc
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from slopscope import cli, composition, composition_render, render, size_limits_render
+from slopscope._display import display_text
 from slopscope.render import OutputFormat
 from slopscope.report import (
     AreaRow,
@@ -49,6 +51,23 @@ PAYLOADS = [
     ("a\u202eb", r"a\u202eb"),
     ("a\u2028b", r"a\u2028b"),
 ]
+
+
+def test_sparse_terminal_escapes_keep_allocation_proportional_to_text() -> None:
+    run = "漢字" * 50_000
+    diagnostic = run + "\n\r\t\x1b\u202e\U000e0001" + run
+    expected = run + r"\n\r\t\x1b\u202e\U000e0001" + run
+
+    tracemalloc.start()
+    try:
+        result = display_text(diagnostic)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result == expected
+    assert peak < 2_000_000
+    assert display_text(run) is run
 
 
 def safe_output(output: str, escaped: str, output_format: OutputFormat) -> str:
