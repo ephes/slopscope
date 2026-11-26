@@ -979,6 +979,7 @@ def _build_composition_report(
         max_source_bytes=composition_config.max_source_bytes
         or composition.DEFAULT_MAX_SOURCE_BYTES,
         max_total_source_bytes=composition_config.max_total_source_bytes,
+        max_source_tokens=composition_config.max_source_tokens,
         max_total_tokens=composition_config.max_total_tokens,
         max_total_anchors=composition_config.max_total_anchors,
         admissions=admissions,

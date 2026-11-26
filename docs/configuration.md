@@ -225,6 +225,7 @@ The composition report also has its own optional section:
 limit = 20
 min_duplicate_tokens = 80
 max_source_bytes = 16777216
+max_source_tokens = 250000
 max_total_source_bytes = 134217728
 max_total_tokens = 8000000
 max_total_anchors = 2000000
@@ -238,6 +239,8 @@ churn_months = 24
 See [Composition Report](composition.md#configuration) for what each field does. `0.1.0a1` rejects this section as an
 unknown field. `0.3.0a1` and earlier reject the `max_source_bytes`, `max_total_source_bytes`,
 `max_total_tokens`, and `max_total_anchors` keys; use `0.4.0a1` or later when setting them.
+`max_source_tokens` (default 250000, composition only) is new after `0.4.0a2`; earlier releases reject it as an
+unknown key.
 
 ## Size Limits
 
@@ -252,8 +255,8 @@ allowlist = "size-limits.json"
 ```
 
 The allowlist path is relative to the analyzed project root, or to each configured project's root with `--project`.
-Size-limits also uses `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
-`max_total_anchors` from `[tool.slopscope.composition]`. Cumulative budgets reset per project;
+Size-limits also uses `max_source_bytes` and `max_total_source_bytes` from
+`[tool.slopscope.composition]`. Cumulative budgets reset per project;
 exhaustion returns exit code 2 without a partial report or allowlist write.
 See [Size Limits](size-limits.md). `0.2.0a1` and earlier reject this section as an unknown field;
 use `0.3.0a1` or later.

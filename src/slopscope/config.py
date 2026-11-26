@@ -53,6 +53,7 @@ class CompositionConfig:
     compat_markers: tuple[str, ...] | None = None
     churn_branch: str | None = None
     churn_months: int | None = None
+    max_source_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,7 @@ _COMPOSITION_FIELDS = {
     "limit",
     "max_source_bytes",
     "max_total_source_bytes",
+    "max_source_tokens",
     "max_total_tokens",
     "max_total_anchors",
     "min_duplicate_tokens",
@@ -249,6 +251,7 @@ def _composition_config(data: Mapping[str, object]) -> CompositionConfig:
         max_total_source_bytes=_optional_positive_int(
             value, "max_total_source_bytes", context=context
         ),
+        max_source_tokens=_optional_positive_int(value, "max_source_tokens", context=context),
         max_total_tokens=_optional_positive_int(value, "max_total_tokens", context=context),
         max_total_anchors=_optional_positive_int(value, "max_total_anchors", context=context),
         min_duplicate_tokens=_optional_positive_int(value, "min_duplicate_tokens", context=context),

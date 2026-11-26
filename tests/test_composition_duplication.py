@@ -5,7 +5,7 @@ import io
 import textwrap
 import tokenize
 import weakref
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import GeneratorType
 from typing import Any
@@ -361,6 +361,59 @@ def test_extension_reuses_member_tail_per_group(monkeypatch: pytest.MonkeyPatch)
     )
     assert result.intervals == {index: [(index + 1, index + 2)] for index in range(8)}
     assert len({id(tail) for tail in compared_tails}) == 3
+
+
+def test_disjoint_continuation_stops_before_later_memberships() -> None:
+    class UnvisitedCover(list[tuple[int, int]]):
+        def __iter__(self) -> Iterator[tuple[int, int]]:
+            pytest.fail("a disjoint continuation should stop scanning memberships")
+
+    later = UnvisitedCover([(0, 2)])
+    members = range(1000)
+    covers: dict[int, list[tuple[int, int]]] = dict.fromkeys(members, later)
+    covers[0] = [(0, 0)]
+    covers[1] = [(1, 0)]
+    budget = composition_duplication._DuplicateBudget(output=0, work=5000)
+
+    assert not composition_duplication._continues_block(members, covers, (), budget=budget)
+    assert budget.work == 4996
+
+
+@pytest.mark.parametrize(
+    ("second_occurrence", "block_copies", "continues", "remaining_work"),
+    [(1, 2, True, 0), (0, 2, False, 0), (1, 3, False, 4)],
+)
+def test_overlapping_continuation_requires_every_distinct_copy(
+    second_occurrence: int, block_copies: int, continues: bool, remaining_work: int
+) -> None:
+    blocks = [
+        composition_duplication.Block(
+            10,
+            tuple(composition_duplication.Occurrence(file, 1, 2) for file in range(block_copies)),
+        )
+    ]
+    covers = {0: [(0, 0), (1, 0)], 1: [(2, 0), (0, second_occurrence)]}
+    budget = composition_duplication._DuplicateBudget(output=0, work=10)
+
+    assert (
+        composition_duplication._continues_block([0, 1], covers, blocks, budget=budget) is continues
+    )
+    assert budget.work == remaining_work
+
+
+def test_continuation_skips_blocks_with_other_copy_counts_before_scanning() -> None:
+    blocks = [
+        composition_duplication.Block(
+            10, tuple(composition_duplication.Occurrence(file, 1, 2) for file in range(copies))
+        )
+        for copies in (3, 2)
+    ]
+    covers = {0: [(0, 0), (1, 0)], 1: [(0, 1), (1, 1)]}
+    # Membership scan costs 2 * (1 + 2); only the two-copy block may charge its 4-unit check.
+    budget = composition_duplication._DuplicateBudget(output=0, work=10)
+
+    assert composition_duplication._continues_block([0, 1], covers, blocks, budget=budget)
+    assert budget.work == 0
 
 
 def test_staircase_subgroups_do_not_use_python_recursion() -> None:
