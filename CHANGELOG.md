@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Mark composition baseline comparisons as incomparable when the baseline total lacks headline
+  counts, and name the missing fields while retaining unknown deltas.
+
 - Reduce composition scan memory by retaining one eligibility byte per line for duplicate counts.
 
 - Reject composition and size-limits reads when the source was detached from its selected path

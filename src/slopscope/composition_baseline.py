@@ -348,6 +348,15 @@ def compare(
                 f"setting {name} differs: baseline {baseline_settings.get(name)!r}, "
                 f"current {value!r}"
             )
+    total = baseline.get("total")
+    total_counts = (
+        _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
+    )
+    warnings.extend(
+        f"baseline is missing headline count total.{metric}"
+        for metric in HEADLINE_METRICS
+        if metric not in total_counts
+    )
     comparable = not warnings
     if baseline_python_version != report.python_version:
         warnings.append(
@@ -355,10 +364,6 @@ def compare(
             f"current {report.python_version!r}"
         )
 
-    total = baseline.get("total")
-    total_counts = (
-        _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
-    )
     baseline_kinds = {
         str(kind.get("name")): _read_kind_metrics(
             kind, total_counts, path=path, where=f"report kinds[{index}]"

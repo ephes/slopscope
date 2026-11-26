@@ -759,12 +759,16 @@ def test_baseline_invalid_metric_group_exits_2(tmp_path: Path, value: object) ->
     assert "kinds[0].categories" in err
 
 
-def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing_headline", [None, "code", "physical"])
+def test_baseline_absent_metrics_remain_unknown(
+    tmp_path: Path, missing_headline: str | None
+) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "snapshot.json"
     run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
     data = json.loads(snapshot.read_text())
-    del data["total"]["code"]
+    if missing_headline is not None:
+        del data["total"][missing_headline]
     del data["total"]["categories"]
     data["extension"] = {"values": [1.25, -1e308, "NaN"]}
     snapshot.write_text(json.dumps(data))
@@ -772,8 +776,20 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
         ["--composition", "--format", "json", "--baseline", str(snapshot), str(repository)]
     )
     assert code == 0
-    assert err == ""
-    assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+    comparison = json.loads(out)["baseline"]
+    assert comparison["comparable"] is (missing_headline is None)
+    total = comparison["deltas"]["total"]
+    assert total["categories.import"]["baseline"] is None
+    assert total["categories.import"]["delta"] is None
+    if missing_headline is None:
+        assert comparison["warnings"] == []
+        assert err == ""
+    else:
+        warning = f"baseline is missing headline count total.{missing_headline}"
+        assert comparison["warnings"] == [warning]
+        assert err == f"slopscope: warning: {warning}\n"
+        assert total[missing_headline]["baseline"] is None
+        assert total[missing_headline]["delta"] is None
 
 
 @pytest.mark.parametrize("metric", ["files", "physical", "code"])
