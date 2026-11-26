@@ -188,7 +188,8 @@ def analyze_source(
             for token in tokenize.generate_tokens(io.StringIO(source).readline):
                 if max_source_tokens is not None and len(tokens) == max_source_tokens:
                     raise composition_duplication.BudgetExceeded(
-                        "source tokenizer token limit exceeded"
+                        f"source tokenizer token limit exceeded: {path} has more than "
+                        f"{max_source_tokens} tokens"
                     )
                 tokens.append(token)
         except (tokenize.TokenError, SyntaxError) as exc:
@@ -348,6 +349,10 @@ def build_composition_report(
     max_source_tokens = (
         DEFAULT_MAX_SOURCE_TOKENS if max_source_tokens is None else max_source_tokens
     )
+    if isinstance(max_source_tokens, bool) or not isinstance(max_source_tokens, int):
+        raise TypeError("max_source_tokens must be a positive integer")
+    if max_source_tokens < 1:
+        raise ValueError("max_source_tokens must be a positive integer")
     max_total_tokens = DEFAULT_MAX_TOTAL_TOKENS if max_total_tokens is None else max_total_tokens
     max_total_anchors = (
         DEFAULT_MAX_TOTAL_ANCHORS if max_total_anchors is None else max_total_anchors

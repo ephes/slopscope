@@ -170,10 +170,26 @@ def test_composition_tokenizer_boundary_counts_non_code_tokens(tmp_path: Path) -
     assert not report.failures
     assert report.total.counts.code == 1
 
-    with pytest.raises(fallback.CountingError, match="source tokenizer token limit"):
+    with pytest.raises(
+        fallback.CountingError,
+        match=(
+            f"source tokenizer token limit exceeded: app.py has more than {raw_tokens - 1} tokens"
+        ),
+    ):
         composition.build_composition_report(
             tmp_path, excluded_paths=(), max_total_tokens=3, max_source_tokens=raw_tokens - 1
         )
+
+
+@pytest.mark.parametrize(
+    ("limit", "error"), [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError)]
+)
+def test_composition_builder_rejects_invalid_source_token_limit(
+    tmp_path: Path, limit: Any, error: type[Exception]
+) -> None:
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    with pytest.raises(error, match="max_source_tokens must be a positive integer"):
+        composition.build_composition_report(tmp_path, excluded_paths=(), max_source_tokens=limit)
 
 
 def test_composition_exact_cumulative_boundaries(tmp_path: Path) -> None:

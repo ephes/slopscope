@@ -312,6 +312,8 @@ def _continues_block(
             return False
 
     for block in shared_blocks or ():
+        if len(blocks[block].occurrences) != len(members):
+            continue
         budget.reserve(work=coverage_work)
         occurrences = {
             occurrence
@@ -319,7 +321,7 @@ def _continues_block(
             for covered, occurrence in covered_by[anchor]
             if covered == block
         }
-        if len(occurrences) == len(members) == len(blocks[block].occurrences):
+        if len(occurrences) == len(members):
             return True
     return False
 

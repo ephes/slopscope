@@ -8,11 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
-- Intersect duplicate continuation memberships incrementally and stop scanning once no
-  block covers the group.
+- Intersect duplicate continuation memberships incrementally, stop scanning once no
+  block covers the group, and skip blocks with a different copy count before charging work.
 
 - Bound the number of tokenizer results retained per Python source in composition mode with
-  the separately configurable `max_source_tokens` ceiling. Overflow preserves existing snapshots.
+  the separately configurable `max_source_tokens` ceiling. Overflow names the source and limit
+  and preserves existing snapshots; `build_composition_report` rejects non-positive limits.
 
 - Report the published composition snapshot path and exit 2 if rendering or delivering the display output fails, including on a closed stdout pipe.
 

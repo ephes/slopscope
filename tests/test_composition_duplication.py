@@ -380,11 +380,11 @@ def test_disjoint_continuation_stops_before_later_memberships() -> None:
 
 
 @pytest.mark.parametrize(
-    ("second_occurrence", "block_copies", "continues"),
-    [(1, 2, True), (0, 2, False), (1, 3, False)],
+    ("second_occurrence", "block_copies", "continues", "remaining_work"),
+    [(1, 2, True, 0), (0, 2, False, 0), (1, 3, False, 4)],
 )
 def test_overlapping_continuation_requires_every_distinct_copy(
-    second_occurrence: int, block_copies: int, continues: bool
+    second_occurrence: int, block_copies: int, continues: bool, remaining_work: int
 ) -> None:
     blocks = [
         composition_duplication.Block(
@@ -398,6 +398,21 @@ def test_overlapping_continuation_requires_every_distinct_copy(
     assert (
         composition_duplication._continues_block([0, 1], covers, blocks, budget=budget) is continues
     )
+    assert budget.work == remaining_work
+
+
+def test_continuation_skips_blocks_with_other_copy_counts_before_scanning() -> None:
+    blocks = [
+        composition_duplication.Block(
+            10, tuple(composition_duplication.Occurrence(file, 1, 2) for file in range(copies))
+        )
+        for copies in (3, 2)
+    ]
+    covers = {0: [(0, 0), (1, 0)], 1: [(0, 1), (1, 1)]}
+    # Membership scan costs 2 * (1 + 2); only the two-copy block may charge its 4-unit check.
+    budget = composition_duplication._DuplicateBudget(output=0, work=10)
+
+    assert composition_duplication._continues_block([0, 1], covers, blocks, budget=budget)
     assert budget.work == 0
 
 
