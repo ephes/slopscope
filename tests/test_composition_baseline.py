@@ -5,6 +5,8 @@ import io
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -55,6 +57,98 @@ def test_snapshot_writes_the_json_report(tmp_path: Path) -> None:
     assert stderr == ""
     assert stdout.startswith("Slopscope Composition\n")
     assert snapshot.read_text(encoding="utf-8") == as_json
+
+
+@pytest.mark.parametrize("failure", ["render", "write", "flush"])
+def test_display_failure_reports_published_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    class FailingOutput(io.StringIO):
+        def write(self, text: str, /) -> int:
+            if failure == "write":
+                raise BrokenPipeError("injected write failure")
+            return super().write(text)
+
+        def flush(self) -> None:
+            if failure == "flush":
+                raise BrokenPipeError("injected flush failure")
+            super().flush()
+
+    def fail_render(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("injected render failure")
+
+    if failure == "render":
+        monkeypatch.setattr(composition_render, "render_composition_report", fail_render)
+
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "saved.json"
+    stderr = io.StringIO()
+    code = cli.run(
+        ["--composition", "--format", "plain", "--snapshot", str(snapshot), str(repository)],
+        stdout=FailingOutput(),
+        stderr=stderr,
+    )
+
+    assert code == 2
+    assert stderr.getvalue() == (
+        f"slopscope: snapshot {snapshot} published; "
+        f"could not display composition report: injected {failure} failure\n"
+    )
+    baseline = composition_baseline.load_baseline(
+        snapshot,
+        expected_report_type=composition_baseline.SINGLE_REPORT_TYPE,
+        schema_version=composition.SCHEMA_VERSION,
+    )
+    assert baseline["report_type"] == "composition"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX pipes")
+def test_closed_stdout_pipe_after_snapshot_exits_2_without_shutdown_noise(
+    tmp_path: Path,
+) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "saved.json"
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; from slopscope import cli; sys.exit(cli.main(sys.argv[1:]))",
+                "--composition",
+                "--format",
+                "plain",
+                "--snapshot",
+                str(snapshot),
+                str(repository),
+            ],
+            stdout=write_end,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        os.close(write_end)
+
+    assert completed.returncode == 2
+    assert completed.stderr.startswith(f"slopscope: snapshot {snapshot} published; ")
+    assert completed.stderr.count("\n") == 1
+    assert "Exception ignored" not in completed.stderr
+    assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
+
+
+def test_display_failure_without_snapshot_preserves_stream_error(tmp_path: Path) -> None:
+    class FailingOutput(io.StringIO):
+        def write(self, text: str, /) -> int:
+            raise BrokenPipeError("injected write failure")
+
+    repository = make_repository(tmp_path)
+    stderr = io.StringIO()
+    with pytest.raises(BrokenPipeError, match="injected write failure"):
+        cli.run(["--composition", str(repository)], stdout=FailingOutput(), stderr=stderr)
+    assert stderr.getvalue() == ""
 
 
 def test_snapshot_write_failure_exits_2(tmp_path: Path) -> None:
@@ -934,7 +1028,7 @@ def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:
     assert "duplicate projects[1].name" in err
 
 
-@pytest.mark.parametrize("failure", ["partial-write", "flush", "replace"])
+@pytest.mark.parametrize("failure", ["partial-write", "short-write", "flush", "replace"])
 def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -944,6 +1038,7 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     snapshot = tmp_path / "before.json"
     assert run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])[0] == 0
     previous = snapshot.read_bytes()
+    original = snapshot.stat()
     injected = False
     original_temporary = tempfile.NamedTemporaryFile
 
@@ -951,13 +1046,21 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
         handle = original_temporary(*args, **kwargs)
         original_write = handle.write
 
-        def partial_write(text: str) -> int:
+        def partial_write(content: bytes) -> int:
             nonlocal injected
             injected = True
-            original_write(text[:20])
-            raise OSError("injected partial write")
+            written: int = original_write(content[:20])
+            if failure == "partial-write":
+                raise OSError("injected partial write")
+            return written
 
         monkeypatch.setattr(handle, "write", partial_write)
+        if failure == "short-write":
+
+            def unexpected_flush() -> None:
+                raise AssertionError("short snapshot write reached flush")
+
+            monkeypatch.setattr(handle, "flush", unexpected_flush)
         return handle
 
     def fail(*args: Any, **kwargs: Any) -> None:
@@ -965,7 +1068,7 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
         injected = True
         raise OSError(f"injected {failure}")
 
-    if failure == "partial-write":
+    if failure in {"partial-write", "short-write"}:
         monkeypatch.setattr(tempfile, "NamedTemporaryFile", temporary)
     elif failure == "flush":
         monkeypatch.setattr(os, "fsync", fail)
@@ -977,7 +1080,11 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     assert code == 2
     assert out == ""
     assert "could not write snapshot" in err
+    if failure == "short-write":
+        assert "short write" in err
     assert snapshot.read_bytes() == previous
+    current = snapshot.stat()
+    assert (current.st_dev, current.st_ino) == (original.st_dev, original.st_ino)
     assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
     assert not [p for p in tmp_path.glob(".before.json.*") if p.suffix != ".lock"]
 

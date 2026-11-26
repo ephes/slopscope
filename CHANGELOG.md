@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Report the published composition snapshot path and exit 2 if rendering or delivering the display output fails, including on a closed stdout pipe.
+
+- Refuse short composition snapshot writes and preserve the previous baseline.
+
 - Preserve ceilings for source paths skipped during discovery and show why they are out of scope.
 
 - Preserve test-file ceilings when a scan classifies their paths outside tests and report them as out of scope.

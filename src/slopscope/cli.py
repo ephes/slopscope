@@ -688,6 +688,7 @@ def _run_composition(
             skipped_projects=skipped_projects,
         )
 
+    published_snapshot = None
     if snapshot_destination is not None and not failed:
         snapshot_path = Path(args.snapshot)
         try:
@@ -706,14 +707,55 @@ def _run_composition(
             )
             return 2
 
-    out.write(
-        composition_render.render_composition_report(
-            rendered_report,
-            output_format=args.format,
-            color=not args.no_color,
+        published_snapshot = snapshot_path
+
+    try:
+        out.write(
+            composition_render.render_composition_report(
+                rendered_report,
+                output_format=args.format,
+                color=not args.no_color,
+            )
         )
-    )
+        if published_snapshot is not None:
+            out.flush()
+    except Exception as exc:
+        if published_snapshot is None:
+            raise
+        if isinstance(exc, OSError):
+            _discard_failed_display_stream(out)
+        print(
+            display_text(
+                f"slopscope: snapshot {published_snapshot} published; "
+                f"could not display composition report: {exc}"
+            ),
+            file=err,
+        )
+        return 2
     return 1 if failed else 0
+
+
+def _discard_failed_display_stream(stream: TextIO) -> None:
+    """Point a failed display descriptor at devnull so interpreter exit cannot retry it.
+
+    Without this, CPython flushes the still-buffered report again at shutdown, prints
+    ``Exception ignored ... BrokenPipeError`` and replaces the exit status with 120.
+    """
+
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull, descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(devnull)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -852,7 +894,11 @@ def _publish_snapshot(path: Path, content: bytes, *, destination: _SnapshotDesti
             mode="wb", dir=target.parent, prefix=f".{target.name}.", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            handle.write(content)
+            written = handle.write(content)
+            if written != len(content):
+                raise OSError(
+                    f"short write staging snapshot: wrote {written} of {len(content)} bytes"
+                )
             handle.flush()
             if mode is not None:
                 os.chmod(temporary, mode)
