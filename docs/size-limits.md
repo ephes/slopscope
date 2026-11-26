@@ -147,8 +147,10 @@ exits 1.
 - `--seed-allowlist` writes a new allowlist with every unit that is currently over its limit, at its current size. It
   refuses to overwrite an existing file.
 - `--update-allowlist` lowers recorded sizes to current sizes for units that shrank, and drops entries that are
-  missing or now within the limit. It never adds an entry and never raises a recorded size, so growth and new
-  offenders still show up afterwards. It needs an existing allowlist.
+  missing from the selected paths or now within the limit. Entries whose paths are excluded by
+  `exclude_dirs`, the built-in exclusions, or `include_globs` keep their recorded sizes. The update
+  never adds an entry and never raises a recorded size, so growth and new offenders still show up
+  afterwards. It needs an existing allowlist.
 - Both refuse to run while files fail to parse, because unmeasured units would look missing.
 - With `--project`, every selected project is measured and validated before any allowlist is written, so a refusal
   in one project leaves all of them unchanged. Seeding or updating is refused when two projects resolve to the same

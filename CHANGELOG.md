@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve size-limit allowlist entries outside the discovery path filters when updating an allowlist.
+
 - Keep configured scans bound to the admitted directory. Refuse changed aliases or directory replacements
   with an incomplete-analysis error.
 

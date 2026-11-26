@@ -354,6 +354,39 @@ def _two_projects(tmp_path: Path, extra: str = "") -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "filter_config", ['include_globs = ["src/*.py"]', 'exclude_dirs = ["tests"]']
+)
+def test_filtered_project_updates_preserve_out_of_scope_entries(
+    tmp_path: Path, filter_config: str
+) -> None:
+    _two_projects(tmp_path)
+    args = ["--size-limits", "--project", "all", "--format", "json", str(tmp_path)]
+    assert run_cli([*args, "--seed-allowlist"])[0] == 0
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        f"[tool.slopscope]\n{filter_config}\n" + config.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (tmp_path / "one/src/big.py").unlink()
+    write(tmp_path / "two", "src/big.py", "def big():\n" + "    x = 1\n" * 3)
+
+    code, stdout, stderr = run_cli([*args, "--update-allowlist"])
+
+    assert (code, stderr) == (0, "")
+    for project in ("one", "two"):
+        allowlist = tmp_path / project / "size-limits.json"
+        saved = json.loads(allowlist.read_text(encoding="utf-8"))
+        assert saved["test_files"] == {"tests/test_big.py": 6}
+        assert saved["functions"] == ({} if project == "one" else {"src/big.py::big": 4})
+    one, two = json.loads(stdout)["projects"]
+    assert [(entry["key"], entry["reason"]) for entry in one["report"]["dropped"]] == [
+        ("src/big.py::big", "missing")
+    ]
+    assert two["report"]["dropped"] == []
+
+
 def test_a_later_project_failure_leaves_earlier_projects_unwritten(tmp_path: Path) -> None:
     _two_projects(tmp_path)
     write(tmp_path, "two/src/broken.py", "def broken(:\n")

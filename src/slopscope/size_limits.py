@@ -14,7 +14,8 @@ import os
 import stat
 import tempfile
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from functools import partial
 from itertools import chain
 from pathlib import Path
 
@@ -699,7 +700,12 @@ def plan(
             for key, size in sorted(allowlist[kind].items())
         ]
     elif action == UPDATE:
-        allowlist, lowered, dropped = _updated(units, allowlist, settings)
+        path_in_scope = partial(
+            fallback.matches_path_filters,
+            excluded_patterns=fallback.compile_excluded_paths(excluded_paths),
+            include_globs=tuple(include_globs),
+        )
+        allowlist, lowered, dropped = _updated(units, allowlist, settings, path_in_scope)
 
     over_limit, grown, shrunk, stale = _groups(units, allowlist, settings, failures)
     report = SizeLimitsReport(
@@ -765,8 +771,9 @@ def _updated(
     units: Units,
     allowlist: Units,
     settings: SizeLimitSettings,
+    path_in_scope: Callable[[str], bool],
 ) -> tuple[Units, list[SizeLimitEntry], list[SizeLimitEntry]]:
-    """Lower shrunk entries and drop missing or within-limit ones; never add or raise."""
+    """Lower shrunk entries and drop stale entries within the selected paths."""
 
     updated: Units = {}
     lowered: list[SizeLimitEntry] = []
@@ -776,6 +783,9 @@ def _updated(
         updated[kind] = {}
         for key, recorded in sorted(allowlist.get(kind, {}).items()):
             size = units[kind].get(key)
+            if size is None and not path_in_scope(_unit_path(kind, key)):
+                updated[kind][key] = recorded
+                continue
             if size is None or size <= limit:
                 dropped.append(
                     SizeLimitEntry(
