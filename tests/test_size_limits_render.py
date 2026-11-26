@@ -195,3 +195,30 @@ def test_known_zero_delta_is_signed(output_format: OutputFormat) -> None:
         sample_report(), grown=(SizeLimitEntry("functions", "same.py::f", 171, 150, 171),)
     )
     assert "function 171 171 +0 same.py::f" in human(report, output_format)
+
+
+@pytest.mark.parametrize("output_format", ["plain", "rich"])
+def test_out_of_scope_group_shows_reason_column(output_format: OutputFormat) -> None:
+    report = replace(
+        sample_report(),
+        out_of_scope=(
+            SizeLimitEntry("functions", "vendor/x.py::f", None, 150, 199),
+            SizeLimitEntry(
+                "test_files", "tests/helper.py", None, 3000, 3456, "not classified as tests"
+            ),
+        ),
+    )
+    lines = human(report, output_format)
+    title = "Out-of-Scope Allowlist Entries"
+    assert title in lines
+    section = lines[lines.index(title) + 1 :]
+    section = section[: section.index("")]
+    assert "Kind Recorded Limit Reason Unit" in section
+    assert "function 199 150 vendor/x.py::f" in section
+    assert "test file 3456 3000 not classified as tests tests/helper.py" in section
+    assert "0 new over limit, 0 grown, 0 shrunk, 0 stale, 2 out of scope" in lines
+    data = json.loads(render.render_size_limits_json(report))
+    assert [(entry["key"], entry["reason"]) for entry in data["out_of_scope"]] == [
+        ("vendor/x.py::f", None),
+        ("tests/helper.py", "not classified as tests"),
+    ]
