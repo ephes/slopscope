@@ -109,8 +109,11 @@ require one recorded identity for the root and one for each relative path compon
 any descriptor. A length mismatch is reported as a source change. Reads then open components
 relative to checked directory descriptors without following links below the selected
 root (the root itself may be a symlink). Files changed since admission, including regular-file
-replacements, are refused. The walk holds at most two directory descriptors at a time, regardless
-of path depth, and releases the last one before reading. A descriptor close failure is reported as
+replacements, are refused. After reading, the same directory walk rechecks the named root,
+directories, and leaf, and the opened file's metadata is checked again. A detached source is
+reported as an analysis failure. Changes to unrelated directory entries are allowed. Each walk
+holds at most two directory descriptors at a time, regardless of path depth, and releases them
+before reading or returning the bytes. A descriptor close failure is reported as
 a source I/O error when it is the first failure. If admission already failed, its diagnostic is
 preserved while cleanup attempts to close the remaining descriptors. Leaf opens are nonblocking and descriptors
 must be regular files before any bytes are read, so a substituted FIFO cannot wait for a writer. Platforms without
@@ -340,6 +343,10 @@ Duplicate detection works on tokens, so layout, comments, and blank lines do not
 `duplicated_lines` counts code lines covered by any copy of any duplicated window or block, merging overlapping
 intervals so each line counts once. Blank, comment, and docstring lines inside a copy are not counted. The first copy
 counts too: when two files share a block, both files report its lines.
+
+After building each file's report rows, the scan keeps its token segments and one byte per
+physical line for duplicate counting. The byte records whether the line contributes to
+`duplicated_lines`.
 
 Largest duplicate blocks are ranked by the physical lines spanned by their longest copy, then by number of copies and
 tokens, and list up to five locations each.

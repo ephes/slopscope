@@ -279,7 +279,8 @@ exclude these links. The cloc engine's discovery is unchanged. Python fallback r
 `Engine: python (physical lines)`.
 
 Composition and size-limits bind discovered Python files to their root, directory, and regular-file
-identities, then open each component without following links below the selected root. Changed or
+identities, then open each component without following links below the selected root. After reading,
+they recheck those identities under the selected path before accepting the bytes. Changed or
 nonregular sources make analysis incomplete; snapshots and allowlists are preserved. Descriptor
 close failures also make analysis incomplete and preserve any earlier source error. Opening is
 nonblocking so a substituted FIFO cannot wait for a writer. These modes require descriptor-relative

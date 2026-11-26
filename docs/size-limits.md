@@ -5,7 +5,8 @@ limit must be recorded in an allowlist, where they may shrink but not grow; ever
 The check reuses the [composition report](composition.md) analyzer, so it needs no setup beyond a local checkout.
 It also uses `[tool.slopscope.composition].max_source_bytes` (16 MiB by default). Source reads
 validate discovery identities and refuse links below the root or nonregular replacements before
-reading, using descriptor-relative no-follow and nonblocking OS APIs. If those APIs are unavailable
+reading, using descriptor-relative no-follow and nonblocking OS APIs. After the read, the named
+root, directories, and file must still match their admitted identities. If those APIs are unavailable
 (for example on Windows, where size-limits is therefore unsupported), source analysis fails explicitly. An unreadable, changed, or oversized source prevents allowlist
 seed/update publication; report mode lists failures and exits nonzero.
 

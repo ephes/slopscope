@@ -10,7 +10,7 @@ import tokenize
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO, Literal
+from typing import IO, Any, BinaryIO, Literal
 
 import pytest
 
@@ -124,6 +124,55 @@ def test_nonregular_opened_descriptor_is_refused_before_read(
     assert code == 1
     assert json.loads(out)["failures"]
     assert "source changed" in err
+
+
+@pytest.mark.parametrize("change", ["ancestor", "root-alias", "leaf", "sibling"])
+def test_composition_checks_named_source_after_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    tree = tmp_path / "tree"
+    parent = tree / "pkg" / "inner"
+    parent.mkdir(parents=True)
+    source = parent / "app.py"
+    source.write_bytes(b"x = 1\ny = 2\n")
+    root = tmp_path / "repo"
+    root.symlink_to(tree, target_is_directory=True)
+    relative = "pkg/inner/app.py"
+    admission = _source.admit(root, relative)
+    read = _source.read_bounded
+
+    def replace_during_read(*args: Any, **kwargs: Any) -> bytes | None:
+        raw = read(*args, **kwargs)
+        if change == "ancestor":
+            (tree / "pkg").rename(tree / "detached")
+            parent.mkdir(parents=True)
+        elif change == "root-alias":
+            replacement = tmp_path / "replacement"
+            (replacement / "pkg" / "inner").mkdir(parents=True)
+            root.unlink()
+            root.symlink_to(replacement, target_is_directory=True)
+        elif change == "leaf":
+            source.rename(parent / "detached.py")
+        else:
+            (parent / "sibling.py").write_bytes(b"z = 3\n")
+            return raw
+        (root / relative).write_bytes(b"new = 1\n")
+        return raw
+
+    monkeypatch.setattr(_source, "read_bounded", replace_during_read)
+    report = composition.build_composition_report(
+        root, excluded_paths=(), admissions={relative: admission}
+    )
+
+    if change == "sibling":
+        assert not report.failures
+        assert report.total.counts.code == 2
+    else:
+        assert len(report.failures) == 1
+        assert report.failures[0].path == relative
+        assert "source changed" in report.failures[0].error
+        assert report.files == ()
+        assert report.total.counts.code == 0
 
 
 @pytest.mark.parametrize("stat_mismatch", [False, True])
@@ -359,7 +408,7 @@ def test_admission_chain_length_is_checked_before_open(
 
 
 @pytest.mark.parametrize("replace_directory", [False, True])
-def test_deep_source_open_bounds_live_directory_descriptors(
+def test_deep_source_open_bounds_live_descriptors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_directory: bool
 ) -> None:
     source = Path(*(["pkg"] * 24), "app.py")
@@ -372,16 +421,22 @@ def test_deep_source_open_bounds_live_directory_descriptors(
         directory.mkdir()
 
     live: set[int] = set()
+    leaf: IO[bytes] | None = None
     peak = 0
-    real_open, real_close = os.open, os.close
+    real_open, real_close, real_fdopen = os.open, os.close, os.fdopen
 
     def track_open(name: Path | str, flags: int, *, dir_fd: int | None = None) -> int:
         nonlocal peak
         fd = real_open(name, flags, dir_fd=dir_fd)
+        peak = max(peak, len(live) + 1 + (leaf is not None and not leaf.closed))
         if flags & os.O_DIRECTORY:
             live.add(fd)
-            peak = max(peak, len(live))
         return fd
+
+    def track_fdopen(fd: int, mode: str) -> IO[bytes]:
+        nonlocal leaf
+        leaf = real_fdopen(fd, mode)
+        return leaf
 
     def track_close(fd: int) -> None:
         real_close(fd)
@@ -389,6 +444,7 @@ def test_deep_source_open_bounds_live_directory_descriptors(
 
     monkeypatch.setattr(os, "open", track_open)
     monkeypatch.setattr(os, "close", track_close)
+    monkeypatch.setattr(os, "fdopen", track_fdopen)
     if replace_directory:
         with (
             pytest.raises(OSError, match="source changed since discovery"),
@@ -401,6 +457,7 @@ def test_deep_source_open_bounds_live_directory_descriptors(
             assert handle.read() == b"x = 1\n"
 
     assert not live
+    assert leaf is None or leaf.closed
     assert peak == 2
 
 

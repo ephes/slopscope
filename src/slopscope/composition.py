@@ -136,6 +136,12 @@ class FileAnalysis:
     segments: tuple[composition_duplication.Segment, ...] = ()
 
 
+@dataclass(frozen=True)
+class _DuplicationInput:
+    segments: tuple[composition_duplication.Segment, ...]
+    eligible_lines: bytes
+
+
 def python_version() -> str:
     """Return the interpreter version whose ``ast`` grammar parses files."""
 
@@ -331,7 +337,7 @@ def build_composition_report(
         composition_duplication.TokenBudget(max_total_tokens, max_total_anchors),
     )
     interner: dict[str, int] = {}
-    analyses: list[FileAnalysis] = []
+    duplication_inputs: list[_DuplicationInput] = []
     file_rows: list[CompositionFileRow] = []
     classes: list[CompositionClassRow] = []
     functions: list[CompositionFunctionRow] = []
@@ -375,7 +381,6 @@ def build_composition_report(
             test_dirs=test_dirs,
             named_areas=named_areas,
         )
-        analyses.append(analysis)
         file_rows.append(
             CompositionFileRow(path=relative_path, kind=kind, area=area, counts=analysis.counts)
         )
@@ -400,9 +405,19 @@ def build_composition_report(
             )
             for row in analysis.functions
         )
+        duplication_inputs.append(
+            _DuplicationInput(
+                segments=analysis.segments,
+                eligible_lines=bytes(
+                    category not in (BLANK, COMMENT, DOCSTRING)
+                    for category in analysis.line_categories
+                ),
+            )
+        )
+        del analysis
 
     try:
-        duplicates = _apply_duplication(analyses, file_rows, min_duplicate_tokens)
+        duplicates = _apply_duplication(duplication_inputs, file_rows, min_duplicate_tokens)
     except composition_duplication.BudgetExceeded as exc:
         raise fallback.CountingError(f"incomplete analysis: whole-composition {exc}") from exc
     except (RecursionError, MemoryError):
@@ -457,22 +472,19 @@ def build_composition_report(
 
 
 def _apply_duplication(
-    analyses: Sequence[FileAnalysis],
+    inputs: Sequence[_DuplicationInput],
     file_rows: list[CompositionFileRow],
     min_duplicate_tokens: int,
 ) -> list[CompositionDuplicateBlock]:
     """Set each file row's duplicated code lines and return the sorted duplicate blocks."""
 
     duplication = composition_duplication.find_duplicates(
-        [analysis.segments for analysis in analyses], min_tokens=min_duplicate_tokens
+        [item.segments for item in inputs], min_tokens=min_duplicate_tokens
     )
     for index, spans in duplication.intervals.items():
-        categories = analyses[index].line_categories
+        eligible_lines = inputs[index].eligible_lines
         duplicated = sum(
-            1
-            for start, end in spans
-            for line in range(start, end + 1)
-            if categories[line - 1] not in (BLANK, COMMENT, DOCSTRING)
+            eligible_lines[line - 1] for start, end in spans for line in range(start, end + 1)
         )
         row = file_rows[index]
         file_rows[index] = dataclasses.replace(
