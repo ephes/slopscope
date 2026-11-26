@@ -166,26 +166,35 @@ def discover_files(
 
     root = Path(path)
     excluded_paths_tuple = tuple(excluded_paths)
+    excluded_patterns = compile_excluded_paths(excluded_paths_tuple)
     git_result = run_git_ls_files(root)
-    if git_result.returncode == 0:
+    tracked = git_result.returncode == 0
+    if tracked:
         try:
-            tracked_paths = parse_git_ls_files_output(git_result.stdout)
+            candidates = parse_git_ls_files_output(git_result.stdout)
         except GitDiscoveryError as exc:
             raise GitDiscoveryError(f"{exc}: {root}") from exc
-        selected = filter_included_paths(
-            filter_excluded_paths(
-                tracked_paths,
-                excluded_path_segments=excluded_paths_tuple,
-            ),
-            include_globs=include_globs,
-        )
-        return [path for path in selected if not _has_source_symlink(root, path)]
-    return filter_included_paths(
-        filter_excluded_paths(
-            discover_filesystem_files(root, pruned_dir_names=excluded_paths_tuple),
-            excluded_path_segments=excluded_paths_tuple,
-        ),
-        include_globs=include_globs,
+    else:
+        candidates = discover_filesystem_files(root, pruned_dir_names=excluded_paths_tuple)
+    globs = tuple(include_globs)
+    return [
+        path
+        for path in candidates
+        if matches_path_filters(path, excluded_patterns=excluded_patterns, include_globs=globs)
+        and (not tracked or not _has_source_symlink(root, path))
+    ]
+
+
+def matches_path_filters(
+    path: Path | str,
+    *,
+    excluded_patterns: tuple[tuple[str, ...], ...],
+    include_globs: tuple[str, ...],
+) -> bool:
+    """Apply discovery's path filters without consulting the filesystem."""
+
+    return not matches_excluded_path(path, excluded_patterns) and (
+        not include_globs or matches_include_globs(path, include_globs)
     )
 
 

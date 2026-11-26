@@ -85,8 +85,9 @@ Allowlist keys identify units by path, relative to the analyzed project root:
 For functions and classes, the final `::` separates the path from the qualified name, allowing
 earlier occurrences of `::` in the path. Test-file keys are read as full paths.
 
-Keys change when a unit is renamed or moved, so a renamed unit shows up as new over its limit plus a stale entry for
-its old key. Moving the entry to the new key in the allowlist, with its recorded size, resolves both.
+Keys change when a unit is renamed or moved. When both paths are in scope, an oversized unit
+can show up as new over its limit plus a stale entry for its old key. Moving the entry to the new
+key in the allowlist, with its recorded size, resolves both.
 
 ## Allowlist
 
@@ -130,13 +131,16 @@ Stable lock files may remain as usual.
 
 ## Report
 
-The report compares every measured unit with its limit and the allowlist, and lists four groups:
+The report compares every measured unit with its limit and the allowlist, and lists these groups:
 
 - **New over limit:** units over their limit that the allowlist does not contain.
 - **Grown past allowlist:** allowlisted units now larger than their recorded size, with the delta.
 - **Shrunk below allowlist:** allowlisted units now smaller than their recorded size but still over the limit.
   `--update-allowlist` records the smaller size.
-- **Stale:** allowlist entries whose unit is missing (gone, renamed, or moved) or now within its limit.
+- **Stale** lists allowlist entries in the selected paths whose unit is missing (gone, renamed, or moved)
+  or now within its limit.
+- **Out of scope** lists allowlist entries left unmeasured by the discovery path filters. These entries
+  have no current size and do not affect `--strict`.
 
 The report exits 0. With `--strict` it exits 1 when the first or second group is not empty. Files that cannot be read
 or parsed are listed as failures, their allowlist entries are neither checked nor reported as stale, and the command
@@ -147,8 +151,10 @@ exits 1.
 - `--seed-allowlist` writes a new allowlist with every unit that is currently over its limit, at its current size. It
   refuses to overwrite an existing file.
 - `--update-allowlist` lowers recorded sizes to current sizes for units that shrank, and drops entries that are
-  missing or now within the limit. It never adds an entry and never raises a recorded size, so growth and new
-  offenders still show up afterwards. It needs an existing allowlist.
+  missing within the selected paths or now within the limit. Entries whose paths are excluded by
+  `exclude_dirs`, the built-in exclusions, or `include_globs` keep their recorded sizes. The update
+  never adds an entry and never raises a recorded size, so growth and new offenders still show up
+  afterwards. It needs an existing allowlist.
 - Both refuse to run while files fail to parse, because unmeasured units would look missing.
 - With `--project`, every selected project is measured and validated before any allowlist is written, so a refusal
   in one project leaves all of them unchanged. Seeding or updating is refused when two projects resolve to the same
@@ -265,6 +271,7 @@ and earlier reject this section as an unknown field; use `0.3.0a1` or later.
   "shrunk": [],
   "stale": [{"kind": "functions", "key": "src/pkg/old.py::parse", "size": null, "limit": 150,
              "recorded": 190, "delta": null, "reason": "missing"}],
+  "out_of_scope": [],
   "seeded": [],
   "lowered": [],
   "dropped": [],
@@ -275,6 +282,8 @@ and earlier reject this section as an unknown field; use `0.3.0a1` or later.
 - `action` is `report`, `seed`, or `update`. `seeded`, `lowered`, and `dropped` list what the action changed.
 - `units` counts every measured unit, not only offenders. `allowlist.entries` counts entries after the action.
 - `reason` is `missing` or `within limit` for stale and dropped entries.
+- `out_of_scope` lists entries omitted by the path filters. Their `size`, `delta`, and `reason` are `null`.
+  The array is empty when all allowlisted paths match the filters.
 - With `--project`, the top level has `report_type: "size_limits_projects"`, `schema_version`, a `projects` array
   whose items contain `name`, `path`, and a full `report` object, and `skipped_projects`.
 

@@ -662,6 +662,7 @@ class SizeLimitsReport:
     dropped: tuple[SizeLimitEntry, ...]
     seeded: tuple[SizeLimitEntry, ...]
     failures: tuple[CompositionFailure, ...]
+    out_of_scope: tuple[SizeLimitEntry, ...] = ()
 
     @property
     def check_failed(self) -> bool:

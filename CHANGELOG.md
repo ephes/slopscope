@@ -8,6 +8,11 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- List size-limit allowlist entries outside the discovery path filters in their own report section
+  and the JSON `out_of_scope` array. Missing entries in the selected paths still appear as stale.
+
+- Preserve size-limit allowlist entries outside the discovery path filters when updating an allowlist.
+
 - Keep configured scans bound to the admitted directory. Refuse changed aliases or directory replacements
   with an incomplete-analysis error.
 
