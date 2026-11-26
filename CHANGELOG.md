@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Bound the number of tokenizer results retained per Python source in composition mode with
+  the separately configurable `max_source_tokens` ceiling. Overflow preserves existing snapshots.
+
 - Report the published composition snapshot path and exit 2 if rendering or delivering the display output fails, including on a closed stdout pipe.
 
 - Refuse short composition snapshot writes and preserve the previous baseline.

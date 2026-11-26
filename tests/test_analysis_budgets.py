@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import json
+import tokenize
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +125,57 @@ def test_composition_cumulative_limit_preserves_snapshot_and_stops(
     assert all(unique <= 6 for unique, _ in retained)
 
 
+def test_composition_stops_tokenizing_at_first_excess_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    limit = 13
+    (tmp_path / "app.py").write_text("x = 1; " * 2000 + "x = 1\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.slopscope.composition]\nmax_source_tokens = {limit}\n",
+        encoding="utf-8",
+    )
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_bytes(b"previous snapshot")
+    produced = 0
+    generate = tokenize.generate_tokens
+
+    def counted(readline: Callable[[], str]) -> Iterator[tokenize.TokenInfo]:
+        nonlocal produced
+        for token in generate(readline):
+            produced += 1
+            assert produced <= limit + 1
+            yield token
+
+    monkeypatch.setattr(tokenize, "generate_tokens", counted)
+    out, err = io.StringIO(), io.StringIO()
+    assert (
+        cli.run(
+            [str(tmp_path), "--composition", "--snapshot", str(snapshot)], stdout=out, stderr=err
+        )
+        == 2
+    )
+    assert produced == limit + 1
+    assert "whole-composition source tokenizer token limit exceeded" in err.getvalue()
+    assert out.getvalue() == ""
+    assert snapshot.read_bytes() == b"previous snapshot"
+
+
+def test_composition_tokenizer_boundary_counts_non_code_tokens(tmp_path: Path) -> None:
+    source = '# note\n"""Documentation."""\nx = 1\n'
+    (tmp_path / "app.py").write_text(source, encoding="utf-8")
+    raw_tokens = sum(1 for _ in tokenize.generate_tokens(io.StringIO(source).readline))
+    report = composition.build_composition_report(
+        tmp_path, excluded_paths=(), max_total_tokens=3, max_source_tokens=raw_tokens
+    )
+    assert not report.failures
+    assert report.total.counts.code == 1
+
+    with pytest.raises(fallback.CountingError, match="source tokenizer token limit"):
+        composition.build_composition_report(
+            tmp_path, excluded_paths=(), max_total_tokens=3, max_source_tokens=raw_tokens - 1
+        )
+
+
 def test_composition_exact_cumulative_boundaries(tmp_path: Path) -> None:
     source = b"x = 1\n"
     (tmp_path / "app.py").write_bytes(source)
@@ -220,7 +273,6 @@ def test_partial_failed_read_still_consumes_composition_budget(
     opened = _source.open_source
 
     # Keep descriptor admission, but fail after a successful bounded read.
-    from collections.abc import Iterator
     from contextlib import contextmanager
     from typing import BinaryIO
 
@@ -337,8 +389,7 @@ def test_size_measure_uses_cumulative_defaults(
 def test_size_limits_ignore_token_and_anchor_budgets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, limit: int
 ) -> None:
-    """Size-limits builds no duplicate-detection token segments, so the budgets that bound
-    them cannot stop it, however large the project."""
+    """Size-limits uses its source byte budgets without the composition token budgets."""
     for index in range(5):
         (tmp_path / f"{index}.py").write_text(
             f"def unique_{index}():\n    return {index}\n", encoding="utf-8"

@@ -26,6 +26,7 @@ from slopscope.composition_semantics import Unit
 from slopscope.report import (
     COMPOSITION_CATEGORIES,
     COMPOSITION_CONSTRUCTS,
+    DEFAULT_MAX_SOURCE_TOKENS,
     CompositionAggregate,
     CompositionClassRow,
     CompositionCounts,
@@ -100,13 +101,14 @@ class CompositionAnalysisError(Exception):
 
 @dataclass
 class AnalysisBudget:
-    """Raw bytes read and token/index state admitted across one complete report.
+    """Raw bytes and token/index state admitted across a report, with a per-source tokenizer cap.
 
     ``tokens`` is ``None`` when no duplicate-detection token segments are built (size-limits).
     """
 
     source_bytes: int
     tokens: composition_duplication.TokenBudget | None
+    max_source_tokens: int | None = None
 
     def consume_source(self, size: int) -> None:
         if size > self.source_bytes:
@@ -164,7 +166,8 @@ def analyze_source(
     Test placement is computed only when ``test_file`` is true. Token segments for duplicate
     detection are built only when an ``interner`` is passed. With ``measure_only``, skip
     semantic detectors and duplicate segments while still resolving overload decorators.
-    Raises :class:`CompositionAnalysisError` when parsing, tokenization, or traversal fails.
+    Raises :class:`CompositionAnalysisError` when parsing, tokenization, or traversal fails,
+    and :class:`composition_duplication.BudgetExceeded` on resource budget exhaustion.
     """
 
     lines = _physical_lines(source)
@@ -180,7 +183,14 @@ def analyze_source(
 
     try:
         try:
-            tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+            tokens: list[tokenize.TokenInfo] = []
+            max_source_tokens = budget.max_source_tokens if budget is not None else None
+            for token in tokenize.generate_tokens(io.StringIO(source).readline):
+                if max_source_tokens is not None and len(tokens) == max_source_tokens:
+                    raise composition_duplication.BudgetExceeded(
+                        "source tokenizer token limit exceeded"
+                    )
+                tokens.append(token)
         except (tokenize.TokenError, SyntaxError) as exc:
             raise CompositionAnalysisError(f"tokenize error: {exc}") from exc
 
@@ -320,6 +330,7 @@ def build_composition_report(
     limit: int = DEFAULT_LIMIT,
     min_duplicate_tokens: int = composition_duplication.DEFAULT_MIN_TOKENS,
     max_source_bytes: int = DEFAULT_MAX_SOURCE_BYTES,
+    max_source_tokens: int | None = None,
     max_total_source_bytes: int | None = None,
     max_total_tokens: int | None = None,
     max_total_anchors: int | None = None,
@@ -334,6 +345,9 @@ def build_composition_report(
     max_total_source_bytes = (
         DEFAULT_MAX_TOTAL_SOURCE_BYTES if max_total_source_bytes is None else max_total_source_bytes
     )
+    max_source_tokens = (
+        DEFAULT_MAX_SOURCE_TOKENS if max_source_tokens is None else max_source_tokens
+    )
     max_total_tokens = DEFAULT_MAX_TOTAL_TOKENS if max_total_tokens is None else max_total_tokens
     max_total_anchors = (
         DEFAULT_MAX_TOTAL_ANCHORS if max_total_anchors is None else max_total_anchors
@@ -341,6 +355,7 @@ def build_composition_report(
     budget = AnalysisBudget(
         max_total_source_bytes,
         composition_duplication.TokenBudget(max_total_tokens, max_total_anchors),
+        max_source_tokens=max_source_tokens,
     )
     interner: dict[str, int] = {}
     duplication_inputs: list[_DuplicationInput] = []
@@ -447,6 +462,7 @@ def build_composition_report(
             max_source_bytes=max_source_bytes,
             max_total_source_bytes=max_total_source_bytes,
             max_total_tokens=max_total_tokens,
+            max_source_tokens=max_source_tokens,
             max_total_anchors=max_total_anchors,
             min_duplicate_tokens=min_duplicate_tokens,
             qt_modules=semantic_settings.qt_modules,

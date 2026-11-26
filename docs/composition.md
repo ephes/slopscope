@@ -46,6 +46,7 @@ adjusts it:
 limit = 20
 min_duplicate_tokens = 80
 max_source_bytes = 16777216
+max_source_tokens = 250000
 max_total_source_bytes = 134217728
 max_total_tokens = 8000000
 max_total_anchors = 2000000
@@ -61,6 +62,7 @@ churn_months = 24
 | `limit` | Rows in the largest-item and duplicate lists. `--limit` overrides it. | 10 |
 | `min_duplicate_tokens` | Minimum tokens in a duplicated block. | 50 |
 | `max_source_bytes` | Positive per-source byte ceiling, also used by size-limits, checked before decoding or parsing. | 16777216 (16 MiB) |
+| `max_source_tokens` | Positive per-source ceiling on all results yielded by Python's tokenizer in composition mode. | 250000 |
 | `max_total_source_bytes` | Positive cumulative raw-byte ceiling for all sources read in one composition or size-limits report, charged before decoding (including failed files). | 134217728 (128 MiB) |
 | `max_total_tokens` | Positive cumulative retained code-token ceiling; also bounds the number of shared interned strings. | 8000000 |
 | `max_total_anchors` | Positive cumulative potential duplicate-anchor ceiling: code line starts in token segments, including short segments without a full duplicate window. | 2000000 |
@@ -128,9 +130,11 @@ Encoding detection uses `tokenize.detect_encoding()` to honor PEP 263 declaratio
 Whole-report budgets apply per repository/project, across every selected Python source. Reads use
 at most 64 KiB chunks and one overflow-probe byte. Each file's code-token and potential-anchor
 counts are checked before mutating the shared interner or retaining its token/line arrays; the
-actual duplicate index has no more anchors than this admitted upper bound. Per-file parsing and
-tokenization remain bounded by `max_source_bytes`. Exact ceilings are accepted; below the limits,
-counts and exact duplicate detection are unchanged. Of the aggregate budgets, only
+actual duplicate index has no more anchors than this admitted upper bound. Composition also applies
+`max_source_tokens` separately to each file. Every tokenizer result counts, including comments,
+layout, docstrings, and the end marker. The first excess result stops analysis before it is
+retained. AST parsing still runs under the source-byte ceilings. Exact ceilings are accepted.
+Complete reports retain the same counts and duplicate detection. Of the aggregate budgets, only
 `max_total_source_bytes` also applies to size-limits measurement, alongside its per-source
 ceiling; size-limits builds no token segments. Exhaustion preserves allowlists and returns exit
 code 2 without a partial report.
@@ -427,6 +431,7 @@ file to keep a snapshot.
     "language": "Python",
     "limit": 10,
     "max_source_bytes": 16777216,
+    "max_source_tokens": 250000,
     "max_total_source_bytes": 134217728,
     "max_total_tokens": 8000000,
     "max_total_anchors": 2000000,
@@ -576,8 +581,8 @@ Comparison rules:
   may omit these fields. A missing name does not affect comparability. Missing versions retain the
   comparison warnings and appear as `null` in the result.
 - A different analyzer name or version, detector inventory or version, or counting setting (every `settings` entry except
-  `language`, `limit`, `max_source_bytes`, `max_total_source_bytes`, `max_total_tokens`, and
-  `max_total_anchors`, which only control presentation or admission) prints a
+  `language`, `limit`, `max_source_bytes`, `max_source_tokens`, `max_total_source_bytes`,
+  `max_total_tokens`, and `max_total_anchors`, which only control presentation or admission) prints a
   `slopscope: warning:` line on stderr and marks the comparison as not comparable, because the numbers may differ from
   changed rules or settings alone. A detector present on only one side also prints a warning and marks the
   comparison as not comparable; deltas are still reported. A different Python version is

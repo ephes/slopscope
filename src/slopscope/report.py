@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-# Whole-composition budgets; composition re-exports these as its defaults.
+# Composition resource ceilings.
+DEFAULT_MAX_SOURCE_TOKENS = 250_000
 DEFAULT_MAX_TOTAL_SOURCE_BYTES = 128 * 1024 * 1024
 DEFAULT_MAX_TOTAL_TOKENS = 8_000_000
 DEFAULT_MAX_TOTAL_ANCHORS = 2_000_000
@@ -453,6 +454,7 @@ class CompositionSettings:
     max_total_source_bytes: int = DEFAULT_MAX_TOTAL_SOURCE_BYTES
     max_total_tokens: int = DEFAULT_MAX_TOTAL_TOKENS
     max_total_anchors: int = DEFAULT_MAX_TOTAL_ANCHORS
+    max_source_tokens: int = DEFAULT_MAX_SOURCE_TOKENS
 
     def as_mapping(self) -> dict[str, object]:
         """Return the settings as JSON-ready values, in output order."""
@@ -461,6 +463,7 @@ class CompositionSettings:
             "language": "Python",
             "limit": self.limit,
             "max_source_bytes": self.max_source_bytes,
+            "max_source_tokens": self.max_source_tokens,
             "max_total_source_bytes": self.max_total_source_bytes,
             "max_total_tokens": self.max_total_tokens,
             "max_total_anchors": self.max_total_anchors,

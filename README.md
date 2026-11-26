@@ -312,6 +312,11 @@ and a final unterminated decoded line counts once. One overflow-probe byte may b
 or growing inputs return exit code 2 with an incomplete-analysis error and no report or total.
 These limits are not configurable: exclude large generated or data files, or use the cloc engine.
 
+Composition admits up to 250,000 tokenizer results per file before retaining them, including
+comments, docstrings, layout, and the end marker. Set a positive `max_source_tokens` under
+`[tool.slopscope.composition]` to change the ceiling. This ceiling is independent of the retained
+code-token budget.
+
 Composition also bounds the entire analysis per repository/project: 128 MiB of raw source bytes,
 8,000,000 retained code tokens, and 2,000,000 potential duplicate anchors (code line starts within
 each token segment). These ceilings include all files together; unique interned strings cannot
@@ -319,7 +324,7 @@ outnumber admitted code tokens. Raw bytes are charged before decoding, including
 files. A file's token/anchor batch is admitted before changing the shared interner or retaining its
 segments. Configure positive `max_total_source_bytes`, `max_total_tokens`, and `max_total_anchors`
 under `[tool.slopscope.composition]`. Overflow stops analysis with exit code 2 and no partial report
-or snapshot/allowlist; prior artifacts survive. Size-limits applies only the source-byte ceiling:
+or snapshot/allowlist; prior artifacts survive. Size-limits applies only the source-byte ceilings:
 it skips composition's semantic detectors and duplicate-detection token segments. It still
 classifies lines, measures definition spans, and resolves overload decorators.
 These aggregate settings do not apply to cloc. All ceilings accept exact-limit inputs and leave complete-report counting unchanged.

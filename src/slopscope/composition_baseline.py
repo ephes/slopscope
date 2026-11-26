@@ -56,6 +56,7 @@ _PRESENTATION_SETTINGS = frozenset(
         "language",
         "limit",
         "max_source_bytes",
+        "max_source_tokens",
         "max_total_source_bytes",
         "max_total_tokens",
         "max_total_anchors",
