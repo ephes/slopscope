@@ -116,6 +116,62 @@ def test_baseline_reports_deltas(
     assert list(baseline["deltas"]) == ["total", "source", "tests", "other"]
 
 
+@pytest.mark.parametrize("failed_side", ["baseline", "current"])
+@pytest.mark.parametrize("output_format", ["json", "plain", "rich"])
+def test_baseline_comparison_with_failed_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_side: str, output_format: str
+) -> None:
+    if output_format == "rich":
+        pytest.importorskip("rich")
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "before.json"
+    options = ["--composition", str(repository)]
+    original_open = _source.open_source
+
+    @contextmanager
+    def open_source(
+        root: Path, relative_path: str, admission: _source.Admission | None = None
+    ) -> Iterator[BinaryIO]:
+        if relative_path == "src/app.py":
+            raise PermissionError("injected read failure")
+        with original_open(root, relative_path, admission) as handle:
+            yield handle
+
+    with monkeypatch.context() as patch:
+        if failed_side == "baseline":
+            patch.setattr(_source, "open_source", open_source)
+        code, baseline_json, _stderr = run_cli(options + ["--format", "json"])
+    assert code == (1 if failed_side == "baseline" else 0)
+    snapshot.write_text(baseline_json, encoding="utf-8")
+
+    if failed_side == "current":
+        monkeypatch.setattr(_source, "open_source", open_source)
+    code, stdout, stderr = run_cli(
+        options + ["--baseline", str(snapshot), "--format", output_format]
+    )
+
+    assert code == (1 if failed_side == "current" else 0)
+    warning = f"{failed_side} scan is incomplete (failed sources: 1). Deltas are provisional."
+    if output_format == "json":
+        comparison = json.loads(stdout)["baseline"]
+        assert comparison["comparable"] is False
+        assert comparison["warnings"] == [warning]
+        before, after = (1, 2) if failed_side == "baseline" else (2, 1)
+        assert comparison["deltas"]["total"]["files"] == {
+            "baseline": before,
+            "current": after,
+            "delta": after - before,
+        }
+    else:
+        assert "not directly comparable with this baseline" in stdout
+        assert warning in " ".join(stdout.split())
+        assert "Changes Since Baseline" in stdout
+        assert ("+1" if failed_side == "baseline" else "-1") in stdout
+        if output_format == "rich":
+            assert "│" in stdout
+    assert f"slopscope: warning: {warning}" in stderr
+
+
 def test_baseline_plain_output_lists_changed_metrics(tmp_path: Path) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "before.json"

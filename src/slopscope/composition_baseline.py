@@ -357,6 +357,17 @@ def compare(
         for metric in HEADLINE_METRICS
         if metric not in total_counts
     )
+    baseline_failures = baseline.get("failures")
+    if isinstance(baseline_failures, list) and baseline_failures:
+        warnings.append(
+            f"baseline scan is incomplete (failed sources: {len(baseline_failures)}). "
+            "Deltas are provisional."
+        )
+    if report.failures:
+        warnings.append(
+            f"current scan is incomplete (failed sources: {len(report.failures)}). "
+            "Deltas are provisional."
+        )
     comparable = not warnings
     if baseline_python_version != report.python_version:
         warnings.append(
