@@ -530,7 +530,8 @@ Preflight also records the destination file generation: device, inode, size, and
 change times (or that the file is absent). Publication compares it before staging and again
 immediately before replacement, together with the parent-directory identity. A destination edited
 in place, replaced, or newly created during analysis or staging is refused with exit code 2 and
-"snapshot target changed after preflight"; the concurrent bytes are kept.
+"snapshot target changed after preflight"; the concurrent bytes are kept. On filesystems with coarse
+timestamps, a same-size rewrite within one timestamp tick of the previous write is not detectable.
 Writers serialize publication through a persistent sibling `.NAME.lock` kernel lock. A writer waits
 at most 10 seconds for it. If another writer still holds the lock, the command exits 2 with
 "snapshot lock busy", leaves the snapshot unchanged, and can be retried once that writer finishes.

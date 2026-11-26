@@ -472,7 +472,8 @@ Snapshot publication uses the resolved destination approved during preflight and
 file generation (device, inode, size, modification and change times) and the parent-directory identity
 before staging and again before replacement. A changed target is refused, preserving existing
 outputs, including when a snapshot symlink is retargeted during analysis or writing, when the file is
-edited in place, or when an absent destination is created meanwhile.
+edited in place, or when an absent destination is created meanwhile. A same-size in-place rewrite
+within one timestamp tick of the previous write is not detectable on filesystems with coarse timestamps.
 Writers serialize verification and replacement under a persistent sibling `.NAME.lock` kernel lock.
 The lock must be a single-link regular file, opened without following symlinks and rechecked after
 waiting; do not remove it while writers may be active. A writer waits at most 10 seconds for the

@@ -220,6 +220,8 @@ def test_snapshot_refuses_in_place_target_edit(
     (repository / "app.py").write_text("x = 1\n")
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_bytes(b"old snapshot")
+    # Backdate mtime so the same-length edit is detectable even with coarse timestamps.
+    os.utime(snapshot, ns=(0, 0))
     identity = cli._snapshot_identity(snapshot)
     edits = 0
 
