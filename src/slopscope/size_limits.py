@@ -56,6 +56,7 @@ def measure(
     test_dirs: Sequence[str] = classify.DEFAULT_TEST_DIRS,
     max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
     max_total_source_bytes: int | None = None,
+    skips: fallback.DiscoverySkips | None = None,
 ) -> tuple[Units, tuple[CompositionFailure, ...]]:
     """Measure every function, class, and test file below ``root``, keyed as in the allowlist.
 
@@ -73,7 +74,11 @@ def measure(
     failures: list[CompositionFailure] = []
     admissions: dict[str, _source.Admission] = {}
     for relative_path in composition.discover_python_files(
-        root, excluded_paths=excluded_paths, include_globs=include_globs, admissions=admissions
+        root,
+        excluded_paths=excluded_paths,
+        include_globs=include_globs,
+        admissions=admissions,
+        skips=skips,
     ):
         try:
             analysis = composition.analyze_file(
@@ -672,6 +677,7 @@ def plan(
     if action == UPDATE and not existed:
         raise SizeLimitsError(f"no allowlist at {allowlist_path}; seed one first")
 
+    skips = fallback.DiscoverySkips()
     units, failures = measure(
         root,
         excluded_paths=excluded_paths,
@@ -680,6 +686,7 @@ def plan(
         test_dirs=test_dirs,
         max_source_bytes=max_source_bytes,
         max_total_source_bytes=max_total_source_bytes,
+        skips=skips if loaded and any(loaded.values()) else None,
     )
     if failures and action != REPORT:
         raise SizeLimitsError(
@@ -695,6 +702,8 @@ def plan(
     def unit_scope(kind: str, path: str) -> tuple[bool, str | None]:
         if not matches_filters(path):
             return False, None
+        if (reason := skips.reason(Path(path))) is not None:
+            return False, reason
         if (
             kind == "test_files"
             and classify.classify_source_test(path, source_dirs=source_dirs, test_dirs=test_dirs)

@@ -261,6 +261,7 @@ def discover_python_files(
     excluded_paths: Iterable[str],
     include_globs: Iterable[str] = (),
     admissions: dict[str, _source.Admission] | None = None,
+    skips: fallback.DiscoverySkips | None = None,
 ) -> list[str]:
     """Discover Python files with the fallback discovery rules, sorted by relative path."""
 
@@ -269,6 +270,7 @@ def discover_python_files(
         root,
         excluded_paths=excluded_paths,
         include_globs=include_globs,
+        skips=skips,
     )
     relative_paths: set[str] = set()
     for candidate in discovered:
@@ -284,6 +286,8 @@ def discover_python_files(
             if exc.errno == errno.ELOOP:
                 # Looping/self-referential source symlinks are skipped like other
                 # non-regular paths.
+                if skips is not None:
+                    skips.linked_paths.add(candidate)
                 continue
             raise fallback.CountingError(
                 f"incomplete analysis: could not stat source {str(candidate)[:200]!r}: "
@@ -291,6 +295,8 @@ def discover_python_files(
             ) from exc
         if stat.S_ISREG(info.st_mode):
             relative_paths.add(candidate.as_posix())
+        elif skips is not None:
+            skips.nonregular_paths.add(candidate)
     paths = sorted(relative_paths)
     if admissions is not None:
         for relative_path in paths:

@@ -88,6 +88,21 @@ class CountingError(RuntimeError):
     """An included source file could not be counted."""
 
 
+@dataclass
+class DiscoverySkips:
+    """Nonregular and linked or uninspectable paths skipped during discovery."""
+
+    linked_paths: set[Path] = field(default_factory=set)
+    nonregular_paths: set[Path] = field(default_factory=set)
+
+    def reason(self, path: Path) -> str | None:
+        if path in self.linked_paths or any(parent in self.linked_paths for parent in path.parents):
+            return "source path is linked or uninspectable"
+        if path in self.nonregular_paths:
+            return "source path is not a regular file"
+        return None
+
+
 @dataclass(frozen=True)
 class GitLsFilesResult:
     """Completed git file-listing process data."""
@@ -161,6 +176,7 @@ def discover_files(
     *,
     excluded_paths: Iterable[str] = DEFAULT_EXCLUDED_PATH_SEGMENTS,
     include_globs: Iterable[str] = (),
+    skips: DiscoverySkips | None = None,
 ) -> list[Path]:
     """Discover repository files using git when available, then filesystem traversal."""
 
@@ -175,14 +191,22 @@ def discover_files(
         except GitDiscoveryError as exc:
             raise GitDiscoveryError(f"{exc}: {root}") from exc
     else:
-        candidates = discover_filesystem_files(root, pruned_dir_names=excluded_paths_tuple)
+        candidates = discover_filesystem_files(
+            root, pruned_dir_names=excluded_paths_tuple, skips=skips
+        )
     globs = tuple(include_globs)
-    return [
-        path
-        for path in candidates
-        if matches_path_filters(path, excluded_patterns=excluded_patterns, include_globs=globs)
-        and (not tracked or not _has_source_symlink(root, path))
-    ]
+    files: list[Path] = []
+    for candidate in candidates:
+        if not matches_path_filters(
+            candidate, excluded_patterns=excluded_patterns, include_globs=globs
+        ):
+            continue
+        if tracked and _has_source_symlink(root, candidate):
+            if skips is not None:
+                skips.linked_paths.add(candidate)
+            continue
+        files.append(candidate)
+    return files
 
 
 def matches_path_filters(
@@ -277,6 +301,7 @@ def discover_filesystem_files(
     path: Path | str,
     *,
     pruned_dir_names: Iterable[str] = DEFAULT_PRUNED_DIR_NAMES,
+    skips: DiscoverySkips | None = None,
 ) -> list[Path]:
     """Discover files below a path by filesystem traversal."""
 
@@ -302,10 +327,14 @@ def discover_filesystem_files(
                         )
                     relative = (current / entry.name).relative_to(root)
                     if entry.is_symlink():
+                        if skips is not None:
+                            skips.linked_paths.add(relative)
                         continue
                     if entry.is_dir(follow_symlinks=False):
                         if matches_excluded_path(relative, pruned_paths):
                             continue
+                        if skips is not None:
+                            skips.nonregular_paths.add(relative)
                         directories += 1
                         if directories > MAX_DISCOVERY_DIRECTORIES:
                             raise CountingError(
@@ -316,12 +345,16 @@ def discover_filesystem_files(
                                 "incomplete analysis: filesystem discovery depth limit exceeded"
                             )
                         subdirs.append(current / entry.name)
-                    elif entry.is_file(follow_symlinks=False) and entry.name not in pruned_names:
+                    elif entry.is_file(follow_symlinks=False):
+                        if entry.name in pruned_names:
+                            continue
                         if len(files) + len(current_files) >= MAX_DISCOVERY_FILES:
                             raise CountingError(
                                 "incomplete analysis: filesystem discovery file limit exceeded"
                             )
                         current_files.append(relative)
+                    elif skips is not None:
+                        skips.nonregular_paths.add(relative)
         except OSError as error:
             affected = repr(str(error.filename or current))[:240]
             raise CountingError(f"incomplete analysis: could not traverse {affected}") from error

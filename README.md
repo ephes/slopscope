@@ -495,13 +495,13 @@ known limits.
 classes 1,500, and test files may have at most 3,000 code lines, using the composition report's span and code-line
 definitions. Units over a limit must be recorded in an allowlist (`size-limits.json` by default) keyed as
 `path::Qualified.name`; they may shrink but not grow. The report lists new offenders, grown and shrunk allowlisted
-units, stale entries, and entries outside the discovery path filters or current test-file classification.
-It exits 0 by default.
+units, stale entries, and entries outside the scan scope because of path filters, test-file classification,
+or skipped source paths. It exits 0 by default.
 With `--strict`, new or grown offenders cause exit code 1. `--seed-allowlist` writes the
 first allowlist, and `--update-allowlist` lowers recorded sizes and drops stale entries in the
-selected paths without ever adding or raising one. Entries outside the discovery path filters and
-test-file entries outside the current test classification keep their recorded sizes. When a source
-fails analysis, its entries are excluded from stale reporting, including when
+selected paths without ever adding or raising one. Entries outside the scan scope keep their recorded
+sizes, including when discovery skips a source path because it is a symlink or a nonregular file.
+When a source fails analysis, its entries are excluded from stale reporting, including when
 the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
 nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
 Baseline reads compare opened-descriptor generation metadata before and after the bounded read and verify that

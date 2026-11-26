@@ -3,12 +3,14 @@ from __future__ import annotations
 import importlib
 import io
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from slopscope import cli
+from slopscope import cli, fallback
 
 CONFIG = """
 [tool.slopscope.size_limits]
@@ -264,6 +266,88 @@ def test_update_preserves_test_file_ceiling_after_reclassification(tmp_path: Pat
         (f"{path}::helper", 6),
         (path, 6),
     ]
+
+
+@pytest.mark.parametrize("tracked", [False, True], ids=["filesystem", "git"])
+@pytest.mark.parametrize("replacement", ["symlink", "directory", "linked-parent"])
+def test_update_preserves_unadmitted_source_ceilings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tracked: bool, replacement: str
+) -> None:
+    root = tmp_path / "repo"
+    path = "tests/pkg::support/helper.py"
+    removed = "src/removed.py"
+    method = "    def run(self):\n        value = 1\n        value += 1\n        return value\n"
+    source = "class Sample:\n" + method * 2
+    write(root, "pyproject.toml", CONFIG)
+    write(root, path, source)
+    write(root, removed, "def large():\n" + "    x = 1\n" * 5)
+    if tracked:
+        if shutil.which("git") is None:
+            pytest.skip("Git fixture requires git")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "--", path, removed], check=True)
+    else:
+        monkeypatch.setattr(
+            fallback, "run_git_ls_files", lambda _: fallback.GitLsFilesResult(1, b"")
+        )
+
+    args = ["--size-limits", "--format", "json", str(root)]
+    assert run_cli([*args, "--seed-allowlist"])[0] == 0
+    allowlist_path = root / "size-limits.json"
+    expected = json.loads(allowlist_path.read_bytes())
+    assert expected["functions"].pop(f"{removed}::large") == 6
+    keys = {(kind, key) for kind, sizes in expected.items() for key in sizes}
+    assert keys == {
+        ("classes", f"{path}::Sample"),
+        ("functions", f"{path}::Sample.run"),
+        ("functions", f"{path}::Sample.run#2"),
+        ("test_files", path),
+    }
+
+    (root / removed).unlink()
+    (root / path).unlink()
+    write(tmp_path, "outside/helper.py", "invalid Python!\n")
+    if replacement == "directory":
+        (root / path).mkdir()
+        reason = "source path is not a regular file"
+    else:
+        if replacement == "linked-parent":
+            (root / path).parent.rmdir()
+            (root / path).parent.symlink_to(tmp_path / "outside", target_is_directory=True)
+        else:
+            (root / path).symlink_to(tmp_path / "outside/helper.py")
+        reason = "source path is linked or uninspectable"
+
+    code, stdout, stderr = run_cli([*args, "--strict"])
+    assert (code, stderr) == (0, "")
+    report = json.loads(stdout)
+    assert [(e["key"], e["reason"]) for e in report["stale"]] == [(f"{removed}::large", "missing")]
+    code, stdout, stderr = run_cli([*args, "--update-allowlist"])
+    assert (code, stderr) == (0, "")
+    assert json.loads(allowlist_path.read_bytes()) == expected
+    report = json.loads(stdout)
+    assert [(e["key"], e["reason"]) for e in report["dropped"]] == [
+        (f"{removed}::large", "missing")
+    ]
+    assert {(e["kind"], e["key"], e["reason"]) for e in report["out_of_scope"]} == {
+        (kind, key, reason) for kind, key in keys
+    }
+    code, stdout, stderr = run_cli(["--size-limits", "--format", "plain", str(root)])
+    assert (code, stderr) == (0, "")
+    assert reason in stdout
+
+    if replacement == "directory":
+        (root / path).rmdir()
+    elif replacement == "linked-parent":
+        (root / path).parent.unlink()
+    else:
+        (root / path).unlink()
+    write(root, path, source + "    extra = 1\n")
+    code, stdout, stderr = run_cli([*args, "--strict"])
+    assert (code, stderr) == (1, "")
+    report = json.loads(stdout)
+    assert report["out_of_scope"] == report["over_limit"] == []
+    assert {e["key"] for e in report["grown"]} == {f"{path}::Sample", path}
 
 
 def test_default_limits_apply_without_config(tmp_path: Path) -> None:
