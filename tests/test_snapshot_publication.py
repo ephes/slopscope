@@ -24,10 +24,8 @@ def test_snapshot_writers_share_a_kernel_lock(tmp_path: Path) -> None:
     target.write_text("old")
     script = """
 import sys
-import time
 from pathlib import Path
-from typing import Any
-from slopscope import cli, composition
+from slopscope import cli
 path = Path(sys.argv[1])
 destination = cli._SnapshotDestination(path, cli._snapshot_identity(path),
                                        cli._snapshot_identity(path.parent),
