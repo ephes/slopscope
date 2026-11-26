@@ -20,7 +20,10 @@ from slopscope.size_limits import SCHEMA_VERSION, SEED, UPDATE
 
 RenderableSizeLimitsReport = SizeLimitsReport | MultiProjectSizeLimitsReport
 
-RENAME_NOTE = "A renamed or moved unit appears as new over its limit plus a stale entry."
+RENAME_NOTE = (
+    "A renamed or moved unit can appear as new over its limit plus a stale entry "
+    "when both paths are in scope."
+)
 _KIND_LABELS = {"functions": "function", "classes": "class", "test_files": "test file"}
 _KIND_PLURALS = {"functions": "functions", "classes": "classes", "test_files": "test files"}
 _UNITS = {"functions": "span lines", "classes": "span lines", "test_files": "code lines"}
@@ -81,6 +84,7 @@ def _report_to_dict(report: SizeLimitsReport) -> dict[str, Any]:
         "grown": [_entry_to_dict(entry) for entry in report.grown],
         "shrunk": [_entry_to_dict(entry) for entry in report.shrunk],
         "stale": [_entry_to_dict(entry) for entry in report.stale],
+        "out_of_scope": [_entry_to_dict(entry) for entry in report.out_of_scope],
         "seeded": [_entry_to_dict(entry) for entry in report.seeded],
         "lowered": [_entry_to_dict(entry) for entry in report.lowered],
         "dropped": [_entry_to_dict(entry) for entry in report.dropped],
@@ -204,6 +208,14 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
             ),
         ]
     )
+    if report.out_of_scope:
+        groups.append(
+            (
+                "Out-of-Scope Allowlist Entries",
+                ("Kind", "Recorded", "Limit", "Unit"),
+                [_row(entry, entry.recorded, entry.limit) for entry in report.out_of_scope],
+            )
+        )
     return groups
 
 
@@ -232,10 +244,13 @@ def _header_lines(report: SizeLimitsReport) -> list[str]:
 
 
 def _summary(report: SizeLimitsReport) -> str:
-    return (
+    summary = (
         f"{len(report.over_limit)} new over limit, {len(report.grown)} grown, "
         f"{len(report.shrunk)} shrunk, {len(report.stale)} stale"
     )
+    if report.out_of_scope:
+        summary += f", {len(report.out_of_scope)} out of scope"
+    return summary
 
 
 def render_size_limits_plain(report: RenderableSizeLimitsReport) -> str:

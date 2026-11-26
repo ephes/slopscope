@@ -51,7 +51,10 @@ def test_report_lists_offenders_and_exits_0(tmp_path: Path) -> None:
     assert "tests/test_big.py" in stdout
     assert "(not found; nothing is allowlisted)" in stdout
     assert "2 new over limit, 0 grown, 0 shrunk, 0 stale" in stdout
-    assert "A renamed or moved unit appears as new over its limit plus a stale entry." in stdout
+    assert (
+        "A renamed or moved unit can appear as new over its limit plus a stale entry "
+        "when both paths are in scope." in stdout
+    )
 
 
 def test_strict_exit_codes(tmp_path: Path) -> None:
@@ -157,6 +160,7 @@ def test_json_shape(tmp_path: Path) -> None:
         "grown",
         "shrunk",
         "stale",
+        "out_of_scope",
         "seeded",
         "lowered",
         "dropped",
@@ -168,6 +172,7 @@ def test_json_shape(tmp_path: Path) -> None:
     assert data["limits"] == {"functions": 3, "classes": 8, "test_files": 4}
     assert data["allowlist"]["existed"] is False
     assert data["check_failed"] is True
+    assert data["out_of_scope"] == []
     assert data["over_limit"][0] == {
         "kind": "functions",
         "key": "src/big.py::big",
@@ -177,6 +182,55 @@ def test_json_shape(tmp_path: Path) -> None:
         "delta": None,
         "reason": None,
     }
+
+
+def test_filtered_report_distinguishes_unmeasured_entries_from_deletions(tmp_path: Path) -> None:
+    excluded = "vendor/excluded::pkg/large.py"
+    missing = "src/removed.py"
+    for path in (excluded, missing):
+        write(tmp_path, path, "def large():\n" + "    x = 1\n" * 5)
+    write(tmp_path, "pyproject.toml", CONFIG)
+    args = ["--size-limits", str(tmp_path)]
+    assert run_cli([*args, "--seed-allowlist"])[0] == 0
+
+    (tmp_path / missing).unlink()
+    write(
+        tmp_path,
+        "pyproject.toml",
+        '[tool.slopscope]\nexclude_dirs = ["vendor/excluded::pkg"]\n' + CONFIG,
+    )
+
+    code, stdout, stderr = run_cli([*args, "--strict", "--format", "json"])
+    assert (code, stderr) == (0, "")
+    data = json.loads(stdout)
+    assert [(entry["key"], entry["reason"]) for entry in data["stale"]] == [
+        (f"{missing}::large", "missing")
+    ]
+    assert data["out_of_scope"] == [
+        {
+            "kind": "functions",
+            "key": f"{excluded}::large",
+            "size": None,
+            "limit": 3,
+            "recorded": 6,
+            "delta": None,
+            "reason": None,
+        }
+    ]
+    assert data["failures"] == []
+    assert data["check_failed"] is False
+
+    code, stdout, stderr = run_cli([*args, "--strict", "--format", "plain"])
+    assert (code, stderr) == (0, "")
+    stale = next(
+        section for section in stdout.split("\n\n") if section.startswith("Stale Allowlist")
+    )
+    out_of_scope = next(
+        section for section in stdout.split("\n\n") if section.startswith("Out-of-Scope Allowlist")
+    )
+    assert stale.splitlines()[-1].split() == ["function", "6", "-", "missing", f"{missing}::large"]
+    assert out_of_scope.splitlines()[-1].split() == ["function", "6", "3", f"{excluded}::large"]
+    assert "1 stale, 1 out of scope" in stdout
 
 
 def test_default_limits_apply_without_config(tmp_path: Path) -> None:
@@ -223,6 +277,7 @@ def test_failed_source_with_delimiter_keeps_allowlist_entries(tmp_path: Path) ->
     assert "could not analyze" in stderr
     assert [failure["path"] for failure in report["failures"]] == [path]
     assert report["stale"] == []
+    assert report["out_of_scope"] == []
     assert allowlist.read_bytes() == seeded
 
 

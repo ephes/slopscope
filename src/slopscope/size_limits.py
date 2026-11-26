@@ -619,7 +619,7 @@ def check(
     max_source_bytes: int = composition.DEFAULT_MAX_SOURCE_BYTES,
     max_total_source_bytes: int | None = None,
 ) -> SizeLimitsReport:
-    """Measure a project, apply ``action`` to its allowlist, and report the four groups."""
+    """Measure a project, apply ``action`` to its allowlist, and report the results."""
 
     with allowlist_locks([allowlist_path], action=action) as destinations:
         report, pending = plan(
@@ -685,6 +685,11 @@ def plan(
             f"cannot {action} the allowlist while {len(failures)} file(s) fail to parse"
         )
 
+    path_in_scope = partial(
+        fallback.matches_path_filters,
+        excluded_patterns=fallback.compile_excluded_paths(excluded_paths),
+        include_globs=tuple(include_globs),
+    )
     allowlist: Units = loaded or {kind: {} for kind in SIZE_LIMIT_KINDS}
     seeded: list[SizeLimitEntry] = []
     lowered: list[SizeLimitEntry] = []
@@ -700,14 +705,11 @@ def plan(
             for key, size in sorted(allowlist[kind].items())
         ]
     elif action == UPDATE:
-        path_in_scope = partial(
-            fallback.matches_path_filters,
-            excluded_patterns=fallback.compile_excluded_paths(excluded_paths),
-            include_globs=tuple(include_globs),
-        )
         allowlist, lowered, dropped = _updated(units, allowlist, settings, path_in_scope)
 
-    over_limit, grown, shrunk, stale = _groups(units, allowlist, settings, failures)
+    over_limit, grown, shrunk, stale, out_of_scope = _groups(
+        units, allowlist, settings, failures, path_in_scope
+    )
     report = SizeLimitsReport(
         path=root,
         action=action,
@@ -720,6 +722,7 @@ def plan(
         grown=tuple(grown),
         shrunk=tuple(shrunk),
         stale=tuple(stale),
+        out_of_scope=tuple(out_of_scope),
         lowered=tuple(lowered),
         dropped=tuple(dropped),
         seeded=tuple(seeded),
@@ -738,12 +741,14 @@ def _groups(
     allowlist: Units,
     settings: SizeLimitSettings,
     failures: Sequence[CompositionFailure],
+    path_in_scope: Callable[[str], bool],
 ) -> tuple[list[SizeLimitEntry], ...]:
     failed_paths = {failure.path for failure in failures}
     over_limit: list[SizeLimitEntry] = []
     grown: list[SizeLimitEntry] = []
     shrunk: list[SizeLimitEntry] = []
     stale: list[SizeLimitEntry] = []
+    out_of_scope: list[SizeLimitEntry] = []
     for kind in SIZE_LIMIT_KINDS:
         limit = settings.limit(kind)
         recorded_sizes = allowlist.get(kind, {})
@@ -751,20 +756,24 @@ def _groups(
             if key not in recorded_sizes and size > limit:
                 over_limit.append(SizeLimitEntry(kind=kind, key=key, size=size, limit=limit))
         for key, recorded in sorted(recorded_sizes.items()):
-            if _unit_path(kind, key) in failed_paths:
+            path = _unit_path(kind, key)
+            if path in failed_paths:
                 # The file was not measured, so nothing can be said about this entry.
                 continue
             current = units[kind].get(key)
             entry = SizeLimitEntry(kind=kind, key=key, size=current, limit=limit, recorded=recorded)
             if current is None:
-                stale.append(dataclasses.replace(entry, reason="missing"))
+                if path_in_scope(path):
+                    stale.append(dataclasses.replace(entry, reason="missing"))
+                else:
+                    out_of_scope.append(entry)
             elif current <= limit:
                 stale.append(dataclasses.replace(entry, reason="within limit"))
             elif current > recorded:
                 grown.append(entry)
             elif current < recorded:
                 shrunk.append(entry)
-    return over_limit, grown, shrunk, stale
+    return over_limit, grown, shrunk, stale, out_of_scope
 
 
 def _updated(
