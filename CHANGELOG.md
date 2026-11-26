@@ -8,6 +8,10 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Preserve ceilings for source paths skipped during discovery and show why they are out of scope.
+
+- Preserve test-file ceilings when a scan classifies their paths outside tests and report them as out of scope.
+
 - List size-limit allowlist entries outside the discovery path filters in their own report section
   and the JSON `out_of_scope` array. Missing entries in the selected paths still appear as stale.
 

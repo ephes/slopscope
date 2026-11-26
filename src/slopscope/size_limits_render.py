@@ -212,8 +212,17 @@ def _groups(report: SizeLimitsReport) -> list[Group]:
         groups.append(
             (
                 "Out-of-Scope Allowlist Entries",
-                ("Kind", "Recorded", "Limit", "Unit"),
-                [_row(entry, entry.recorded, entry.limit) for entry in report.out_of_scope],
+                ("Kind", "Recorded", "Limit", "Reason", "Unit"),
+                [
+                    (
+                        _KIND_LABELS[entry.kind],
+                        _size(entry.recorded),
+                        _size(entry.limit),
+                        display_text(entry.reason or ""),
+                        display_text(entry.key),
+                    )
+                    for entry in report.out_of_scope
+                ],
             )
         )
     return groups
