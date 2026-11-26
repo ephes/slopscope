@@ -5,6 +5,8 @@ import io
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -98,6 +100,43 @@ def test_display_failure_reports_published_snapshot(
         schema_version=composition.SCHEMA_VERSION,
     )
     assert baseline["report_type"] == "composition"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX pipes")
+def test_closed_stdout_pipe_after_snapshot_exits_2_without_shutdown_noise(
+    tmp_path: Path,
+) -> None:
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "saved.json"
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; from slopscope import cli; sys.exit(cli.main(sys.argv[1:]))",
+                "--composition",
+                "--format",
+                "plain",
+                "--snapshot",
+                str(snapshot),
+                str(repository),
+            ],
+            stdout=write_end,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        os.close(write_end)
+
+    assert completed.returncode == 2
+    assert completed.stderr.startswith(f"slopscope: snapshot {snapshot} published; ")
+    assert completed.stderr.count("\n") == 1
+    assert "Exception ignored" not in completed.stderr
+    assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
 
 
 def test_display_failure_without_snapshot_preserves_stream_error(tmp_path: Path) -> None:

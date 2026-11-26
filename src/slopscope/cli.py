@@ -722,6 +722,8 @@ def _run_composition(
     except Exception as exc:
         if published_snapshot is None:
             raise
+        if isinstance(exc, OSError):
+            _discard_failed_display_stream(out)
         print(
             display_text(
                 f"slopscope: snapshot {published_snapshot} published; "
@@ -731,6 +733,29 @@ def _run_composition(
         )
         return 2
     return 1 if failed else 0
+
+
+def _discard_failed_display_stream(stream: TextIO) -> None:
+    """Point a failed display descriptor at devnull so interpreter exit cannot retry it.
+
+    Without this, CPython flushes the still-buffered report again at shutdown, prints
+    ``Exception ignored ... BrokenPipeError`` and replaces the exit status with 120.
+    """
+
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull, descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(devnull)
 
 
 @dataclasses.dataclass(frozen=True)

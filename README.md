@@ -474,7 +474,7 @@ Snapshot bytes (including preserved mode) are fsynced before replacement, then t
 is fsynced before success. A directory-sync failure exits 2 with "published; durability unconfirmed":
 the new snapshot is visible and is not rolled back. Precommit failures, including short writes,
 preserve the prior snapshot. If display output fails after successful publication, stderr reports the
-published snapshot path.
+published snapshot path and the command exits 2, also when stdout is a closed pipe.
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.

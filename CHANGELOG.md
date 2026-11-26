@@ -8,7 +8,7 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
-- Report the published composition snapshot path if rendering or delivering the display output fails.
+- Report the published composition snapshot path and exit 2 if rendering or delivering the display output fails, including on a closed stdout pipe.
 
 - Refuse short composition snapshot writes and preserve the previous baseline.
 
