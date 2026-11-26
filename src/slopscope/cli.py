@@ -10,6 +10,7 @@ import os
 import stat
 import sys
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Never, TextIO
@@ -763,6 +764,11 @@ class _SnapshotDestination:
     target: Path
     identity: tuple[int, int] | None
     parent_identity: tuple[int, int] | None
+    generation: tuple[int, ...] | None
+
+
+_SNAPSHOT_LOCK_TIMEOUT_SECONDS = 10.0
+_SNAPSHOT_LOCK_POLL_SECONDS = 0.05
 
 
 def _snapshot_identity(path: Path) -> tuple[int, int] | None:
@@ -771,6 +777,21 @@ def _snapshot_identity(path: Path) -> tuple[int, int] | None:
     except FileNotFoundError:
         return None
     return metadata.st_dev, metadata.st_ino
+
+
+def _snapshot_generation(path: Path) -> tuple[int, ...] | None:
+    """Identity plus size and change timestamps, so in-place edits are detected."""
+    try:
+        metadata = path.stat()
+    except FileNotFoundError:
+        return None
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
 
 
 def _resolved_snapshot(path: Path) -> Path:
@@ -791,8 +812,11 @@ def _validate_snapshot_inputs(
 ) -> _SnapshotDestination:
     """Refuse input aliases and optionally retain the admissions checked by preflight."""
     target = _resolved_snapshot(snapshot)
-    identity = _snapshot_identity(target)
-    destination = _SnapshotDestination(target, identity, _snapshot_identity(target.parent))
+    generation = _snapshot_generation(target)
+    identity = None if generation is None else (generation[0], generation[1])
+    destination = _SnapshotDestination(
+        target, identity, _snapshot_identity(target.parent), generation
+    )
 
     for input_path in (config_path, baseline_path):
         if input_path is None:
@@ -826,7 +850,7 @@ def _validate_snapshot_inputs(
 def _verify_snapshot_destination(path: Path, destination: _SnapshotDestination) -> None:
     if (
         _resolved_snapshot(path) != destination.target
-        or _snapshot_identity(destination.target) != destination.identity
+        or _snapshot_generation(destination.target) != destination.generation
         or _snapshot_identity(destination.target.parent) != destination.parent_identity
     ):
         raise OSError(f"snapshot target changed after preflight: {path}")
@@ -850,9 +874,7 @@ def _snapshot_lock(target: Path) -> Iterator[None]:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise OSError("snapshot lock must be a single-link regular file")
-        import fcntl
-
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        _acquire_snapshot_lock(descriptor, lock)
         info, named = os.fstat(descriptor), lock.lstat()
         if (
             _snapshot_identity(target.parent) != parent_identity
@@ -865,6 +887,25 @@ def _snapshot_lock(target: Path) -> Iterator[None]:
         yield
     finally:
         os.close(descriptor)
+
+
+def _acquire_snapshot_lock(descriptor: int, lock: Path) -> None:
+    """Wait for the writer lock until a monotonic deadline instead of blocking forever."""
+    import fcntl
+
+    deadline = time.monotonic() + _SNAPSHOT_LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OSError(
+                    f"snapshot lock busy: another writer held {lock.name} for more than "
+                    f"{_SNAPSHOT_LOCK_TIMEOUT_SECONDS:g} s; retry when it finishes",
+                ) from None
+            time.sleep(min(_SNAPSHOT_LOCK_POLL_SECONDS, remaining))
 
 
 def _write_snapshot(path: Path, text: str, *, destination: _SnapshotDestination) -> None:

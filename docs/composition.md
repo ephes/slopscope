@@ -526,6 +526,15 @@ are rejected with exit code 2 and no report or writes. Resolved symlink paths an
 all selected projects. Preflight captures the destination identity once and compares it with the same
 source admissions used by the analysis. A source changed between discovery and opening fails analysis.
 A distinct snapshot inside the repository is allowed.
+Preflight also records the destination file generation: device, inode, size, and modification and
+change times (or that the file is absent). Publication compares it before staging and again
+immediately before replacement, together with the parent-directory identity. A destination edited
+in place, replaced, or newly created during analysis or staging is refused with exit code 2 and
+"snapshot target changed after preflight"; the concurrent bytes are kept. On filesystems with coarse
+timestamps, a same-size rewrite within one timestamp tick of the previous write is not detectable.
+Writers serialize publication through a persistent sibling `.NAME.lock` kernel lock. A writer waits
+at most 10 seconds for it. If another writer still holds the lock, the command exits 2 with
+"snapshot lock busy", leaves the snapshot unchanged, and can be retried once that writer finishes.
 The JSON is serialized first and written to a sibling temporary file. A short write is refused before
 flushing or updating permissions. A complete stage is flushed and atomically replaces the destination.
 Precommit write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
