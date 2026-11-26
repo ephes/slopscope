@@ -93,18 +93,26 @@ def partition_existing_projects(
 
 
 def _verify_missing_project_path(path: Path, label: str) -> None:
-    """Check for a directory entry that the followed stat could not reach."""
-    try:
-        entry = path.lstat()
-    except (FileNotFoundError, NotADirectoryError):
-        return
-    except OSError as exc:
-        raise ProjectError(
-            f"incomplete analysis: could not inspect {label} path {path}: {exc}"
-        ) from exc
+    """Walk reachable prefixes to distinguish a missing entry from a broken link."""
+    for component in (*reversed(path.parents), path):
+        try:
+            entry = component.lstat()
+            if stat.S_ISLNK(entry.st_mode):
+                try:
+                    entry = component.stat()
+                except (FileNotFoundError, NotADirectoryError) as exc:
+                    raise ProjectError(
+                        f"incomplete analysis: {label} path has a dangling symlink: {component}"
+                    ) from exc
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ProjectError(
+                f"incomplete analysis: could not inspect {label} path {path}: {exc}"
+            ) from exc
 
-    if stat.S_ISLNK(entry.st_mode):
-        raise ProjectError(f"incomplete analysis: {label} path is a dangling symlink: {path}")
+        if component != path and not stat.S_ISDIR(entry.st_mode):
+            raise ProjectError(f"{label} path has a non-directory component: {path}")
     raise ProjectError(f"incomplete analysis: {label} path changed during admission: {path}")
 
 

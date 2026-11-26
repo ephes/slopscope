@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Reject configured project paths with dangling symlinks in intermediate components,
+  including for optional projects.
+
 - Mark composition baseline comparisons as incomparable when either scan reports source failures.
   Keep available deltas as provisional evidence. Reject baselines whose `failures` value is not a list.
 

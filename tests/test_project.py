@@ -111,6 +111,30 @@ def test_partition_existing_projects_fails_required_missing_path(tmp_path: Path)
         project.partition_existing_projects((backend,))
 
 
+@pytest.mark.parametrize("parent_kind", ["absent", "linked", "dangling"])
+def test_partition_optional_project_with_missing_subtree(tmp_path: Path, parent_kind: str) -> None:
+    parent = tmp_path / "checkout"
+    target = tmp_path / "target"
+    if parent_kind == "linked":
+        target.mkdir()
+    if parent_kind != "absent":
+        parent.symlink_to(target, target_is_directory=True)
+    configured = config.ProjectConfig(name="docs", path=parent / "nested" / "docs", optional=True)
+
+    if parent_kind == "dangling":
+        with pytest.raises(
+            project.ProjectError, match=r"incomplete analysis: project docs.*dangling symlink"
+        ) as exc:
+            project.partition_existing_projects((configured,))
+        assert str(parent) in str(exc.value)
+    else:
+        existing, skipped = project.partition_existing_projects((configured,))
+        assert existing == ()
+        assert skipped == (
+            SkippedProject("docs", configured.path, "missing optional project path"),
+        )
+
+
 def test_build_multi_project_report_builds_snapshot_rows(tmp_path: Path) -> None:
     report = sample_repository_report(tmp_path / "frontend")
 
