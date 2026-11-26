@@ -139,8 +139,8 @@ The report compares every measured unit with its limit and the allowlist, and li
   `--update-allowlist` records the smaller size.
 - **Stale** lists allowlist entries in the selected paths whose unit is missing (gone, renamed, or moved)
   or now within its limit.
-- **Out of scope** lists allowlist entries left unmeasured by the discovery path filters. These entries
-  have no current size and do not affect `--strict`.
+- **Out of scope** lists allowlist entries left unmeasured by the discovery path filters or the
+  current test-file classification. These entries have no current size and do not affect `--strict`.
 
 The report exits 0. With `--strict` it exits 1 when the first or second group is not empty. Files that cannot be read
 or parsed are listed as failures, their allowlist entries are neither checked nor reported as stale, and the command
@@ -152,7 +152,10 @@ exits 1.
   refuses to overwrite an existing file.
 - `--update-allowlist` lowers recorded sizes to current sizes for units that shrank, and drops entries that are
   missing within the selected paths or now within the limit. Entries whose paths are excluded by
-  `exclude_dirs`, the built-in exclusions, or `include_globs` keep their recorded sizes. The update
+  `exclude_dirs`, the built-in exclusions, or `include_globs` keep their recorded sizes. Test-file
+  entries also keep their sizes when the current configuration classifies their paths outside tests.
+  For permanent reclassification, remove the old key from `test_files` manually. Function and class
+  measurements continue under the same paths. The update
   never adds an entry and never raises a recorded size, so growth and new offenders still show up
   afterwards. It needs an existing allowlist.
 - Both refuse to run while files fail to parse, because unmeasured units would look missing.
@@ -282,8 +285,8 @@ and earlier reject this section as an unknown field; use `0.3.0a1` or later.
 - `action` is `report`, `seed`, or `update`. `seeded`, `lowered`, and `dropped` list what the action changed.
 - `units` counts every measured unit, not only offenders. `allowlist.entries` counts entries after the action.
 - `reason` is `missing` or `within limit` for stale and dropped entries.
-- `out_of_scope` lists entries omitted by the path filters. Their `size`, `delta`, and `reason` are `null`.
-  The array is empty when all allowlisted paths match the filters.
+- `out_of_scope` entries have `null` for `size` and `delta`. The `reason` is `null` for path-filter
+  exclusions and `not classified as tests` for test-file entries outside the current test classification.
 - With `--project`, the top level has `report_type: "size_limits_projects"`, `schema_version`, a `projects` array
   whose items contain `name`, `path`, and a full `report` object, and `skipped_projects`.
 

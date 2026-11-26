@@ -233,6 +233,39 @@ def test_filtered_report_distinguishes_unmeasured_entries_from_deletions(tmp_pat
     assert "1 stale, 1 out of scope" in stdout
 
 
+def test_update_preserves_test_file_ceiling_after_reclassification(tmp_path: Path) -> None:
+    path = "src/fixtures/helpers.py"
+    test_config = '[tool.slopscope]\ntest_dirs = ["fixtures"]\n' + CONFIG
+    write(tmp_path, "pyproject.toml", test_config)
+    source = "def helper():\n" + "    x = 1\n" * 5
+    write(tmp_path, path, source)
+    args = ["--size-limits", "--format", "json", str(tmp_path)]
+    assert run_cli([*args, "--seed-allowlist"])[0] == 0
+
+    write(tmp_path, "pyproject.toml", CONFIG)
+    write(tmp_path, path, source + "    return x\n")
+    code, stdout, stderr = run_cli([*args, "--update-allowlist"])
+    assert (code, stderr) == (0, "")
+    allowlist = json.loads((tmp_path / "size-limits.json").read_bytes())
+    assert allowlist["test_files"] == {path: 6}
+    report = json.loads(stdout)
+    assert report["dropped"] == []
+    assert [(entry["key"], entry["reason"]) for entry in report["out_of_scope"]] == [
+        (path, "not classified as tests")
+    ]
+    assert [entry["key"] for entry in report["grown"]] == [f"{path}::helper"]
+
+    write(tmp_path, "pyproject.toml", test_config)
+    code, stdout, stderr = run_cli([*args, "--strict"])
+    assert (code, stderr) == (1, "")
+    report = json.loads(stdout)
+    assert report["out_of_scope"] == []
+    assert [(entry["key"], entry["recorded"]) for entry in report["grown"]] == [
+        (f"{path}::helper", 6),
+        (path, 6),
+    ]
+
+
 def test_default_limits_apply_without_config(tmp_path: Path) -> None:
     write(tmp_path, "src/app.py", "def long():\n" + "    x = 1\n" * 150)
 

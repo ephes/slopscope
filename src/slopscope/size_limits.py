@@ -40,6 +40,7 @@ UPDATE = "update"
 SEED = "seed"
 
 Units = dict[str, dict[str, int]]
+UnitScope = Callable[[str, str], tuple[bool, str | None]]
 
 
 class SizeLimitsError(Exception):
@@ -685,11 +686,23 @@ def plan(
             f"cannot {action} the allowlist while {len(failures)} file(s) fail to parse"
         )
 
-    path_in_scope = partial(
+    matches_filters = partial(
         fallback.matches_path_filters,
         excluded_patterns=fallback.compile_excluded_paths(excluded_paths),
         include_globs=tuple(include_globs),
     )
+
+    def unit_scope(kind: str, path: str) -> tuple[bool, str | None]:
+        if not matches_filters(path):
+            return False, None
+        if (
+            kind == "test_files"
+            and classify.classify_source_test(path, source_dirs=source_dirs, test_dirs=test_dirs)
+            != "tests"
+        ):
+            return False, "not classified as tests"
+        return True, None
+
     allowlist: Units = loaded or {kind: {} for kind in SIZE_LIMIT_KINDS}
     seeded: list[SizeLimitEntry] = []
     lowered: list[SizeLimitEntry] = []
@@ -705,10 +718,10 @@ def plan(
             for key, size in sorted(allowlist[kind].items())
         ]
     elif action == UPDATE:
-        allowlist, lowered, dropped = _updated(units, allowlist, settings, path_in_scope)
+        allowlist, lowered, dropped = _updated(units, allowlist, settings, unit_scope)
 
     over_limit, grown, shrunk, stale, out_of_scope = _groups(
-        units, allowlist, settings, failures, path_in_scope
+        units, allowlist, settings, failures, unit_scope
     )
     report = SizeLimitsReport(
         path=root,
@@ -741,7 +754,7 @@ def _groups(
     allowlist: Units,
     settings: SizeLimitSettings,
     failures: Sequence[CompositionFailure],
-    path_in_scope: Callable[[str], bool],
+    unit_scope: UnitScope,
 ) -> tuple[list[SizeLimitEntry], ...]:
     failed_paths = {failure.path for failure in failures}
     over_limit: list[SizeLimitEntry] = []
@@ -763,10 +776,11 @@ def _groups(
             current = units[kind].get(key)
             entry = SizeLimitEntry(kind=kind, key=key, size=current, limit=limit, recorded=recorded)
             if current is None:
-                if path_in_scope(path):
+                in_scope, reason = unit_scope(kind, path)
+                if in_scope:
                     stale.append(dataclasses.replace(entry, reason="missing"))
                 else:
-                    out_of_scope.append(entry)
+                    out_of_scope.append(dataclasses.replace(entry, reason=reason))
             elif current <= limit:
                 stale.append(dataclasses.replace(entry, reason="within limit"))
             elif current > recorded:
@@ -780,7 +794,7 @@ def _updated(
     units: Units,
     allowlist: Units,
     settings: SizeLimitSettings,
-    path_in_scope: Callable[[str], bool],
+    unit_scope: UnitScope,
 ) -> tuple[Units, list[SizeLimitEntry], list[SizeLimitEntry]]:
     """Lower shrunk entries and drop stale entries within the selected paths."""
 
@@ -792,7 +806,7 @@ def _updated(
         updated[kind] = {}
         for key, recorded in sorted(allowlist.get(kind, {}).items()):
             size = units[kind].get(key)
-            if size is None and not path_in_scope(_unit_path(kind, key)):
+            if size is None and not unit_scope(kind, _unit_path(kind, key))[0]:
                 updated[kind][key] = recorded
                 continue
             if size is None or size <= limit:
