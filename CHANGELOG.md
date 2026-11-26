@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Wait at most 10 seconds for the composition snapshot writer lock; a still-held lock exits 2
+  with a "snapshot lock busy" diagnostic and leaves the snapshot unchanged for a retry.
+
+- Refuse composition snapshot publication when the target was edited in place after preflight,
+  detected by size and modification/change times in addition to device and inode.
+
 - Intersect duplicate continuation memberships incrementally, stop scanning once no
   block covers the group, and skip blocks with a different copy count before charging work.
 

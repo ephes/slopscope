@@ -468,12 +468,16 @@ For files, physical lines, and code lines, the sum of available kind counts cann
 corresponding report total when it is present.
 A baseline that names a different analyzer is marked non-comparable, even when the analyzer
 versions match. Older baselines may omit the analyzer name.
-Snapshot publication uses the resolved destination approved during preflight and rechecks its file
-and parent-directory identity before replacement. A changed target is refused, preserving existing
-outputs, including when a snapshot symlink is retargeted during analysis or writing.
+Snapshot publication uses the resolved destination approved during preflight and rechecks the target
+file generation (device, inode, size, modification and change times) and the parent-directory identity
+before staging and again before replacement. A changed target is refused, preserving existing
+outputs, including when a snapshot symlink is retargeted during analysis or writing, when the file is
+edited in place, or when an absent destination is created meanwhile.
 Writers serialize verification and replacement under a persistent sibling `.NAME.lock` kernel lock.
 The lock must be a single-link regular file, opened without following symlinks and rechecked after
-waiting; do not remove it while writers may be active. A writer whose preflight generation has
+waiting; do not remove it while writers may be active. A writer waits at most 10 seconds for the
+lock; if another writer still holds it, the command exits 2 with "snapshot lock busy" and the
+snapshot is unchanged, so it can simply be retried. A writer whose preflight generation has
 already been replaced refuses publication. Snapshot locking requires POSIX `flock` and `O_NOFOLLOW`.
 Snapshot bytes (including preserved mode) are fsynced before replacement, then the parent directory
 is fsynced before success. A directory-sync failure exits 2 with "published; durability unconfirmed":
