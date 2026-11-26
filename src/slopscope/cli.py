@@ -202,7 +202,12 @@ def run(
 
     try:
         return _run(argv, stdout=stdout, stderr=stderr)
-    except (fallback.GitDiscoveryError, fallback.CountingError, cloc.ClocParseError) as exc:
+    except (
+        fallback.GitDiscoveryError,
+        fallback.CountingError,
+        cloc.ClocParseError,
+        project_module.ProjectError,
+    ) as exc:
         print(display_text(f"slopscope: {exc}"), file=stderr if stderr is not None else sys.stderr)
         return 2
 
@@ -390,6 +395,8 @@ def _run_size_limits(
             existing_projects, skipped_projects = project_module.partition_existing_projects(
                 selected_projects
             )
+            for configured_project in existing_projects:
+                configured_project.verify_directory()
             for skipped_project in skipped_projects:
                 print(
                     display_text(
@@ -413,14 +420,17 @@ def _run_size_limits(
                 # Plan every project first: all refusals happen before any allowlist is written.
                 planned: list[tuple[str, SizeLimitsReport, size_limits.Units | None, Path]] = []
                 for configured_project in existing_projects:
+                    root = configured_project.verify_directory()
                     report, pending = _plan_size_limits(
-                        configured_project.path,
+                        root,
                         allowlists[configured_project.name],
                         action,
                         slopscope_config,
                         label=configured_project.name,
                         destination=destinations.get(allowlists[configured_project.name]),
                     )
+                    configured_project.verify_directory()
+                    report = dataclasses.replace(report, path=configured_project.path)
                     planned.append(
                         (
                             configured_project.name,
@@ -445,7 +455,7 @@ def _run_size_limits(
             rendered = MultiProjectSizeLimitsReport(
                 projects=tuple(project_reports), skipped_projects=skipped_projects
             )
-    except (project_module.ProjectError, size_limits.SizeLimitsError) as exc:
+    except size_limits.SizeLimitsError as exc:
         print(display_text(f"slopscope: {exc}"), file=err)
         return 2
 
@@ -554,16 +564,12 @@ def _run_composition(
 
     roots = [path]
     if args.project is not None:
-        try:
-            selected_projects = project_module.select_projects(slopscope_config, args.project)
-            existing_projects, skipped_projects = project_module.partition_existing_projects(
-                selected_projects
-            )
-        except project_module.ProjectError as exc:
-            print(display_text(f"slopscope: {exc}"), file=err)
-            return 2
-
-        roots = [project.path for project in existing_projects]
+        selected_projects = project_module.select_projects(slopscope_config, args.project)
+        existing_projects, skipped_projects = project_module.partition_existing_projects(
+            selected_projects
+        )
+        if args.snapshot is not None:
+            roots = [project.verify_directory() for project in existing_projects]
 
     snapshot_destination: _SnapshotDestination | None = None
     source_admissions: dict[Path, dict[str, _source.Admission]] = {}
@@ -624,20 +630,23 @@ def _run_composition(
             {} if baseline is None else composition_baseline.project_baselines(baseline)
         )
         for configured_project in existing_projects:
+            root = configured_project.verify_directory()
             report = _build_composition_report(
-                configured_project.path,
+                root,
                 slopscope_config,
                 limit,
-                admissions=source_admissions.get(configured_project.path),
+                admissions=source_admissions.get(root),
             )
             if args.churn:
                 report = _with_churn(
                     report,
-                    configured_project.path,
+                    root,
                     slopscope_config,
                     err,
                     label=configured_project.name,
                 )
+            configured_project.verify_directory()
+            report = dataclasses.replace(report, path=configured_project.path)
             if baseline_path is not None:
                 project_baseline = baseline_projects.get(configured_project.name)
                 if project_baseline is None:
@@ -960,14 +969,10 @@ def _run_projects(
     out: TextIO,
     err: TextIO,
 ) -> int:
-    try:
-        selected_projects = project_module.select_projects(slopscope_config, args.project)
-        existing_projects, skipped_projects = project_module.partition_existing_projects(
-            selected_projects
-        )
-    except project_module.ProjectError as exc:
-        print(display_text(f"slopscope: {exc}"), file=err)
-        return 2
+    selected_projects = project_module.select_projects(slopscope_config, args.project)
+    existing_projects, skipped_projects = project_module.partition_existing_projects(
+        selected_projects
+    )
 
     for skipped_project in skipped_projects:
         print(
@@ -980,16 +985,23 @@ def _run_projects(
 
     project_reports: list[ProjectReport] = []
     for configured_project in existing_projects:
+        root = configured_project.verify_directory()
         report = _build_repository_report(
-            path=configured_project.path,
+            path=root,
             engine=engine,
             err=err,
             slopscope_config=slopscope_config,
         )
+        configured_project.verify_directory()
         if isinstance(report, int):
             print(display_text(f"slopscope: project {configured_project.name} failed"), file=err)
             return report
-        project_reports.append(ProjectReport(name=configured_project.name, report=report))
+        project_reports.append(
+            ProjectReport(
+                name=configured_project.name,
+                report=dataclasses.replace(report, path=configured_project.path),
+            )
+        )
 
     multi_project_report = project_module.build_multi_project_report(
         engine=engine,

@@ -8,8 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from slopscope import cli, cloc, config, fallback
-from slopscope.report import FileAggregateReport, FileRow, LanguageRow, LanguageSummaryReport
+from slopscope import cli, cloc, config, fallback, project
+from slopscope.report import (
+    FileAggregateReport,
+    FileRow,
+    LanguageRow,
+    LanguageSummaryReport,
+    SkippedProject,
+)
 
 
 def test_cli_smoke_with_cloc_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1770,6 +1776,63 @@ def test_configured_file_root_is_rejected(tmp_path: Path, optional: bool, mode: 
     )
     assert out.getvalue() == ""
     assert "not a directory" in err.getvalue()
+
+
+@pytest.mark.parametrize("change", ["retarget", "replace", "stable"])
+@pytest.mark.parametrize("mode", ["report", "composition", "size-limits"])
+def test_configured_project_keeps_admitted_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str, mode: str
+) -> None:
+    checkout = tmp_path / "checkout"
+    replacement = tmp_path / "replacement"
+    for root in (checkout, replacement):
+        root.mkdir()
+        (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout, target_is_directory=True)
+    configuration = tmp_path / "workspace.toml"
+    configuration.write_text(
+        '[[tool.slopscope.projects]]\nname = "example"\npath = "alias"\noptional = true\n',
+        encoding="utf-8",
+    )
+
+    partition = project.partition_existing_projects
+
+    def partition_then_change(
+        projects: Sequence[config.ProjectConfig],
+    ) -> tuple[tuple[project.AdmittedProject, ...], tuple[SkippedProject, ...]]:
+        result = partition(projects)
+        if change == "retarget":
+            alias.unlink()
+            alias.symlink_to(replacement, target_is_directory=True)
+        elif change == "replace":
+            checkout.rename(tmp_path / "retired")
+            replacement.rename(checkout)
+        return result
+
+    monkeypatch.setattr(project, "partition_existing_projects", partition_then_change)
+    snapshot = tmp_path / "snapshot.json"
+    options = {
+        "report": ["--engine", "python"],
+        "composition": ["--composition", "--snapshot", str(snapshot)],
+        "size-limits": ["--size-limits", "--seed-allowlist"],
+    }[mode]
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.run(
+        ["--config", str(configuration), "--project", "all", "--format", "json", *options],
+        stdout=out,
+        stderr=err,
+    )
+    if change == "stable":
+        assert code == 0, err.getvalue()
+        assert json.loads(out.getvalue())["projects"][0]["path"] == str(alias)
+    else:
+        assert code == 2
+        assert out.getvalue() == ""
+        assert "incomplete analysis: project example" in err.getvalue()
+        assert str(alias) in err.getvalue()
+        assert not snapshot.exists()
+        assert not (alias / "size-limits.json").exists()
 
 
 @pytest.mark.parametrize("relative_root", [False, True])

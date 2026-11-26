@@ -94,7 +94,9 @@ def test_partition_existing_projects_skips_optional_missing_paths(tmp_path: Path
 
     existing, skipped = project.partition_existing_projects((frontend, docs))
 
-    assert existing == (frontend,)
+    (admitted,) = existing
+    assert (admitted.name, admitted.path) == (frontend.name, frontend.path)
+    assert admitted.verify_directory() == existing_path.resolve()
     assert skipped == (
         SkippedProject(
             name="docs",

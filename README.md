@@ -167,6 +167,9 @@ allowlist write. Existing empty directories are allowed. Missing optional config
 skippable. Permission and I/O failures and non-directory components in configured project paths fail
 with exit code 2. A dangling symlink anywhere along a configured project path also fails with exit code 2,
 including for optional projects. A symlink to a directory is accepted and reports display the configured path.
+Configured scans use the resolved directory selected during admission and check its identity before and after
+analysis. If an alias is retargeted or that directory is replaced, the affected scan returns exit code 2 without
+publishing a report, snapshot, or allowlist.
 
 Git file discovery (`git ls-files`) captures at most 16 MiB of combined stdout/stderr in 64 KiB
 reads and has a 30-second execution timeout followed by bounded

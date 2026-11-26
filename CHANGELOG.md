@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Keep configured scans bound to the admitted directory. Refuse changed aliases or directory replacements
+  with an incomplete-analysis error.
+
 - Reject configured project paths with dangling symlinks in intermediate components,
   including for optional projects.
 
