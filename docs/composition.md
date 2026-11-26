@@ -516,7 +516,8 @@ are rejected with exit code 2 and no report or writes. Resolved symlink paths an
 all selected projects. Preflight captures the destination identity once and compares it with the same
 source admissions used by the analysis. A source changed between discovery and opening fails analysis.
 A distinct snapshot inside the repository is allowed.
-The JSON is serialized first, then written and flushed to a sibling temporary file and atomically replaced.
+The JSON is serialized first and written to a sibling temporary file. A short write is refused before
+flushing or updating permissions. A complete stage is flushed and atomically replaces the destination.
 Precommit write or replacement errors exit with code 2, preserve the previous snapshot, and remove the temporary file.
 The snapshot file is fsynced before replacement, and its parent directory is fsynced afterward.
 A directory-fsync failure exits 2 without a terminal report and explicitly says "published; durability unconfirmed":

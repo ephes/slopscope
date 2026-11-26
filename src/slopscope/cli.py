@@ -852,7 +852,11 @@ def _publish_snapshot(path: Path, content: bytes, *, destination: _SnapshotDesti
             mode="wb", dir=target.parent, prefix=f".{target.name}.", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            handle.write(content)
+            written = handle.write(content)
+            if written != len(content):
+                raise OSError(
+                    f"short write staging snapshot: wrote {written} of {len(content)} bytes"
+                )
             handle.flush()
             if mode is not None:
                 os.chmod(temporary, mode)

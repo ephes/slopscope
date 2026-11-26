@@ -934,7 +934,7 @@ def test_duplicate_project_baseline_exits_2(tmp_path: Path) -> None:
     assert "duplicate projects[1].name" in err
 
 
-@pytest.mark.parametrize("failure", ["partial-write", "flush", "replace"])
+@pytest.mark.parametrize("failure", ["partial-write", "short-write", "flush", "replace"])
 def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -944,6 +944,7 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     snapshot = tmp_path / "before.json"
     assert run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])[0] == 0
     previous = snapshot.read_bytes()
+    original = snapshot.stat()
     injected = False
     original_temporary = tempfile.NamedTemporaryFile
 
@@ -951,13 +952,21 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
         handle = original_temporary(*args, **kwargs)
         original_write = handle.write
 
-        def partial_write(text: str) -> int:
+        def partial_write(content: bytes) -> int:
             nonlocal injected
             injected = True
-            original_write(text[:20])
-            raise OSError("injected partial write")
+            written: int = original_write(content[:20])
+            if failure == "partial-write":
+                raise OSError("injected partial write")
+            return written
 
         monkeypatch.setattr(handle, "write", partial_write)
+        if failure == "short-write":
+
+            def unexpected_flush() -> None:
+                raise AssertionError("short snapshot write reached flush")
+
+            monkeypatch.setattr(handle, "flush", unexpected_flush)
         return handle
 
     def fail(*args: Any, **kwargs: Any) -> None:
@@ -965,7 +974,7 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
         injected = True
         raise OSError(f"injected {failure}")
 
-    if failure == "partial-write":
+    if failure in {"partial-write", "short-write"}:
         monkeypatch.setattr(tempfile, "NamedTemporaryFile", temporary)
     elif failure == "flush":
         monkeypatch.setattr(os, "fsync", fail)
@@ -977,7 +986,11 @@ def test_snapshot_failure_preserves_baseline_and_removes_temporary(
     assert code == 2
     assert out == ""
     assert "could not write snapshot" in err
+    if failure == "short-write":
+        assert "short write" in err
     assert snapshot.read_bytes() == previous
+    current = snapshot.stat()
+    assert (current.st_dev, current.st_ino) == (original.st_dev, original.st_ino)
     assert json.loads(snapshot.read_bytes())["report_type"] == "composition"
     assert not [p for p in tmp_path.glob(".before.json.*") if p.suffix != ".lock"]
 

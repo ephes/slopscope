@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Refuse short composition snapshot writes and preserve the previous baseline.
+
 - Preserve ceilings for source paths skipped during discovery and show why they are out of scope.
 
 - Preserve test-file ceilings when a scan classifies their paths outside tests and report them as out of scope.
