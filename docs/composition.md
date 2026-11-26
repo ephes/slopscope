@@ -344,6 +344,10 @@ Duplicate detection works on tokens, so layout, comments, and blank lines do not
 intervals so each line counts once. Blank, comment, and docstring lines inside a copy are not counted. The first copy
 counts too: when two files share a block, both files report its lines.
 
+After building each file's report rows, the scan keeps its token segments and one byte per
+physical line for duplicate counting. The byte records whether the line contributes to
+`duplicated_lines`.
+
 Largest duplicate blocks are ranked by the physical lines spanned by their longest copy, then by number of copies and
 tokens, and list up to five locations each.
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import gc
 import io
 import textwrap
 import tokenize
+import weakref
+from collections.abc import Sequence
 from pathlib import Path
 from types import GeneratorType
 from typing import Any
@@ -10,6 +13,7 @@ from typing import Any
 import pytest
 
 from slopscope import composition, composition_duplication, fallback
+from slopscope.report import CompositionDuplicateBlock, CompositionFileRow
 
 EXCLUDES = tuple(sorted(fallback.DEFAULT_EXCLUDED_PATH_SEGMENTS))
 
@@ -98,6 +102,58 @@ def test_formatting_and_comments_do_not_hide_duplicates(tmp_path: Path) -> None:
     rows = {row.path: row.counts.duplicated_lines for row in report.files}
     # The blank and comment lines inside the reformatted copy are not code lines.
     assert rows == {"src/a.py": 8, "src/b.py": 11}
+
+
+def test_composition_retains_only_compact_duplicate_line_eligibility(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blank_lines = 16_000
+    paths = [f"src/copy_{index}.py" for index in range(4)]
+    text = '"""Module\ndocstring."""\n' + BLOCK.replace(
+        "    total = 0\n", "    total = 0\n    # note\n" + "\n" * blank_lines
+    )
+    for path in paths:
+        write(tmp_path, path, text)
+
+    analyses: list[weakref.ReferenceType[composition.FileAnalysis]] = []
+    analyze_file = composition.analyze_file
+    apply_duplication = composition._apply_duplication
+
+    def record_analysis(*args: Any, **kwargs: Any) -> composition.FileAnalysis:
+        result = analyze_file(*args, **kwargs)
+        analyses.append(weakref.ref(result))
+        return result
+
+    def measure_duplication(
+        inputs: Sequence[composition._DuplicationInput],
+        rows: list[CompositionFileRow],
+        min_tokens: int,
+    ) -> list[CompositionDuplicateBlock]:
+        assert len(analyses) == len(paths)
+        gc.collect()
+        assert all(ref() is None for ref in analyses)
+        for item, row in zip(inputs, rows, strict=True):
+            mask = item.eligible_lines
+            assert isinstance(mask, bytes)
+            assert len(mask) == row.counts.physical
+        return apply_duplication(inputs, rows, min_tokens)
+
+    monkeypatch.setattr(composition, "analyze_file", record_analysis)
+    monkeypatch.setattr(composition, "_apply_duplication", measure_duplication)
+    report = composition.build_composition_report(
+        tmp_path, excluded_paths=EXCLUDES, min_duplicate_tokens=20
+    )
+
+    assert not report.failures
+    counts = report.total.counts
+    assert counts.physical == len(paths) * (blank_lines + 11)
+    assert counts.code == counts.duplicated_lines == len(paths) * 8
+    assert len(report.duplicates) == 1
+    block = report.duplicates[0]
+    assert block.tokens == 42
+    assert [(o.path, o.start_line, o.end_line) for o in block.occurrences] == [
+        (path, 3, blank_lines + 11) for path in paths
+    ]
 
 
 def test_short_or_different_code_is_not_duplicated(tmp_path: Path) -> None:
