@@ -522,6 +522,9 @@ Precommit write or replacement errors exit with code 2, preserve the previous sn
 The snapshot file is fsynced before replacement, and its parent directory is fsynced afterward.
 A directory-fsync failure exits 2 without a terminal report and explicitly says "published; durability unconfirmed":
 the new snapshot is already visible and is not rolled back.
+Once both synchronization steps succeed, the CLI renders, writes, and flushes its display output.
+If any of those steps fails, stderr reports the published snapshot path and the display error.
+The snapshot remains available for comparison.
 Existing mode bits are retained; new snapshots use mode 0600 (use `chmod` to share them).
 Snapshot output has the same 16 MiB (16,777,216 bytes) ceiling as the baseline reader,
 including the entire multi-project envelope. The complete serialized UTF-8 bytes (formatting

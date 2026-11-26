@@ -57,6 +57,61 @@ def test_snapshot_writes_the_json_report(tmp_path: Path) -> None:
     assert snapshot.read_text(encoding="utf-8") == as_json
 
 
+@pytest.mark.parametrize("failure", ["render", "write", "flush"])
+def test_display_failure_reports_published_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    class FailingOutput(io.StringIO):
+        def write(self, text: str, /) -> int:
+            if failure == "write":
+                raise BrokenPipeError("injected write failure")
+            return super().write(text)
+
+        def flush(self) -> None:
+            if failure == "flush":
+                raise BrokenPipeError("injected flush failure")
+            super().flush()
+
+    def fail_render(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("injected render failure")
+
+    if failure == "render":
+        monkeypatch.setattr(composition_render, "render_composition_report", fail_render)
+
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "saved.json"
+    stderr = io.StringIO()
+    code = cli.run(
+        ["--composition", "--format", "plain", "--snapshot", str(snapshot), str(repository)],
+        stdout=FailingOutput(),
+        stderr=stderr,
+    )
+
+    assert code == 2
+    assert stderr.getvalue() == (
+        f"slopscope: snapshot {snapshot} published; "
+        f"could not display composition report: injected {failure} failure\n"
+    )
+    baseline = composition_baseline.load_baseline(
+        snapshot,
+        expected_report_type=composition_baseline.SINGLE_REPORT_TYPE,
+        schema_version=composition.SCHEMA_VERSION,
+    )
+    assert baseline["report_type"] == "composition"
+
+
+def test_display_failure_without_snapshot_preserves_stream_error(tmp_path: Path) -> None:
+    class FailingOutput(io.StringIO):
+        def write(self, text: str, /) -> int:
+            raise BrokenPipeError("injected write failure")
+
+    repository = make_repository(tmp_path)
+    stderr = io.StringIO()
+    with pytest.raises(BrokenPipeError, match="injected write failure"):
+        cli.run(["--composition", str(repository)], stdout=FailingOutput(), stderr=stderr)
+    assert stderr.getvalue() == ""
+
+
 def test_snapshot_write_failure_exits_2(tmp_path: Path) -> None:
     repository = make_repository(tmp_path)
 

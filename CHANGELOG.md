@@ -8,6 +8,8 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Report the published composition snapshot path if rendering or delivering the display output fails.
+
 - Refuse short composition snapshot writes and preserve the previous baseline.
 
 - Preserve ceilings for source paths skipped during discovery and show why they are out of scope.

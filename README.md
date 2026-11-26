@@ -472,7 +472,9 @@ waiting; do not remove it while writers may be active. A writer whose preflight 
 already been replaced refuses publication. Snapshot locking requires POSIX `flock` and `O_NOFOLLOW`.
 Snapshot bytes (including preserved mode) are fsynced before replacement, then the parent directory
 is fsynced before success. A directory-sync failure exits 2 with "published; durability unconfirmed":
-the new snapshot is visible and is not rolled back. Precommit failures preserve the prior snapshot.
+the new snapshot is visible and is not rolled back. Precommit failures, including short writes,
+preserve the prior snapshot. If display output fails after successful publication, stderr reports the
+published snapshot path.
 Snapshot destinations that alias selected Python files, the loaded config, or the baseline are refused with exit
 code 2, including symlink and hardlink aliases. A distinct snapshot inside the repository is allowed.
 `--churn` adds Python lines added and removed per month on a configured branch's first-parent history.
