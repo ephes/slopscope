@@ -204,6 +204,8 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
             raise fail(f"detectors[{index}].version")
     if not isinstance(data.get("total"), dict):
         raise fail("total")
+    if "failures" in data and not isinstance(data["failures"], list):
+        raise fail("failures")
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
@@ -348,6 +350,28 @@ def compare(
                 f"setting {name} differs: baseline {baseline_settings.get(name)!r}, "
                 f"current {value!r}"
             )
+    total = baseline.get("total")
+    total_counts = (
+        _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
+    )
+    warnings.extend(
+        f"baseline is missing headline count total.{metric}"
+        for metric in HEADLINE_METRICS
+        if metric not in total_counts
+    )
+    baseline_failures = baseline.get("failures", [])
+    if not isinstance(baseline_failures, list):
+        raise BaselineError(f"baseline file {path} has an invalid report failures")
+    if baseline_failures:
+        warnings.append(
+            f"baseline scan is incomplete (failed sources: {len(baseline_failures)}). "
+            "Deltas are provisional."
+        )
+    if report.failures:
+        warnings.append(
+            f"current scan is incomplete (failed sources: {len(report.failures)}). "
+            "Deltas are provisional."
+        )
     comparable = not warnings
     if baseline_python_version != report.python_version:
         warnings.append(
@@ -355,10 +379,6 @@ def compare(
             f"current {report.python_version!r}"
         )
 
-    total = baseline.get("total")
-    total_counts = (
-        _read_metrics(total, path=path, where="report total") if isinstance(total, Mapping) else {}
-    )
     baseline_kinds = {
         str(kind.get("name")): _read_kind_metrics(
             kind, total_counts, path=path, where=f"report kinds[{index}]"

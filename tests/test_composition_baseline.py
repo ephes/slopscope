@@ -116,6 +116,62 @@ def test_baseline_reports_deltas(
     assert list(baseline["deltas"]) == ["total", "source", "tests", "other"]
 
 
+@pytest.mark.parametrize("failed_side", ["baseline", "current"])
+@pytest.mark.parametrize("output_format", ["json", "plain", "rich"])
+def test_baseline_comparison_with_failed_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failed_side: str, output_format: str
+) -> None:
+    if output_format == "rich":
+        pytest.importorskip("rich")
+    repository = make_repository(tmp_path)
+    snapshot = tmp_path / "before.json"
+    options = ["--composition", str(repository)]
+    original_open = _source.open_source
+
+    @contextmanager
+    def open_source(
+        root: Path, relative_path: str, admission: _source.Admission | None = None
+    ) -> Iterator[BinaryIO]:
+        if relative_path == "src/app.py":
+            raise PermissionError("injected read failure")
+        with original_open(root, relative_path, admission) as handle:
+            yield handle
+
+    with monkeypatch.context() as patch:
+        if failed_side == "baseline":
+            patch.setattr(_source, "open_source", open_source)
+        code, baseline_json, _stderr = run_cli(options + ["--format", "json"])
+    assert code == (1 if failed_side == "baseline" else 0)
+    snapshot.write_text(baseline_json, encoding="utf-8")
+
+    if failed_side == "current":
+        monkeypatch.setattr(_source, "open_source", open_source)
+    code, stdout, stderr = run_cli(
+        options + ["--baseline", str(snapshot), "--format", output_format]
+    )
+
+    assert code == (1 if failed_side == "current" else 0)
+    warning = f"{failed_side} scan is incomplete (failed sources: 1). Deltas are provisional."
+    if output_format == "json":
+        comparison = json.loads(stdout)["baseline"]
+        assert comparison["comparable"] is False
+        assert comparison["warnings"] == [warning]
+        before, after = (1, 2) if failed_side == "baseline" else (2, 1)
+        assert comparison["deltas"]["total"]["files"] == {
+            "baseline": before,
+            "current": after,
+            "delta": after - before,
+        }
+    else:
+        assert "not directly comparable with this baseline" in stdout
+        assert warning in " ".join(stdout.split())
+        assert "Changes Since Baseline" in stdout
+        assert ("+1" if failed_side == "baseline" else "-1") in stdout
+        if output_format == "rich":
+            assert "│" in stdout
+    assert f"slopscope: warning: {warning}" in stderr
+
+
 def test_baseline_plain_output_lists_changed_metrics(tmp_path: Path) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "before.json"
@@ -295,6 +351,22 @@ def test_baseline_requires_exact_analyzer_field_types(
             snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
         )
     with pytest.raises(composition_baseline.BaselineError, match=rf"analyzer\.{field}$"):
+        composition_baseline.compare(report, data, path=snapshot)
+
+
+@pytest.mark.parametrize("value", [{}, 3, "src/pkg/broken.py", None])
+def test_baseline_rejects_malformed_failures(tmp_path: Path, value: object) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    data["failures"] = value
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(composition_baseline.BaselineError, match=r"report failures$"):
+        composition_baseline.load_baseline(
+            snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(composition_baseline.BaselineError, match=r"report failures$"):
         composition_baseline.compare(report, data, path=snapshot)
 
 
@@ -759,12 +831,16 @@ def test_baseline_invalid_metric_group_exits_2(tmp_path: Path, value: object) ->
     assert "kinds[0].categories" in err
 
 
-def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing_headline", [None, "code", "physical"])
+def test_baseline_absent_metrics_remain_unknown(
+    tmp_path: Path, missing_headline: str | None
+) -> None:
     repository = make_repository(tmp_path)
     snapshot = tmp_path / "snapshot.json"
     run_cli(["--composition", "--snapshot", str(snapshot), str(repository)])
     data = json.loads(snapshot.read_text())
-    del data["total"]["code"]
+    if missing_headline is not None:
+        del data["total"][missing_headline]
     del data["total"]["categories"]
     data["extension"] = {"values": [1.25, -1e308, "NaN"]}
     snapshot.write_text(json.dumps(data))
@@ -772,8 +848,20 @@ def test_baseline_absent_metrics_remain_unknown(tmp_path: Path) -> None:
         ["--composition", "--format", "json", "--baseline", str(snapshot), str(repository)]
     )
     assert code == 0
-    assert err == ""
-    assert json.loads(out)["baseline"]["deltas"]["total"]["code"]["baseline"] is None
+    comparison = json.loads(out)["baseline"]
+    assert comparison["comparable"] is (missing_headline is None)
+    total = comparison["deltas"]["total"]
+    assert total["categories.import"]["baseline"] is None
+    assert total["categories.import"]["delta"] is None
+    if missing_headline is None:
+        assert comparison["warnings"] == []
+        assert err == ""
+    else:
+        warning = f"baseline is missing headline count total.{missing_headline}"
+        assert comparison["warnings"] == [warning]
+        assert err == f"slopscope: warning: {warning}\n"
+        assert total[missing_headline]["baseline"] is None
+        assert total[missing_headline]["delta"] is None
 
 
 @pytest.mark.parametrize("metric", ["files", "physical", "code"])
