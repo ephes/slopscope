@@ -1107,6 +1107,7 @@ def test_incomplete_analysis_preserves_snapshot(
         )
         bad_file = repository / "../other/src/bad.py"
         options += ["--project", "all"]
+    bad_source = bad_file.resolve()
     snapshot = tmp_path / "report.json"
     previous = None
     if existing_snapshot:
@@ -1120,7 +1121,7 @@ def test_incomplete_analysis_preserves_snapshot(
         root: Path, relative_path: str, admission: _source.Admission | None = None
     ) -> Iterator[BinaryIO]:
         nonlocal injected
-        if root / relative_path == bad_file:
+        if (root / relative_path).resolve() == bad_source:
             injected = True
             raise PermissionError("injected read failure")
         with original_open(root, relative_path, admission) as handle:

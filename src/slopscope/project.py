@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import stat
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from slopscope import config as config_module
@@ -19,6 +21,29 @@ from slopscope.report import (
 
 class ProjectError(Exception):
     """User-facing project selection or execution error."""
+
+
+@dataclass(frozen=True)
+class AdmittedProject:
+    name: str
+    path: Path
+    resolved_path: Path
+    metadata: os.stat_result
+
+    def verify_directory(self) -> Path:
+        """Return the admitted scan root if the configured name still selects it."""
+        message = (
+            f"incomplete analysis: project {self.name} directory changed after admission: "
+            f"{self.path}"
+        )
+        try:
+            if self.path.resolve(strict=True) == self.resolved_path:
+                current = self.resolved_path.stat()
+                if stat.S_ISDIR(current.st_mode) and os.path.samestat(current, self.metadata):
+                    return self.resolved_path
+        except (OSError, RuntimeError) as exc:
+            raise ProjectError(f"{message}: {exc}") from exc
+        raise ProjectError(message)
 
 
 def select_projects(
@@ -57,10 +82,10 @@ def select_projects(
 
 def partition_existing_projects(
     projects: Sequence[config_module.ProjectConfig],
-) -> tuple[tuple[config_module.ProjectConfig, ...], tuple[SkippedProject, ...]]:
+) -> tuple[tuple[AdmittedProject, ...], tuple[SkippedProject, ...]]:
     """Split selected projects into existing required work and optional skips."""
 
-    existing: list[config_module.ProjectConfig] = []
+    existing: list[AdmittedProject] = []
     skipped: list[SkippedProject] = []
     for configured_project in projects:
         path = configured_project.path
@@ -88,23 +113,42 @@ def partition_existing_projects(
 
         if not stat.S_ISDIR(metadata.st_mode):
             raise ProjectError(f"{label} path is not a directory: {path}")
-        existing.append(configured_project)
+        try:
+            resolved_path = path.resolve(strict=True)
+            current = resolved_path.stat()
+        except (OSError, RuntimeError) as exc:
+            raise ProjectError(
+                f"incomplete analysis: could not resolve {label} path {path}: {exc}"
+            ) from exc
+        if not stat.S_ISDIR(current.st_mode) or not os.path.samestat(current, metadata):
+            raise ProjectError(
+                f"incomplete analysis: {label} path changed during admission: {path}"
+            )
+        existing.append(AdmittedProject(configured_project.name, path, resolved_path, metadata))
     return tuple(existing), tuple(skipped)
 
 
 def _verify_missing_project_path(path: Path, label: str) -> None:
-    """Check for a directory entry that the followed stat could not reach."""
-    try:
-        entry = path.lstat()
-    except (FileNotFoundError, NotADirectoryError):
-        return
-    except OSError as exc:
-        raise ProjectError(
-            f"incomplete analysis: could not inspect {label} path {path}: {exc}"
-        ) from exc
+    """Walk reachable prefixes to distinguish a missing entry from a broken link."""
+    for component in (*reversed(path.parents), path):
+        try:
+            entry = component.lstat()
+            if stat.S_ISLNK(entry.st_mode):
+                try:
+                    entry = component.stat()
+                except (FileNotFoundError, NotADirectoryError) as exc:
+                    raise ProjectError(
+                        f"incomplete analysis: {label} path has a dangling symlink: {component}"
+                    ) from exc
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ProjectError(
+                f"incomplete analysis: could not inspect {label} path {path}: {exc}"
+            ) from exc
 
-    if stat.S_ISLNK(entry.st_mode):
-        raise ProjectError(f"incomplete analysis: {label} path is a dangling symlink: {path}")
+        if component != path and not stat.S_ISDIR(entry.st_mode):
+            raise ProjectError(f"{label} path has a non-directory component: {path}")
     raise ProjectError(f"incomplete analysis: {label} path changed during admission: {path}")
 
 

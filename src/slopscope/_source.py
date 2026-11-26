@@ -32,7 +32,7 @@ def admit(root: Path, relative_path: str) -> Admission:
 
 
 def _check(actual: os.stat_result, expected: os.stat_result, *, directory: bool) -> None:
-    same_identity = (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino)
+    same_identity = os.path.samestat(actual, expected)
     correct_type = stat.S_ISDIR(actual.st_mode) if directory else stat.S_ISREG(actual.st_mode)
     if not same_identity or not correct_type:
         raise OSError("source changed since discovery")
