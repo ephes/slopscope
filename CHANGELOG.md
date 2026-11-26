@@ -8,6 +8,9 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Intersect duplicate continuation memberships incrementally and stop scanning once no
+  block covers the group.
+
 - Bound the number of tokenizer results retained per Python source in composition mode with
   the separately configurable `max_source_tokens` ceiling. Overflow preserves existing snapshots.
 

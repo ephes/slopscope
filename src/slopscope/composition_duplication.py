@@ -297,16 +297,27 @@ def _continues_block(
 ) -> bool:
     """Return whether one found block has every member inside a different one of its copies."""
 
-    budget.reserve(work=len(members))
-    covers = [covered_by.get(anchor, []) for anchor in members]
-    budget.reserve(work=sum(len(cover) for cover in covers))
-    if not all(covers):
-        return False
-    shared_blocks = set.intersection(*({block for block, _occurrence in cover} for cover in covers))
-    for block in shared_blocks:
-        budget.reserve(work=sum(len(cover) for cover in covers))
+    shared_blocks: set[int] | None = None
+    coverage_work = 0
+    for anchor in members:
+        budget.reserve(work=1)
+        cover = covered_by.get(anchor, ())
+        budget.reserve(work=len(cover))
+        coverage_work += len(cover)
+        if shared_blocks is None:
+            shared_blocks = {block for block, _occurrence in cover}
+        else:
+            shared_blocks = {block for block, _occurrence in cover if block in shared_blocks}
+        if not shared_blocks:
+            return False
+
+    for block in shared_blocks or ():
+        budget.reserve(work=coverage_work)
         occurrences = {
-            occurrence for cover in covers for covered, occurrence in cover if covered == block
+            occurrence
+            for anchor in members
+            for covered, occurrence in covered_by[anchor]
+            if covered == block
         }
         if len(occurrences) == len(members) == len(blocks[block].occurrences):
             return True

@@ -364,10 +364,15 @@ In addition to token and anchor admission, each project has fixed duplicate-anal
 1,000,000 cumulative metadata entries for blocks, occurrence memberships, line intervals, and
 anchor coverage memberships, plus 100,000,000 work units. Each token word in an anchor
 window is charged before copying, byte conversion, and hashing. Verification,
-subgroup extension, and coverage scans share the work allowance across all groups. Each attempt
-to extend a match by one token charges the full group size. The list of copies compared against
-the reference is built once per group. Entries are charged before retention, including subgroup
-results before materializing occurrences.
+subgroup extension, and coverage scans share the work allowance across all groups.
+
+Continuation checks intersect one anchor's coverage at a time, retaining only common block
+IDs and stopping when none remain. A shared block suppresses the continuation only when
+the group covers all of that block's distinct copies.
+
+Each attempt to extend a match by one token charges the full group size. The list of copies
+compared against the reference is built once per group. Entries are charged before retention,
+including subgroup results before materializing occurrences.
 These limits are not configurable and do not change counts or ordering below the ceiling.
 Exhaustion returns exit code 2 with an incomplete-analysis diagnostic, no partial report or
 snapshot, and no changes to existing artifacts. Exclude generated/repeated code to reduce work.
