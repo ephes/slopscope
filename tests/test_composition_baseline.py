@@ -354,6 +354,22 @@ def test_baseline_requires_exact_analyzer_field_types(
         composition_baseline.compare(report, data, path=snapshot)
 
 
+@pytest.mark.parametrize("value", [{}, 3, "src/pkg/broken.py", None])
+def test_baseline_rejects_malformed_failures(tmp_path: Path, value: object) -> None:
+    report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())
+    snapshot = tmp_path / "before.json"
+    data = json.loads(composition_render.render_composition_json(report))
+    data["failures"] = value
+    snapshot.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(composition_baseline.BaselineError, match=r"report failures$"):
+        composition_baseline.load_baseline(
+            snapshot, expected_report_type="composition", schema_version=composition.SCHEMA_VERSION
+        )
+    with pytest.raises(composition_baseline.BaselineError, match=r"report failures$"):
+        composition_baseline.compare(report, data, path=snapshot)
+
+
 @pytest.mark.parametrize("omit_versions", [False, True])
 def test_baseline_analyzer_versions_round_trip(tmp_path: Path, omit_versions: bool) -> None:
     report = composition.build_composition_report(make_repository(tmp_path), excluded_paths=())

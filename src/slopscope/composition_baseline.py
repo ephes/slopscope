@@ -204,6 +204,8 @@ def _validate_report(data: Mapping[str, Any], *, path: Path, where: str) -> None
             raise fail(f"detectors[{index}].version")
     if not isinstance(data.get("total"), dict):
         raise fail("total")
+    if "failures" in data and not isinstance(data["failures"], list):
+        raise fail("failures")
     kinds = data.get("kinds")
     if not isinstance(kinds, list) or not all(isinstance(item, dict) for item in kinds):
         raise fail("kinds")
@@ -357,8 +359,10 @@ def compare(
         for metric in HEADLINE_METRICS
         if metric not in total_counts
     )
-    baseline_failures = baseline.get("failures")
-    if isinstance(baseline_failures, list) and baseline_failures:
+    baseline_failures = baseline.get("failures", [])
+    if not isinstance(baseline_failures, list):
+        raise BaselineError(f"baseline file {path} has an invalid report failures")
+    if baseline_failures:
         warnings.append(
             f"baseline scan is incomplete (failed sources: {len(baseline_failures)}). "
             "Deltas are provisional."

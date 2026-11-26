@@ -581,7 +581,8 @@ Comparison rules:
   and per-kind counts remain readable as unknown deltas.
 - A nonempty `failures` list in the baseline or any failed source in the current scan marks
   the comparison as incomparable. Warnings identify the incomplete scan and its failure count.
-  Available deltas are retained as provisional evidence. Older baselines may omit `failures`.
+  Available deltas are retained as provisional evidence. Older baselines may omit `failures`;
+  a present `failures` value that is not a list is rejected as an invalid baseline.
 - Deltas are computed for `total`, `source`, `tests`, and `other`, for files, physical, code, statements, continuation
   lines, duplicated lines, and every category, tag, marker, construct, and test placement.
 - Plain and Rich output show unknown deltas as `-`, known zero as `+0`, and signed changes,

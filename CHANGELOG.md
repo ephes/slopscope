@@ -9,7 +9,7 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 ## Unreleased
 
 - Mark composition baseline comparisons as incomparable when either scan reports source failures.
-  Keep available deltas as provisional evidence.
+  Keep available deltas as provisional evidence. Reject baselines whose `failures` value is not a list.
 
 - Mark composition baseline comparisons as incomparable when the baseline total lacks headline
   counts, and name the missing fields while retaining unknown deltas.
