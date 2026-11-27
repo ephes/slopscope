@@ -516,8 +516,9 @@ sizes, including when discovery skips a source path because it is a symlink or a
 When a source fails analysis, its entries are excluded from stale reporting, including when
 the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
 nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
-Baseline reads compare opened-descriptor generation metadata before and after the bounded read and verify that
-the byte count matches the descriptor's size. In-place changes and incomplete reads are refused before comparison.
+Baseline reads request the opened file's size plus one byte, compare descriptor metadata before and after the read,
+and verify that the byte count matches the descriptor's size. In-place changes and incomplete reads are refused
+before comparison.
 If the pathname is atomically replaced, the reader uses the file it already opened.
 Baseline integer-decoder resource failures, including oversized integers in extension fields,
 return exit code 2 with a bounded diagnostic and preserve prior snapshots.
@@ -533,8 +534,9 @@ changes. Lock entries are opened without following symlinks and must be single-l
 identity is rechecked after acquiring the lock. Each mutation has one 10-second deadline to
 acquire all locks and returns exit code 2 before planning if it expires, so a concurrent writer
 fails instead of waiting when another seed/update holds a lock for longer; rerun it afterwards.
-Multi-project publication
-stages all outputs first and restores earlier writes on catchable replacement failures, including
+Multi-project publication rechecks every scanned project directory under the allowlist locks before
+staging. A changed project directory aborts the entire batch. Publication stages all outputs first
+and restores earlier writes on catchable replacement failures, including
 `KeyboardInterrupt` and `SystemExit`.
 A short write of an output or its recovery backup aborts staging before any target is replaced.
 Publication, restoration, and cleanup check the identity of staged entries and leave substituted

@@ -8,6 +8,12 @@ any CLI, configuration, output, migration, or publishing compatibility details.
 
 ## Unreleased
 
+- Size composition baseline reads to the opened file, so small baselines avoid allocating a buffer
+  sized to the 16 MiB ceiling. Files that grow or otherwise change during the read are still refused.
+
+- Recheck all scanned project directories under the allowlist locks before staging a multi-project
+  seed or update. A changed project directory leaves every allowlist unchanged.
+
 - Wait at most 10 seconds for the composition snapshot writer lock; a still-held lock exits 2
   with a "snapshot lock busy" diagnostic and leaves the snapshot unchanged for a retry.
 

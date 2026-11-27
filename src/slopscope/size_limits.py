@@ -21,6 +21,7 @@ from pathlib import Path
 
 from slopscope import _source, classify, composition, composition_duplication, fallback
 from slopscope._json import DuplicateKeyError, unique_object
+from slopscope.project import AdmittedProject
 from slopscope.report import (
     SIZE_LIMIT_KINDS,
     CompositionFailure,
@@ -409,9 +410,11 @@ def publish_allowlists(
     updates: Sequence[tuple[Path, Mapping[str, Mapping[str, int]]]],
     *,
     destinations: Mapping[Path, AllowlistDestination],
+    project_roots: Sequence[AdmittedProject] = (),
 ) -> None:
     """Stage the set, then replace; compensate handled errors under the caller's locks.
 
+    Recheck the admitted project roots after preparing the batch and before staging.
     This does not provide a transaction across process death. Directory-sync uncertainty
     leaves visible publication in place and retains recovery evidence. Failed compensation
     also retains a named sibling backup for manual recovery.
@@ -431,6 +434,8 @@ def publish_allowlists(
             if staging_bytes > MAX_ALLOWLIST_STAGING_BYTES:
                 raise _staging_overflow(path)
             contents.append((path, content, prior))
+        for project in project_roots:
+            project.verify_directory()
         for path, content, prior in contents:
             destination = destinations[path]
             _verify_destination(destination)

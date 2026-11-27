@@ -1325,20 +1325,30 @@ def test_baseline_byte_limit_preserves_outputs(
     repository = make_repository(tmp_path)
     baseline = tmp_path / "baseline.json"
     snapshot = tmp_path / "snapshot.json"
-    baseline.write_bytes(b" " * 64 + b"{}")
+    oversized = b" " * 64 + b"{}"
+    baseline.write_bytes(b"{}" if grew_after_stat else oversized)
     snapshot.write_bytes(b"previous snapshot")
-    monkeypatch.setattr(composition_baseline, "MAX_BASELINE_BYTES", 64, raising=False)
+    monkeypatch.setattr(composition_baseline, "MAX_BASELINE_BYTES", 64)
     if grew_after_stat:
-        monkeypatch.setattr(
-            os, "fstat", lambda fd: os.stat_result((stat.S_IFREG, 0, 0, 1, 0, 0, 0, 0, 0, 0))
-        )
+        real_fstat = os.fstat
+        baseline_info = baseline.stat()
+
+        def grow_after_admission(fd: int) -> os.stat_result:
+            info = real_fstat(fd)
+            if os.path.samestat(info, baseline_info) and info.st_size == baseline_info.st_size:
+                with baseline.open("ab") as stream:
+                    stream.write(b" " * 64)
+            return info
+
+        monkeypatch.setattr(os, "fstat", grow_after_admission)
+        oversized = b"{}" + b" " * 64
     code, out, err = run_cli(
         [str(repository), "--composition", "--baseline", str(baseline), "--snapshot", str(snapshot)]
     )
     assert code == 2
     assert out == ""
     assert "exceeds 64 bytes" in err
-    assert baseline.read_bytes() == b" " * 64 + b"{}"
+    assert baseline.read_bytes() == oversized
     assert snapshot.read_bytes() == b"previous snapshot"
 
 
@@ -1483,7 +1493,7 @@ def test_baseline_refuses_short_read_with_stable_metadata(
         read = handle.read
 
         def short_read(size: int) -> bytes:
-            assert size == composition_baseline.MAX_BASELINE_BYTES + 1
+            assert size == baseline.stat().st_size + 1
             return read(len(complete_report))
 
         monkeypatch.setattr(handle, "read", short_read)
@@ -1527,7 +1537,7 @@ def test_baseline_read_generation(
 
         def changing_read(size: int) -> bytes:
             nonlocal injected
-            assert size == composition_baseline.MAX_BASELINE_BYTES + 1
+            assert size == len(original) + 1
             prefix = read(10)
             before = baseline.stat()
             if replace_path:
