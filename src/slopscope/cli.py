@@ -447,6 +447,7 @@ def _run_size_limits(
                         if pending is not None
                     ],
                     destinations=destinations,
+                    project_roots=existing_projects if action != size_limits.REPORT else (),
                 )
             project_reports = [
                 SizeLimitsProjectReport(name=name, report=report)

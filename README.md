@@ -534,8 +534,9 @@ changes. Lock entries are opened without following symlinks and must be single-l
 identity is rechecked after acquiring the lock. Each mutation has one 10-second deadline to
 acquire all locks and returns exit code 2 before planning if it expires, so a concurrent writer
 fails instead of waiting when another seed/update holds a lock for longer; rerun it afterwards.
-Multi-project publication
-stages all outputs first and restores earlier writes on catchable replacement failures, including
+Multi-project publication rechecks every scanned project directory under the allowlist locks before
+staging. A changed project directory aborts the entire batch. Publication stages all outputs first
+and restores earlier writes on catchable replacement failures, including
 `KeyboardInterrupt` and `SystemExit`.
 A short write of an output or its recovery backup aborts staging before any target is replaced.
 Publication, restoration, and cleanup check the identity of staged entries and leave substituted

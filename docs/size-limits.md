@@ -195,8 +195,11 @@ concurrent swap in the short window between the final check and the rename is no
 Existing symlinks are supported and remain symlinks.
 
 Multi-project seed/update prepares and fsyncs every output and recovery backup before replacing
-any allowlist, then syncs each parent directory so recovery names are durable. New parent
-directory names are synced too. A short write aborts staging before the affected file is synced
+any allowlist, then syncs each parent directory so recovery names are durable. Before staging any
+output or backup, the command rechecks all scanned project directories under the allowlist locks.
+If any configured path no longer selects its admitted directory, the whole batch exits with code 2
+and leaves the allowlists unchanged. New parent directory names are synced too.
+A short write aborts staging before the affected file is synced
 and preserves all existing allowlists. Every replacement and restoration is directory-synced before
 retiring recovery evidence; backup retirement is also synced before success. Directory-sync
 support is required for successful mutation. A handled staging or replacement error returns exit code 2 with no report and

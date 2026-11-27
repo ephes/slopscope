@@ -5,12 +5,14 @@ import io
 import json
 import shutil
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
-from slopscope import cli, fallback
+from slopscope import cli, fallback, size_limits
 
 CONFIG = """
 [tool.slopscope.size_limits]
@@ -570,6 +572,63 @@ def test_a_later_project_failure_leaves_earlier_projects_unwritten(tmp_path: Pat
     assert exit_code == 2
     assert "project two: cannot seed the allowlist" in stderr
     assert not (tmp_path / "one" / "size-limits.json").exists()
+
+
+@pytest.mark.parametrize("phase", ["second_scan", "serialization"])
+def test_project_root_change_refuses_all_allowlist_updates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    _two_projects(tmp_path)
+    one, two = tmp_path / "one", tmp_path / "two"
+    replacement = make_project(tmp_path / "replacement", config="")
+    write(replacement, "src/big.py", "def big():\n" + "    x = 1\n" * 8)
+    targets = [tmp_path / "one-allowlist.json", tmp_path / "two-allowlist.json"]
+    prior = b'{"functions": {"src/big.py::big": 20}}\n'
+    for root, target in zip((one, two), targets, strict=True):
+        target.write_bytes(prior)
+        (root / "size-limits.json").symlink_to(target)
+    # Both generations resolve to the same external allowlist.
+    (replacement / "size-limits.json").symlink_to(targets[0])
+    saved = tmp_path / "saved-one"
+
+    def exchange_first_root() -> None:
+        one.rename(saved)
+        replacement.rename(one)
+
+    real_measure = size_limits.measure
+    real_serialize = size_limits._serialize_allowlist
+    second_root = two.resolve()
+
+    def measure(root: Path, **kwargs: Any) -> object:
+        if root == second_root:
+            exchange_first_root()
+        return real_measure(root, **kwargs)
+
+    def serialize(
+        path: Path, allowlist: Mapping[str, Mapping[str, int]], *, staging_bytes: int = 0
+    ) -> bytes:
+        if path == two / "size-limits.json":
+            exchange_first_root()
+        return real_serialize(path, allowlist, staging_bytes=staging_bytes)
+
+    args = ["--size-limits", "--project", "all", "--update-allowlist", str(tmp_path)]
+    with monkeypatch.context() as patch:
+        if phase == "second_scan":
+            patch.setattr(size_limits, "measure", measure)
+        else:
+            patch.setattr(size_limits, "_serialize_allowlist", serialize)
+        code, stdout, stderr = run_cli(args)
+
+    assert saved.is_dir()
+    assert code == 2
+    assert stdout == ""
+    assert "project one directory changed after admission" in stderr
+    assert [target.read_bytes() for target in targets] == [prior, prior]
+
+    assert run_cli(args)[0] == 0
+    assert [
+        json.loads(target.read_bytes())["functions"]["src/big.py::big"] for target in targets
+    ] == [9, 6]
 
 
 def test_projects_sharing_an_allowlist_cannot_seed_or_update(tmp_path: Path) -> None:
