@@ -516,8 +516,9 @@ sizes, including when discovery skips a source path because it is a symlink or a
 When a source fails analysis, its entries are excluded from stale reporting, including when
 the filename contains `::`. Allowlist and composition baseline JSON reject duplicate object keys at every
 nesting level, including duplicates with identical values. Refused inputs leave existing outputs unchanged.
-Baseline reads compare opened-descriptor generation metadata before and after the bounded read and verify that
-the byte count matches the descriptor's size. In-place changes and incomplete reads are refused before comparison.
+Baseline reads request the opened file's size plus one byte, compare descriptor metadata before and after the read,
+and verify that the byte count matches the descriptor's size. In-place changes and incomplete reads are refused
+before comparison.
 If the pathname is atomically replaced, the reader uses the file it already opened.
 Baseline integer-decoder resource failures, including oversized integers in extension fields,
 return exit code 2 with a bounded diagnostic and preserve prior snapshots.

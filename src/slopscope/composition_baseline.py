@@ -98,11 +98,11 @@ def load_baseline(
                 raise BaselineError(f"baseline file {path} must be a regular file")
             if info.st_size > MAX_BASELINE_BYTES:
                 raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
-            # The file can grow after fstat; bound the actual read too.
-            content = handle.read(MAX_BASELINE_BYTES + 1)
-            if len(content) > MAX_BASELINE_BYTES:
-                raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
+            # Size the read to the opened file, with one extra byte to detect growth.
+            content = handle.read(info.st_size + 1)
             after = os.fstat(handle.fileno())
+            if len(content) > MAX_BASELINE_BYTES or after.st_size > MAX_BASELINE_BYTES:
+                raise BaselineError(f"baseline file {path} exceeds {MAX_BASELINE_BYTES} bytes")
             if (
                 len(content) != after.st_size
                 or (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
